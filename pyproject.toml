@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nml-tools"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Toolbox for Fortran Namelists"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -17,7 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "coverage",
+    "coverage[toml]",
     "ruff",
     "mypy",
     "pre-commit",
@@ -27,5 +27,19 @@ dev = [
 "nml-tools" = "nml_tools.cli:main"
 "nmlt" = "nml_tools.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/MuellerSeb/nml-tools"
+Repository = "https://github.com/MuellerSeb/nml-tools"
+Issues = "https://github.com/MuellerSeb/nml-tools/issues"
+
 [tool.hatch.build]
 packages = [{include = "nml_tools", from = "src"}]
+
+[tool.hatch.version]
+path = "src/nml_tools/__init__.py"
+
+[tool.coverage.run]
+source = ["src/nml_tools"]
+
+[tool.coverage.report]
+show_missing = true
