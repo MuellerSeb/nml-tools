@@ -20,7 +20,7 @@ dev = [
     "coverage[toml]",
     "ruff",
     "mypy",
-    "pre-commit",
+    "pre-commit"
 ]
 
 [project.scripts]
