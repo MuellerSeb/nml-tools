@@ -12,5 +12,8 @@ dist/
 build/
 *.egg-info/
 
+# generated version file
+src/nml_tools/_version.py
+
 # Editors
 .vscode/
