@@ -43,3 +43,17 @@ source = ["src/nml_tools"]
 
 [tool.coverage.report]
 show_missing = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+
+[[tool.mypy.overrides]]
+module = "nml_tools.*"
+strict = true

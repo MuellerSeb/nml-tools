@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
 def test_cli_help_shows_subcommands() -> None:
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[1] / "src"
     env = os.environ.copy()
-    env["PATH"] = f"{root}{os.pathsep}{env['PATH']}"
+    env["PYTHONPATH"] = f"{root}{os.pathsep}{env.get('PYTHONPATH', '')}"
     result = subprocess.run(
-        ["nml-tools", "--help"],
+        [sys.executable, "-m", "nml_tools.cli", "--help"],
         check=True,
         capture_output=True,
         text=True,
