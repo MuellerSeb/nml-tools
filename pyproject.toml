@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nml-tools"
+dynamic = ["version"]
+description = "Toolbox for Fortran Namelists"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "jsonschema",
+    "f90nml",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "coverage[toml]",
+    "ruff",
+    "mypy",
+    "pre-commit"
+]
+
+[project.scripts]
+"nml-tools" = "nml_tools.cli:main"
+"nmlt" = "nml_tools.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/MuellerSeb/nml-tools"
+Repository = "https://github.com/MuellerSeb/nml-tools"
+Issues = "https://github.com/MuellerSeb/nml-tools/issues"
+
+[tool.hatch.version]
+source = "vcs"
+fallback_version = "0.0.0.dev0"
+
+[tool.hatch.version.raw-options]
+local_scheme = "no-local-version"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/nml_tools/_version.py"
+template = "__version__ = '{version}'"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nml_tools"]
+
+[tool.coverage.run]
+source = ["nml_tools"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+
+[[tool.mypy.overrides]]
+module = "nml_tools.*"
+strict = true
