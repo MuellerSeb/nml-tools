@@ -1,0 +1,116 @@
+module {{ module_name }}
+  use nml_helper, only: nml_file
+{% if use_ieee %}
+  use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
+{% endif %}
+{% if kind_imports %}
+  ! kind specifiers listed in the nml-tools configuration file
+  use {{ kind_module }}, only: {{ kind_imports | join(', ') }}
+{% endif %}
+
+  implicit none
+
+  !> \class {{ doc_class }}
+  !> \brief {{ brief_text }}
+  !> \details {{ details_text }}
+  type, public :: {{ type_name }}
+{% for field in fields %}
+{{ field.declaration | indent(4, True) }}
+{% endfor %}
+  contains
+    procedure :: from_file => {{ type_prefix }}_from_file
+    procedure :: set => {{ type_prefix }}_set
+  end type {{ type_name }}
+contains
+
+  !> \brief Read {{ namelist_name }} namelist from file
+  subroutine {{ type_prefix }}_from_file(this, file, nml_found)
+    class({{ type_name }}), intent(inout) :: this
+    character(len=*), intent(in) :: file
+    logical, intent(out), optional :: nml_found
+    ! namelist variables
+{% for field in fields %}
+{{ field.local_declaration | indent(4, True) }}
+{% endfor %}
+    ! locals
+    type(nml_file) :: nml
+    logical :: found
+
+    namelist /{{ namelist_name }}/ {{ namelist_vars | join(', ') }}
+
+    call nml%open(file)
+    if (present(nml_found)) nml_found = nml%is_open
+    if (.not. nml%is_open) then
+      if (present(nml_found)) return
+      error stop "{{ type_prefix }}%from_file: could not open file"
+    end if
+
+    found = nml%find("{{ namelist_name }}")
+    if (present(nml_found)) nml_found = found
+    if (.not. found) then
+      call nml%close()
+      if (present(nml_found)) return
+      error stop "{{ type_prefix }}%from_file: namelist {{ namelist_name }} not found"
+    end if
+
+{% if sentinel_assignments %}
+    ! sentinel values for required parameters
+{% for stmt in sentinel_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+{% if default_assignments %}
+    ! default values
+{% for stmt in default_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+
+    ! read namelist
+    read(nml%unit, nml={{ namelist_name }})
+    call nml%close()
+
+{% if required_checks %}
+    ! check required parameters
+{% for stmt in required_checks %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+
+    ! assign values
+{% for stmt in assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+
+  end subroutine {{ type_prefix }}_from_file
+
+  !> \brief Set {{ namelist_name }} values
+  subroutine {{ type_prefix }}_set(this{% if argument_list %}, {{ argument_list | join(', ') }}{% endif %})
+    class({{ type_name }}), intent(inout) :: this
+{% for decl in required_argument_declarations %}
+{{ decl | indent(4, True) }}
+{% endfor %}
+{% for decl in optional_argument_declarations %}
+{{ decl | indent(4, True) }}
+{% endfor %}
+
+    ! required parameters
+{% for stmt in set_required_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% if set_optional_defaults %}
+    ! defaults for optional parameters
+{% for stmt in set_optional_defaults %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+{% if set_optional_present %}
+    ! override with provided values
+{% for stmt in set_optional_present %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+
+  end subroutine {{ type_prefix }}_set
+
+end module {{ module_name }}
