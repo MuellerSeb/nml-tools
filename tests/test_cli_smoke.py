@@ -20,5 +20,5 @@ def test_cli_help_shows_subcommands() -> None:
         env=env,
     )
     stdout = result.stdout
-    for sub in ["validate", "gen-fortran", "gen-docs", "gen-template"]:
+    for sub in ["generate", "gen-fortran", "gen-markdown", "gen-template"]:
         assert sub in stdout

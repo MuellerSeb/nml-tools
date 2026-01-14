@@ -17,3 +17,6 @@ src/nml_tools/_version.py
 
 # Editors
 .vscode/
+
+# Own files
+info/

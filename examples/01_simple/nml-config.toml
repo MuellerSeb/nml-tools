@@ -1,0 +1,14 @@
+helper_path = "out/nml_helper.f90"    # target path to create helper module (required)
+helper_module = "nml_helper"          # module name to generate (optional)
+
+[kinds]
+module = "iso_fortran_env"            # module to use the kinds from
+real = ["real32", "real64"]           # used real kinds
+integer = ["int32", "int64"]          # used integer kinds
+# mapping kind specifiers used in schema to Fortran kinds specified above
+map = { sp = "real32", dp = "real64", i4 = "int32", i8 = "int64" }
+
+[[nml-files]]
+schema = "optimization.yml"           # schema defining the namelist file
+mod_path = "out/nml_optimization.f90" # target path to create Fortran module
+doc_path = "out/nml_optimization.md"  # target path to create documentation file

@@ -1,5 +1,5 @@
 module {{ module_name }}
-  use nml_helper, only: nml_file
+  use {{ helper_module }}, only: nml_file_t
 {% if use_ieee %}
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
 {% endif %}
@@ -14,29 +14,57 @@ module {{ module_name }}
   !> \brief {{ brief_text }}
   !> \details {{ details_text }}
   type, public :: {{ type_name }}
+    logical :: is_configured = .false. !< whether the namelist has been configured
 {% for field in fields %}
 {{ field.declaration | indent(4, True) }}
 {% endfor %}
   contains
+    procedure :: init => {{ type_prefix }}_init
     procedure :: from_file => {{ type_prefix }}_from_file
     procedure :: set => {{ type_prefix }}_set
+    procedure :: is_set => {{ type_prefix }}_is_set
   end type {{ type_name }}
 contains
+
+  !> \brief Initialize defaults and sentinels for {{ namelist_name }}
+  subroutine {{ type_prefix }}_init(this)
+    class({{ type_name }}), intent(inout) :: this
+
+    this%is_configured = .false.
+
+{% if sentinel_assignments %}
+    ! sentinel values for required/optional parameters
+{% for stmt in sentinel_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+{% if default_assignments %}
+    ! default values
+{% for stmt in default_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+  end subroutine {{ type_prefix }}_init
 
   !> \brief Read {{ namelist_name }} namelist from file
   subroutine {{ type_prefix }}_from_file(this, file, nml_found)
     class({{ type_name }}), intent(inout) :: this
-    character(len=*), intent(in) :: file
+    character(len=*), intent(in) :: file !< path to namelist file
+    !> whether namelist was found, if present this will prevent error raises, in case the namelist was not found
     logical, intent(out), optional :: nml_found
     ! namelist variables
 {% for field in fields %}
 {{ field.local_declaration | indent(4, True) }}
 {% endfor %}
     ! locals
-    type(nml_file) :: nml
+    type(nml_file_t) :: nml
     logical :: found
-
     namelist /{{ namelist_name }}/ {{ namelist_vars | join(', ') }}
+
+    call this%init()
+{% for stmt in local_init_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
 
     call nml%open(file)
     if (present(nml_found)) nml_found = nml%is_open
@@ -53,22 +81,14 @@ contains
       error stop "{{ type_prefix }}%from_file: namelist {{ namelist_name }} not found"
     end if
 
-{% if sentinel_assignments %}
-    ! sentinel values for required parameters
-{% for stmt in sentinel_assignments %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-{% endif %}
-{% if default_assignments %}
-    ! default values
-{% for stmt in default_assignments %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-{% endif %}
-
     ! read namelist
     read(nml%unit, nml={{ namelist_name }})
     call nml%close()
+
+    ! assign values
+{% for stmt in assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
 
 {% if required_checks %}
     ! check required parameters
@@ -77,11 +97,8 @@ contains
 {% endfor %}
 {% endif %}
 
-    ! assign values
-{% for stmt in assignments %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-
+    ! mark as configured
+    this%is_configured = .true.
   end subroutine {{ type_prefix }}_from_file
 
   !> \brief Set {{ namelist_name }} values
@@ -94,16 +111,12 @@ contains
 {{ decl | indent(4, True) }}
 {% endfor %}
 
+    call this%init()
+
     ! required parameters
 {% for stmt in set_required_assignments %}
 {{ stmt | indent(4, True) }}
 {% endfor %}
-{% if set_optional_defaults %}
-    ! defaults for optional parameters
-{% for stmt in set_optional_defaults %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-{% endif %}
 {% if set_optional_present %}
     ! override with provided values
 {% for stmt in set_optional_present %}
@@ -111,6 +124,27 @@ contains
 {% endfor %}
 {% endif %}
 
+    ! mark as configured
+    this%is_configured = .true.
   end subroutine {{ type_prefix }}_set
+
+  !> \brief Check whether a namelist value was set
+  logical function {{ type_prefix }}_is_set(this, name) result(is_set)
+    class({{ type_name }}), intent(in) :: this
+    character(len=*), intent(in) :: name
+
+    select case (trim(name))
+{% for case in presence_cases %}
+    case ("{{ case.name }}")
+{% if case.always_true %}
+      is_set = .true.
+{% else %}
+      is_set = .not. ({{ case.sentinel_condition }})
+{% endif %}
+{% endfor %}
+    case default
+      error stop "{{ type_prefix }}%is_set: unknown field."
+    end select
+  end function {{ type_prefix }}_is_set
 
 end module {{ module_name }}

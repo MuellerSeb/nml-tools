@@ -10,9 +10,12 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
 dependencies = [
+    "click",
     "jsonschema",
     "f90nml",
     "jinja2",
+    "PyYAML",
+    "tomli; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -21,7 +24,8 @@ dev = [
     "coverage[toml]",
     "ruff",
     "mypy",
-    "pre-commit"
+    "pre-commit",
+    "types-PyYAML"
 ]
 
 [project.scripts]
