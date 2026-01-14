@@ -9,6 +9,7 @@ import click
 from click.exceptions import Exit
 
 from .codegen_fortran import generate_fortran, generate_helper
+from .codegen_markdown import generate_docs
 from .schema import load_schema
 
 try:
@@ -167,6 +168,12 @@ def generate(config_path: Path) -> None:
                 )
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc
+        doc_path = entry["doc_path"]
+        if doc_path is not None:
+            try:
+                generate_docs(schema, doc_path)
+            except ValueError as exc:
+                raise click.ClickException(str(exc)) from exc
 
 
 @cli.command("gen-fortran")
@@ -176,9 +183,32 @@ def gen_fortran() -> None:
 
 
 @cli.command("gen-markdown")
-def gen_markdown() -> None:
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default="nml-config.toml",
+    show_default=True,
+)
+def gen_markdown(config_path: Path) -> None:
     """Generate Markdown docs."""
-    click.echo("TODO")
+    config = _load_config(config_path)
+    base_dir = config_path.parent
+    for entry in _iter_nml_files(config, base_dir):
+        schema_path = entry["schema"]
+        if schema_path is None:
+            raise click.ClickException("nml-files entry missing schema path")
+        try:
+            schema = load_schema(schema_path)
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        doc_path = entry["doc_path"]
+        if doc_path is None:
+            continue
+        try:
+            generate_docs(schema, doc_path)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
 
 
 @cli.command("gen-template")

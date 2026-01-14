@@ -1,7 +1,6 @@
 title: MHM optimization schema
 description: All relevant configurations for the optimization parameters of MHM
 x-fortran-namelist: optimization
-x-fortran-namelist-required: True
 type: object
 properties:
   name:
