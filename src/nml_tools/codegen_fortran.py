@@ -557,7 +557,7 @@ def _sentinel_expressions(
 def _format_default(value: Any, type_info: FieldTypeInfo, prop: dict[str, Any]) -> str:
     if type_info.category == "array":
         if not isinstance(value, list):
-            raise ValueError("array default must be a list")
+            value = [value]
         parsed_dims = _parse_default_dimensions(type_info.dimensions)
         array_default = _prepare_array_default(value, parsed_dims, prop)
         elements = [
