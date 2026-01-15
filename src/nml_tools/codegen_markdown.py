@@ -56,7 +56,7 @@ def generate_docs(schema: dict[str, Any], output: str | Path) -> None:
         info_label = _format_info(prop)
         required_label = "yes" if name in required_set else "no"
         row = [
-            name,
+            f"`{name}`",
             type_label,
             required_label,
             info_label,
@@ -87,14 +87,12 @@ def generate_docs(schema: dict[str, Any], output: str | Path) -> None:
             lines.append(description_text)
             lines.append("")
 
-        lines.append("|  |  |")
-        lines.append("| --- | --- |")
-        lines.append(f"| Type | `{_format_specific_type(type_info)}` |")
-        lines.append(f"| Required | {required_label} |")
+        lines.append(f"- Type: `{_format_specific_type(type_info)}`")
+        lines.append(f"- Required: {required_label}")
         if default_label is not None:
-            lines.append(f"| Default | `{default_label}` |")
+            lines.append(f"- Default: `{default_label}`")
         if enum_label is not None:
-            lines.append(f"| Allowed values | {enum_label} |")
+            lines.append(f"- Allowed values: {enum_label}")
         lines.append("")
 
     rendered = "\n".join(lines) + "\n"
