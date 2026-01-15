@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,15 @@ try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - python<3.11
     import tomli as tomllib
+
+logger = logging.getLogger(__name__)
+
+
+def _configure_logging(verbose: int, quiet: int) -> None:
+    base_level = logging.INFO
+    level = base_level - (10 * verbose) + (10 * quiet)
+    level = max(logging.DEBUG, min(logging.CRITICAL, level))
+    logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
 
 
 def _load_config(path: Path) -> dict[str, Any]:
@@ -124,8 +134,11 @@ def _iter_nml_files(config: dict[str, Any], base_dir: Path) -> list[dict[str, Pa
 
 
 @click.group()
-def cli() -> None:
+@click.option("--verbose", "-v", count=True, help="Increase verbosity (repeatable).")
+@click.option("--quiet", "-q", count=True, help="Decrease verbosity (repeatable).")
+def cli(verbose: int, quiet: int) -> None:
     """nml-tools command line interface."""
+    _configure_logging(verbose, quiet)
 
 
 @cli.command("generate")
@@ -138,26 +151,33 @@ def cli() -> None:
 )
 def generate(config_path: Path) -> None:
     """Generate outputs from a configuration file."""
+    logger.info("Loading config from %s", config_path)
     config = _load_config(config_path)
     base_dir = config_path.parent
+    logger.debug("Base directory: %s", base_dir)
     helper_path, helper_module = _load_helper_settings(config, base_dir)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     if helper_path is not None:
         try:
+            logger.info("Generating helper module at %s", helper_path)
             generate_helper(helper_path, module_name=helper_module)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
-    for entry in _iter_nml_files(config, base_dir):
+    entries = _iter_nml_files(config, base_dir)
+    logger.info("Found %d schema entries", len(entries))
+    for entry in entries:
         schema_path = entry["schema"]
         if schema_path is None:
             raise click.ClickException("nml-files entry missing schema path")
         try:
+            logger.info("Loading schema %s", schema_path)
             schema = load_schema(schema_path)
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
         mod_path = entry["mod_path"]
         if mod_path is not None:
             try:
+                logger.info("Generating Fortran module at %s", mod_path)
                 generate_fortran(
                     schema,
                     mod_path,
@@ -171,6 +191,7 @@ def generate(config_path: Path) -> None:
         doc_path = entry["doc_path"]
         if doc_path is not None:
             try:
+                logger.info("Generating Markdown docs at %s", doc_path)
                 generate_docs(schema, doc_path)
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc
@@ -192,13 +213,17 @@ def gen_fortran() -> None:
 )
 def gen_markdown(config_path: Path) -> None:
     """Generate Markdown docs."""
+    logger.info("Loading config from %s", config_path)
     config = _load_config(config_path)
     base_dir = config_path.parent
-    for entry in _iter_nml_files(config, base_dir):
+    entries = _iter_nml_files(config, base_dir)
+    logger.info("Found %d schema entries", len(entries))
+    for entry in entries:
         schema_path = entry["schema"]
         if schema_path is None:
             raise click.ClickException("nml-files entry missing schema path")
         try:
+            logger.info("Loading schema %s", schema_path)
             schema = load_schema(schema_path)
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
@@ -206,6 +231,7 @@ def gen_markdown(config_path: Path) -> None:
         if doc_path is None:
             continue
         try:
+            logger.info("Generating Markdown docs at %s", doc_path)
             generate_docs(schema, doc_path)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
