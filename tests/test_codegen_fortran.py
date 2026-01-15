@@ -64,3 +64,27 @@ def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
     expected = expected_path.read_text()
 
     assert generated == expected
+
+
+def test_generate_fortran_allows_scalar_array_default(tmp_path: Path) -> None:
+    schema = {
+        "title": "Scalar array default",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": 3,
+                "x-fortran-default-repeat": True,
+                "default": 1,
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(schema, output, kind_module="mo_kind")
+
+    generated = output.read_text()
+    assert "reshape([1_i4], shape=[3], pad=[1_i4])" in generated
