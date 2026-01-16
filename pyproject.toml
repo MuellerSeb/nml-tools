@@ -8,10 +8,14 @@ dynamic = ["version"]
 description = "Toolbox for Fortran Namelists"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 dependencies = [
+    "click",
     "jsonschema",
     "f90nml",
+    "jinja2",
+    "PyYAML",
+    "tomli; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -20,7 +24,8 @@ dev = [
     "coverage[toml]",
     "ruff",
     "mypy",
-    "pre-commit"
+    "pre-commit",
+    "types-PyYAML"
 ]
 
 [project.scripts]
@@ -59,14 +64,14 @@ source = ["nml_tools"]
 show_missing = true
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py38"
 line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 
 [[tool.mypy.overrides]]
 module = "nml_tools.*"
