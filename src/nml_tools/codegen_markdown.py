@@ -5,10 +5,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .codegen_fortran import FieldTypeInfo, _field_type_info, _format_default
+from .codegen_fortran import (
+    FieldTypeInfo,
+    _collect_dimension_constants,
+    _field_type_info,
+    _format_default,
+)
 
 
-def generate_docs(schema: dict[str, Any], output: str | Path) -> None:
+def generate_docs(
+    schema: dict[str, Any],
+    output: str | Path,
+    *,
+    constants: dict[str, int | float] | None = None,
+) -> None:
     """Generate Markdown docs for *schema* at *output*."""
     namelist_name = schema.get("x-fortran-namelist")
     if not isinstance(namelist_name, str):
@@ -51,7 +61,8 @@ def generate_docs(schema: dict[str, Any], output: str | Path) -> None:
     for name, prop in properties.items():
         if not isinstance(prop, dict):
             raise ValueError(f"property '{name}' must be an object")
-        type_info = _field_type_info(prop)
+        type_info = _field_type_info(prop, constants)
+        _collect_dimension_constants(type_info.dimensions, constants)
         type_label = _format_table_type(type_info)
         info_label = _format_info(prop)
         required_label = "yes" if name in required_set else "no"
@@ -71,10 +82,10 @@ def generate_docs(schema: dict[str, Any], output: str | Path) -> None:
     for name, prop in properties.items():
         if not isinstance(prop, dict):
             raise ValueError(f"property '{name}' must be an object")
-        type_info = _field_type_info(prop)
+        type_info = _field_type_info(prop, constants)
         required_label = "yes" if name in required_set else "no"
-        default_label = _get_default_value(prop, type_info)
-        enum_label = _get_enum_values(prop, type_info)
+        default_label = _get_default_value(prop, type_info, constants)
+        enum_label = _get_enum_values(prop, type_info, constants)
         title = _get_title(prop)
         description_text = _get_description(prop)
 
@@ -136,10 +147,14 @@ def _format_specific_type(type_info: FieldTypeInfo) -> str:
     return f"{type_info.type_spec}, dimension({dimensions})"
 
 
-def _get_default_value(prop: dict[str, Any], type_info: FieldTypeInfo) -> str | None:
+def _get_default_value(
+    prop: dict[str, Any],
+    type_info: FieldTypeInfo,
+    constants: dict[str, int | float] | None,
+) -> str | None:
     if "default" not in prop:
         return None
-    return _format_default(prop["default"], type_info, prop)
+    return _format_default(prop["default"], type_info, prop, constants)
 
 
 def _format_info(prop: dict[str, Any]) -> str:
@@ -167,13 +182,17 @@ def _get_description(prop: dict[str, Any]) -> str | None:
     return description or None
 
 
-def _get_enum_values(prop: dict[str, Any], type_info: FieldTypeInfo) -> str | None:
+def _get_enum_values(
+    prop: dict[str, Any],
+    type_info: FieldTypeInfo,
+    constants: dict[str, int | float] | None,
+) -> str | None:
     enum = prop.get("enum")
     if enum is None:
         return None
     if not isinstance(enum, list) or not enum:
         raise ValueError("property enum must be a non-empty list")
-    values = [_format_default(value, type_info, prop) for value in enum]
+    values = [_format_default(value, type_info, prop, constants) for value in enum]
     return ", ".join(f"`{value}`" for value in values)
 
 

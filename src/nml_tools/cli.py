@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
 import click
 from click.exceptions import Exit
 
-from .codegen_fortran import generate_fortran, generate_helper
+from .codegen_fortran import ConstantSpec, generate_fortran, generate_helper
 from .codegen_markdown import generate_docs
 from .schema import load_schema
 
@@ -19,6 +20,7 @@ except ModuleNotFoundError:  # pragma: no cover - python<3.11
     import tomli as tomllib
 
 logger = logging.getLogger(__name__)
+_FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 def _configure_logging(verbose: int, quiet: int) -> None:
@@ -49,19 +51,47 @@ def _resolve_optional_path(
     return base_dir / value
 
 
-def _load_helper_settings(config: dict[str, Any], base_dir: Path) -> tuple[Path | None, str]:
+def _load_helper_settings(
+    config: dict[str, Any],
+    base_dir: Path,
+) -> tuple[Path | None, str, int]:
+    default_buffer = 1024
+    helper_raw = config.get("helper")
+    if helper_raw is None:
+        helper_path = _resolve_optional_path(
+            config.get("helper_path"),
+            base_dir=base_dir,
+            key="helper_path",
+        )
+        helper_module_raw = config.get("helper_module", "nml_helper")
+        if not isinstance(helper_module_raw, str):
+            raise click.ClickException("config 'helper_module' must be a string")
+        helper_module = helper_module_raw.strip()
+        if not helper_module:
+            raise click.ClickException("config 'helper_module' must be a non-empty string")
+        return helper_path, helper_module, default_buffer
+
+    if not isinstance(helper_raw, dict):
+        raise click.ClickException("config 'helper' must be a table")
+    if "helper_path" in config or "helper_module" in config:
+        logger.warning("config uses [helper]; ignoring legacy helper_path/helper_module")
     helper_path = _resolve_optional_path(
-        config.get("helper_path"),
+        helper_raw.get("path"),
         base_dir=base_dir,
-        key="helper_path",
+        key="helper.path",
     )
-    helper_module_raw = config.get("helper_module", "nml_helper")
+    helper_module_raw = helper_raw.get("module", "nml_helper")
     if not isinstance(helper_module_raw, str):
-        raise click.ClickException("config 'helper_module' must be a string")
+        raise click.ClickException("config 'helper.module' must be a string")
     helper_module = helper_module_raw.strip()
     if not helper_module:
-        raise click.ClickException("config 'helper_module' must be a non-empty string")
-    return helper_path, helper_module
+        raise click.ClickException("config 'helper.module' must be a non-empty string")
+    buffer_raw = helper_raw.get("buffer", default_buffer)
+    if isinstance(buffer_raw, bool) or not isinstance(buffer_raw, int):
+        raise click.ClickException("config 'helper.buffer' must be an integer")
+    if buffer_raw <= 0:
+        raise click.ClickException("config 'helper.buffer' must be positive")
+    return helper_path, helper_module, buffer_raw
 
 
 def _load_kind_settings(config: dict[str, Any]) -> tuple[str, dict[str, str], set[str]]:
@@ -95,6 +125,67 @@ def _load_kind_settings(config: dict[str, Any]) -> tuple[str, dict[str, str], se
     allowlist = set(real_raw) | set(integer_raw)
 
     return module, kind_map, allowlist
+
+
+def _format_constant_literal(value: int | float) -> tuple[str, str]:
+    if isinstance(value, bool):
+        raise click.ClickException("config constants must not be boolean")
+    if isinstance(value, int):
+        return "integer", str(value)
+    if isinstance(value, float):
+        literal = repr(float(value))
+        if literal.lower() == "nan":
+            raise click.ClickException("config constants must not be NaN")
+        if "." not in literal and "e" not in literal and "E" not in literal:
+            literal = f"{literal}.0"
+        return "real", literal
+    raise click.ClickException("config constants must be integers or reals")
+
+
+def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], list[ConstantSpec]]:
+    constants_raw = config.get("constants", {})
+    if constants_raw is None:
+        constants_raw = {}
+    if not isinstance(constants_raw, dict):
+        raise click.ClickException("config 'constants' must be a table")
+
+    constants: dict[str, int | float] = {}
+    specs: list[ConstantSpec] = []
+    for name_raw, entry in constants_raw.items():
+        if not isinstance(name_raw, str):
+            raise click.ClickException("config constants must use string keys")
+        name = name_raw.strip()
+        if not name:
+            raise click.ClickException("config constants must have non-empty names")
+        if not _FORTRAN_IDENTIFIER.match(name):
+            raise click.ClickException(
+                f"config constant '{name}' must be a valid Fortran identifier"
+            )
+        if not isinstance(entry, dict):
+            raise click.ClickException(
+                f"config constant '{name}' must be a table with 'value'"
+            )
+        if "value" not in entry:
+            raise click.ClickException(f"config constant '{name}' must define 'value'")
+        value = entry.get("value")
+        type_spec, literal = _format_constant_literal(value)
+        doc = entry.get("doc")
+        if doc is not None:
+            if not isinstance(doc, str):
+                raise click.ClickException(
+                    f"config constant '{name}' doc must be a string"
+                )
+            doc = " ".join(doc.splitlines()).strip() or None
+        specs.append(
+            ConstantSpec(
+                name=name,
+                type_spec=type_spec,
+                value=literal,
+                doc=doc,
+            )
+        )
+        constants[name] = value
+    return constants, specs
 
 
 def _iter_nml_files(config: dict[str, Any], base_dir: Path) -> list[dict[str, Path | None]]:
@@ -155,12 +246,18 @@ def generate(config_path: Path) -> None:
     config = _load_config(config_path)
     base_dir = config_path.parent
     logger.debug("Base directory: %s", base_dir)
-    helper_path, helper_module = _load_helper_settings(config, base_dir)
+    helper_path, helper_module, helper_buffer = _load_helper_settings(config, base_dir)
+    constants, constant_specs = _load_constants(config)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     if helper_path is not None:
         try:
             logger.info("Generating helper module at %s", helper_path)
-            generate_helper(helper_path, module_name=helper_module)
+            generate_helper(
+                helper_path,
+                module_name=helper_module,
+                len_buf=helper_buffer,
+                constants=constant_specs,
+            )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
     entries = _iter_nml_files(config, base_dir)
@@ -185,6 +282,7 @@ def generate(config_path: Path) -> None:
                     kind_module=kind_module,
                     kind_map=kind_map,
                     kind_allowlist=kind_allowlist,
+                    constants=constants,
                 )
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc
@@ -192,7 +290,7 @@ def generate(config_path: Path) -> None:
         if doc_path is not None:
             try:
                 logger.info("Generating Markdown docs at %s", doc_path)
-                generate_docs(schema, doc_path)
+                generate_docs(schema, doc_path, constants=constants)
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc
 
@@ -216,6 +314,7 @@ def gen_markdown(config_path: Path) -> None:
     logger.info("Loading config from %s", config_path)
     config = _load_config(config_path)
     base_dir = config_path.parent
+    constants, _ = _load_constants(config)
     entries = _iter_nml_files(config, base_dir)
     logger.info("Found %d schema entries", len(entries))
     for entry in entries:
@@ -232,7 +331,7 @@ def gen_markdown(config_path: Path) -> None:
             continue
         try:
             logger.info("Generating Markdown docs at %s", doc_path)
-            generate_docs(schema, doc_path)
+            generate_docs(schema, doc_path, constants=constants)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 

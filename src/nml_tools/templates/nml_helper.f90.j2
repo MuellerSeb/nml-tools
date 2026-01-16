@@ -1,8 +1,19 @@
+!> \file {{ file_name }}
+!> \copydoc {{ module_name }}
+
 !> \brief Helper module for namelist file operations
 module {{ module_name }}
 
   !> \brief Buffer length for reading lines
-  integer, public :: len_buf = {{ len_buf }}
+  integer, public :: nml_line_buffer = {{ len_buf }}
+
+{% if constants %}
+  !> \brief Shared constants for namelist dimensions
+{% for constant in constants %}
+  {{ constant.type_spec }}, parameter, public :: {{ constant.name }} = {{ constant.value }}{% if constant.doc %} !< {{ constant.doc }}{% endif %}
+
+{% endfor %}
+{% endif %}
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations
@@ -34,7 +45,7 @@ contains
     character(len=*), intent(in) :: nml
     logical :: found
     integer :: iostat
-    character(len=len_buf) :: line
+    character(len=nml_line_buffer) :: line
     found = .false.
     if (.not. this%is_open) return
     rewind(unit=this%unit)
