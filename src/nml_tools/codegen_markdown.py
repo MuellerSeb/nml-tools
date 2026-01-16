@@ -10,6 +10,7 @@ from .codegen_fortran import (
     _collect_dimension_constants,
     _field_type_info,
     _format_default,
+    _format_scalar_default,
 )
 
 
@@ -98,6 +99,7 @@ def generate_docs(
             lines.append(description_text)
             lines.append("")
 
+        lines.append("Summary:")
         lines.append(f"- Type: `{_format_specific_type(type_info)}`")
         lines.append(f"- Required: {required_label}")
         if default_label is not None:
@@ -154,6 +156,16 @@ def _get_default_value(
 ) -> str | None:
     if "default" not in prop:
         return None
+    if type_info.category == "array":
+        repeat_raw = prop.get("x-fortran-default-repeat", False)
+        if not isinstance(repeat_raw, bool):
+            raise ValueError("array default repeat must be a boolean")
+        if repeat_raw and not isinstance(prop["default"], list):
+            return _format_scalar_default(
+                prop["default"],
+                type_info.kind,
+                type_info.element_category,
+            )
     return _format_default(prop["default"], type_info, prop, constants)
 
 
