@@ -9,8 +9,9 @@ from .codegen_fortran import (
     FieldTypeInfo,
     _collect_dimension_constants,
     _field_type_info,
-    _format_default,
     _format_scalar_default,
+    _parse_default_dimensions,
+    _prepare_array_default,
 )
 
 
@@ -103,7 +104,14 @@ def generate_docs(
         lines.append(f"- Type: `{_format_specific_type(type_info)}`")
         lines.append(f"- Required: {required_label}")
         if default_label is not None:
-            lines.append(f"- Default: `{default_label}`")
+            if isinstance(default_label, tuple):
+                base, note = default_label
+                if note:
+                    lines.append(f"- Default: `{base}` {note}")
+                else:
+                    lines.append(f"- Default: `{base}`")
+            else:
+                lines.append(f"- Default: `{default_label}`")
         if enum_label is not None:
             lines.append(f"- Allowed values: {enum_label}")
         lines.append("")
@@ -153,20 +161,12 @@ def _get_default_value(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
     constants: dict[str, int | float] | None,
-) -> str | None:
+) -> str | tuple[str, str | None] | None:
     if "default" not in prop:
         return None
     if type_info.category == "array":
-        repeat_raw = prop.get("x-fortran-default-repeat", False)
-        if not isinstance(repeat_raw, bool):
-            raise ValueError("array default repeat must be a boolean")
-        if repeat_raw and not isinstance(prop["default"], list):
-            return _format_scalar_default(
-                prop["default"],
-                type_info.kind,
-                type_info.element_category,
-            )
-    return _format_default(prop["default"], type_info, prop, constants)
+        return _format_array_default_display(prop, type_info, constants)
+    return _format_default_plain(prop["default"], type_info, prop, constants)
 
 
 def _format_info(prop: dict[str, Any]) -> str:
@@ -204,10 +204,106 @@ def _get_enum_values(
         return None
     if not isinstance(enum, list) or not enum:
         raise ValueError("property enum must be a non-empty list")
-    values = [_format_default(value, type_info, prop, constants) for value in enum]
+    values = [_format_default_plain(value, type_info, prop, constants) for value in enum]
     return ", ".join(f"`{value}`" for value in values)
 
 
 def _escape_table_cell(value: str) -> str:
     escaped = value.replace("|", "\\|").replace("\n", " ").strip()
     return escaped or "n/a"
+
+
+def _format_default_plain(
+    value: Any,
+    type_info: FieldTypeInfo,
+    prop: dict[str, Any],
+    constants: dict[str, int | float] | None,
+) -> str:
+    if type_info.category == "array":
+        if not isinstance(value, list):
+            value = [value]
+        parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
+        array_default = _prepare_array_default(value, parsed_dims, prop)
+        elements = [
+            _format_scalar_default(element, None, type_info.element_category)
+            for element in array_default.source_values
+        ]
+        if (
+            len(type_info.dimensions) == 1
+            and array_default.order_values is None
+            and array_default.pad_values is None
+        ):
+            return f"[{', '.join(elements)}]"
+
+        shape_literal = ", ".join(type_info.dimensions)
+        arguments = [f"[{', '.join(elements)}]", f"shape=[{shape_literal}]"]
+
+        if array_default.order_values is not None:
+            order_literal = ", ".join(str(index) for index in array_default.order_values)
+            arguments.append(f"order=[{order_literal}]")
+
+        if array_default.pad_values is not None:
+            pad_elements = [
+                _format_scalar_default(element, None, type_info.element_category)
+                for element in array_default.pad_values
+            ]
+            arguments.append(f"pad=[{', '.join(pad_elements)}]")
+
+        return f"reshape({', '.join(arguments)})"
+
+    return _format_scalar_default(value, None, type_info.category)
+
+
+def _format_array_default_display(
+    prop: dict[str, Any],
+    type_info: FieldTypeInfo,
+    constants: dict[str, int | float] | None,
+) -> tuple[str, str | None]:
+    default_value = prop["default"]
+    default_is_list = isinstance(default_value, list)
+    default_list = default_value if default_is_list else [default_value]
+
+    parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
+    _prepare_array_default(default_list, parsed_dims, prop)
+
+    if default_is_list:
+        elements = [
+            _format_scalar_default(value, None, type_info.element_category)
+            for value in default_list
+        ]
+        base = f"[{', '.join(elements)}]"
+    else:
+        base = _format_scalar_default(default_value, None, type_info.element_category)
+
+    repeat_raw = prop.get("x-fortran-default-repeat", False)
+    if not isinstance(repeat_raw, bool):
+        raise ValueError("array default repeat must be a boolean")
+    notes: list[str] = []
+    if repeat_raw:
+        notes.append("repeated")
+
+    order_raw = prop.get("x-fortran-default-order", "F")
+    if not isinstance(order_raw, str):
+        raise ValueError("array default order must be 'F' or 'C'")
+    order = order_raw.upper()
+    if order not in {"F", "C"}:
+        raise ValueError("array default order must be 'F' or 'C'")
+    if order == "C":
+        notes.append("order: C")
+
+    pad_raw = prop.get("x-fortran-default-pad")
+    if pad_raw is not None:
+        pad_list = pad_raw if isinstance(pad_raw, list) else [pad_raw]
+        pad_elements = [
+            _format_scalar_default(value, None, type_info.element_category)
+            for value in pad_list
+        ]
+        if isinstance(pad_raw, list):
+            pad_text = f"[{', '.join(pad_elements)}]"
+        else:
+            pad_text = pad_elements[0]
+        notes.append(f"pad: `{pad_text}`")
+
+    if notes:
+        return base, f"({', '.join(notes)})"
+    return base, None

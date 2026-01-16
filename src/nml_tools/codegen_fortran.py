@@ -660,8 +660,15 @@ def _scalar_type_info(
         )
     if prop_type == "integer":
         kind = prop.get("x-fortran-kind")
-        if not isinstance(kind, str):
-            raise ValueError("integer property must define 'x-fortran-kind'")
+        if kind is None:
+            return ScalarTypeInfo(
+                type_spec="integer",
+                arg_type_spec="integer",
+                kind=None,
+                category="integer",
+            )
+        if not isinstance(kind, str) or not kind.strip():
+            raise ValueError("integer property 'x-fortran-kind' must be a non-empty string")
         return ScalarTypeInfo(
             type_spec=f"integer({kind})",
             arg_type_spec=f"integer({kind})",
@@ -670,8 +677,15 @@ def _scalar_type_info(
         )
     if prop_type == "number":
         kind = prop.get("x-fortran-kind")
-        if not isinstance(kind, str):
-            raise ValueError("number property must define 'x-fortran-kind'")
+        if kind is None:
+            return ScalarTypeInfo(
+                type_spec="real",
+                arg_type_spec="real",
+                kind=None,
+                category="real",
+            )
+        if not isinstance(kind, str) or not kind.strip():
+            raise ValueError("number property 'x-fortran-kind' must be a non-empty string")
         return ScalarTypeInfo(
             type_spec=f"real({kind})",
             arg_type_spec=f"real({kind})",

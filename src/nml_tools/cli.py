@@ -12,6 +12,7 @@ from click.exceptions import Exit
 
 from .codegen_fortran import ConstantSpec, generate_fortran, generate_helper
 from .codegen_markdown import generate_docs
+from .codegen_template import generate_template
 from .schema import load_schema
 
 try:
@@ -246,6 +247,47 @@ def _iter_nml_files(config: dict[str, Any], base_dir: Path) -> list[dict[str, Pa
     return entries
 
 
+def _iter_templates(config: dict[str, Any], base_dir: Path) -> list[dict[str, Any]]:
+    raw_entries = config.get("templates")
+    if raw_entries is None:
+        return []
+    if not isinstance(raw_entries, list) or not raw_entries:
+        raise click.ClickException("config 'templates' must be a non-empty list")
+
+    entries: list[dict[str, Any]] = []
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            raise click.ClickException("each templates entry must be a table")
+        output_raw = entry.get("output")
+        if not isinstance(output_raw, str):
+            raise click.ClickException("templates entry must define string 'output'")
+        output_path = base_dir / output_raw
+
+        schemas_raw = entry.get("schemas")
+        if not isinstance(schemas_raw, list) or not schemas_raw:
+            raise click.ClickException("templates entry must define non-empty 'schemas'")
+        if not all(isinstance(item, str) for item in schemas_raw):
+            raise click.ClickException("templates 'schemas' entries must be strings")
+        schema_paths = [base_dir / item for item in schemas_raw]
+
+        doc_mode = entry.get("doc_mode", "plain")
+        if not isinstance(doc_mode, str):
+            raise click.ClickException("templates 'doc_mode' must be a string")
+        value_mode = entry.get("value_mode", "empty")
+        if not isinstance(value_mode, str):
+            raise click.ClickException("templates 'value_mode' must be a string")
+
+        entries.append(
+            {
+                "output": output_path,
+                "schemas": schema_paths,
+                "doc_mode": doc_mode,
+                "value_mode": value_mode,
+            }
+        )
+    return entries
+
+
 @click.group()
 @click.option("--verbose", "-v", count=True, help="Increase verbosity (repeatable).")
 @click.option("--quiet", "-q", count=True, help="Decrease verbosity (repeatable).")
@@ -323,6 +365,28 @@ def generate(config_path: Path) -> None:
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc
 
+    template_entries = _iter_templates(config, base_dir)
+    if template_entries:
+        logger.info("Found %d template entries", len(template_entries))
+    for entry in template_entries:
+        try:
+            schemas = []
+            for schema_path in entry["schemas"]:
+                logger.info("Loading schema %s", schema_path)
+                schemas.append(load_schema(schema_path))
+            logger.info("Generating template at %s", entry["output"])
+            generate_template(
+                schemas,
+                entry["output"],
+                doc_mode=entry["doc_mode"],
+                value_mode=entry["value_mode"],
+                constants=constants,
+                kind_map=kind_map,
+                kind_allowlist=kind_allowlist,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+
 
 @cli.command("gen-fortran")
 def gen_fortran() -> None:
@@ -366,9 +430,42 @@ def gen_markdown(config_path: Path) -> None:
 
 
 @cli.command("gen-template")
-def gen_template() -> None:
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default="nml-config.toml",
+    show_default=True,
+)
+def gen_template(config_path: Path) -> None:
     """Generate template namelist(s)."""
-    click.echo("TODO")
+    logger.info("Loading config from %s", config_path)
+    config = _load_config(config_path)
+    base_dir = config_path.parent
+    constants, _ = _load_constants(config)
+    _, kind_map, kind_allowlist = _load_kind_settings(config)
+    templates = _iter_templates(config, base_dir)
+    if not templates:
+        raise click.ClickException("config must define non-empty 'templates'")
+    logger.info("Found %d template entries", len(templates))
+    for entry in templates:
+        try:
+            schemas = []
+            for schema_path in entry["schemas"]:
+                logger.info("Loading schema %s", schema_path)
+                schemas.append(load_schema(schema_path))
+            logger.info("Generating template at %s", entry["output"])
+            generate_template(
+                schemas,
+                entry["output"],
+                doc_mode=entry["doc_mode"],
+                value_mode=entry["value_mode"],
+                constants=constants,
+                kind_map=kind_map,
+                kind_allowlist=kind_allowlist,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
 
 
 def main(argv: list[str] | None = None) -> int:

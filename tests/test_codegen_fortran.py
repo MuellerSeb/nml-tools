@@ -172,3 +172,23 @@ def test_generate_fortran_accepts_string_length_constants(tmp_path: Path) -> Non
     generated = output.read_text()
     assert "character(len=name_len) :: name" in generated
     assert "use nml_helper, only: nml_file_t, name_len" in generated
+
+
+def test_generate_fortran_allows_plain_kinds(tmp_path: Path) -> None:
+    schema = {
+        "title": "Plain kinds",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "count": {"type": "integer"},
+            "ratio": {"type": "number"},
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(schema, output, kind_module="mo_kind")
+
+    generated = output.read_text()
+    assert "integer :: count" in generated
+    assert "real :: ratio" in generated
