@@ -1,29 +1,45 @@
+!> \file nml_optimization.f90
+!> \copydoc nml_optimization
+
+!> \brief MHM optimization namelist
+!> \details All relevant configurations for the optimization parameters of MHM.
+!! This namelist corresponds to the `optimization` section in the MHM configuration.
+!! 
 module nml_optimization
-  use nml_helper, only: nml_file_t
+  use nml_helper, only: nml_file_t, buf, max_iter
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: i4=>int32, dp=>real64
 
   implicit none
 
+  ! default values
+  integer(i4), parameter, public :: seed_default = -9_i4
+  real(dp), parameter, public :: dds_r_default = 0.2_dp
+  logical, parameter, public :: mcmc_opti_default = .true.
+  real(dp), parameter, public :: mcmc_error_params_default(4) = [0.01_dp, 0.6_dp, 0.2_dp, 0.3_dp]
+
   !> \class optimization_t
-  !> \brief MHM optimization schema
-  !> \details All relevant configurations for the optimization parameters of MHM
+  !> \brief MHM optimization namelist
+  !> \details All relevant configurations for the optimization parameters of MHM.
+  !! This namelist corresponds to the `optimization` section in the MHM configuration.
+  !! 
   type, public :: nml_optimization_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    character(len=50) :: name !< Optimization name
-    integer(i4) :: niterations !< Number of iterations
-    real(dp) :: tolerance !< Convergence tolerance
+    character(len=buf) :: name !< Optimization name
+    integer :: niterations !< Number of iterations
+    real :: tolerance !< Convergence tolerance
     integer(i4) :: seed !< Random seed
     real(dp) :: dds_r !< DDS perturbation rate
     logical :: mcmc_opti !< MCMC optimization
-    real(dp), dimension(2, 3) :: mcmc_error_params !< MCMC error parameters per domain
+    real(dp), dimension(2, max_iter) :: mcmc_error_params !< MCMC error parameters per domain
   contains
     procedure :: init => nml_optimization_init
     procedure :: from_file => nml_optimization_from_file
     procedure :: set => nml_optimization_set
     procedure :: is_set => nml_optimization_is_set
   end type nml_optimization_t
+
 contains
 
   !> \brief Initialize defaults and sentinels for optimization
@@ -33,14 +49,14 @@ contains
     this%is_configured = .false.
 
     ! sentinel values for required/optional parameters
-    this%name = achar(0) ! sentinel for optional string
+    this%name = repeat(achar(0), len(this%name)) ! sentinel for optional string
     this%niterations = -huge(this%niterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
     ! default values
-    this%seed = -9_i4
-    this%dds_r = 0.2_dp
-    this%mcmc_opti = .true. ! bool values always need a default
-    this%mcmc_error_params = reshape([0.01_dp, 0.6_dp], shape=[2, 3], pad=[0.01_dp, 0.6_dp])
+    this%seed = seed_default
+    this%dds_r = dds_r_default
+    this%mcmc_opti = mcmc_opti_default ! bool values always need a default
+    this%mcmc_error_params = reshape(mcmc_error_params_default, shape=[2, max_iter], order=[2, 1], pad=mcmc_error_params_default)
   end subroutine nml_optimization_init
 
   !> \brief Read optimization namelist from file
@@ -50,17 +66,25 @@ contains
     !> whether namelist was found, if present this will prevent error raises, in case the namelist was not found
     logical, intent(out), optional :: nml_found
     ! namelist variables
-    character(len=50) :: name
-    integer(i4) :: niterations
-    real(dp) :: tolerance
+    character(len=buf) :: name
+    integer :: niterations
+    real :: tolerance
     integer(i4) :: seed
     real(dp) :: dds_r
     logical :: mcmc_opti
-    real(dp), dimension(2, 3) :: mcmc_error_params
+    real(dp), dimension(2, max_iter) :: mcmc_error_params
     ! locals
     type(nml_file_t) :: nml
     logical :: found
-    namelist /optimization/ name, niterations, tolerance, seed, dds_r, mcmc_opti, mcmc_error_params
+
+    namelist /optimization/ &
+      name, &
+      niterations, &
+      tolerance, &
+      seed, &
+      dds_r, &
+      mcmc_opti, &
+      mcmc_error_params
 
     call this%init()
     name = this%name
@@ -102,21 +126,28 @@ contains
     ! check required parameters
     if (.not. this%is_set('niterations')) error stop "nml_optimization%from_file: 'niterations' is required"
     if (.not. this%is_set('tolerance')) error stop "nml_optimization%from_file: 'tolerance' is required"
-
     ! mark as configured
     this%is_configured = .true.
   end subroutine nml_optimization_from_file
 
   !> \brief Set optimization values
-  subroutine nml_optimization_set(this, niterations, tolerance, name, seed, dds_r, mcmc_opti, mcmc_error_params)
+  subroutine nml_optimization_set(this, &
+    niterations, &
+    tolerance, &
+    name, &
+    seed, &
+    dds_r, &
+    mcmc_opti, &
+    mcmc_error_params)
+
     class(nml_optimization_t), intent(inout) :: this
-    integer(i4), intent(in) :: niterations
-    real(dp), intent(in) :: tolerance
+    integer, intent(in) :: niterations
+    real, intent(in) :: tolerance
     character(len=*), intent(in), optional :: name
     integer(i4), intent(in), optional :: seed
     real(dp), intent(in), optional :: dds_r
     logical, intent(in), optional :: mcmc_opti
-    real(dp), dimension(2, 3), intent(in), optional :: mcmc_error_params
+    real(dp), dimension(2, max_iter), intent(in), optional :: mcmc_error_params
 
     call this%init()
 
@@ -135,27 +166,56 @@ contains
   end subroutine nml_optimization_set
 
   !> \brief Check whether a namelist value was set
-  logical function nml_optimization_is_set(this, name) result(is_set)
+  logical function nml_optimization_is_set(this, name, idx) result(is_set)
     class(nml_optimization_t), intent(in) :: this
     character(len=*), intent(in) :: name
+    integer, intent(in), optional :: idx(:)
 
     select case (trim(name))
     case ("name")
-      is_set = .not. (trim(this%name) == achar(0))
+      if (present(idx)) then
+        error stop "nml_optimization%is_set: index not supported for 'name'"
+      end if
+      is_set = .not. (this%name == repeat(achar(0), len(this%name)))
     case ("niterations")
+      if (present(idx)) then
+        error stop "nml_optimization%is_set: index not supported for 'niterations'"
+      end if
       is_set = .not. (this%niterations == -huge(this%niterations))
     case ("tolerance")
+      if (present(idx)) then
+        error stop "nml_optimization%is_set: index not supported for 'tolerance'"
+      end if
       is_set = .not. (ieee_is_nan(this%tolerance))
     case ("seed")
+      if (present(idx)) then
+        error stop "nml_optimization%is_set: index not supported for 'seed'"
+      end if
       is_set = .true.
     case ("dds_r")
+      if (present(idx)) then
+        error stop "nml_optimization%is_set: index not supported for 'dds_r'"
+      end if
       is_set = .true.
     case ("mcmc_opti")
+      if (present(idx)) then
+        error stop "nml_optimization%is_set: index not supported for 'mcmc_opti'"
+      end if
       is_set = .true.
     case ("mcmc_error_params")
-      is_set = .true.
+      if (present(idx)) then
+        if (size(idx) /= 2) then
+          error stop "nml_optimization%is_set: index rank mismatch for 'mcmc_error_params'"
+        end if
+        if (any(idx < lbound(this%mcmc_error_params)) .or. any(idx > ubound(this%mcmc_error_params))) then
+          error stop "nml_optimization%is_set: index out of bounds for 'mcmc_error_params'"
+        end if
+        is_set = .true.
+      else
+        is_set = .true.
+      end if
     case default
-      error stop "nml_optimization%is_set: unknown field."
+      error stop "nml_optimization%is_set: unknown field '" // trim(name) // "'"
     end select
   end function nml_optimization_is_set
 

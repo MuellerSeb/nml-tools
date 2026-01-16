@@ -1,0 +1,18 @@
+! MHM optimization namelist
+&optimization
+  ! Optimization name
+  name = 'test_optimization'
+  ! Number of iterations
+  niterations = 4
+  ! Convergence tolerance
+  tolerance = 0.1
+  ! Random seed
+  seed = -9
+  ! DDS perturbation rate
+  dds_r = 0.2
+  ! MCMC optimization
+  mcmc_opti = .true.
+  ! MCMC error parameters per domain
+  mcmc_error_params(1, :) = 0.01, 0.6, 0.2, 0.6
+  mcmc_error_params(2, :) = 0.2
+/

@@ -1,5 +1,16 @@
-helper_path = "out/nml_helper.f90"    # target path to create helper module (required)
-helper_module = "nml_helper"          # module name to generate (optional)
+[helper]
+path = "out/nml_helper.f90"           # target path to create helper module (required)
+module = "nml_helper"                 # module name to generate (optional)
+buffer = 1024                         # line buffer length for helper module
+
+[constants]
+[constants.max_iter]
+value = 4
+doc = "Maximum number of iterations."
+
+[constants.buf]
+value = 256
+doc = "Buffer length for character strings."
 
 [kinds]
 module = "iso_fortran_env"            # module to use the kinds from
@@ -12,3 +23,14 @@ map = { sp = "real32", dp = "real64", i4 = "int32", i8 = "int64" }
 schema = "optimization.yml"           # schema defining the namelist file
 mod_path = "out/nml_optimization.f90" # target path to create Fortran module
 doc_path = "out/nml_optimization.md"  # target path to create documentation file
+
+[[templates]]
+output = "out/optimization.nml"
+schemas = ["optimization.yml"]
+doc_mode = "documented"      # or "plain"
+value_mode = "filled"        # empty | filled | minimal-empty | minimal-filled
+
+[templates.values.optimization]
+niterations = 4
+tolerance = 0.1
+mcmc_error_params = [0.01, 0.6, 0.2, 0.6, 0.2]

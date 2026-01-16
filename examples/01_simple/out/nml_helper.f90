@@ -1,8 +1,15 @@
+!> \file nml_helper.f90
+!> \copydoc nml_helper
+
 !> \brief Helper module for namelist file operations
 module nml_helper
 
   !> \brief Buffer length for reading lines
-  integer, public :: len_buf = 1024
+  integer, public :: nml_line_buffer = 1024
+
+  !> \brief Shared constants for namelist dimensions
+  integer, parameter, public :: max_iter = 4 !< Maximum number of iterations.
+  integer, parameter, public :: buf = 256 !< Buffer length for character strings.
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations
@@ -34,7 +41,7 @@ contains
     character(len=*), intent(in) :: nml
     logical :: found
     integer :: iostat
-    character(len=len_buf) :: line
+    character(len=nml_line_buffer) :: line
     found = .false.
     if (.not. this%is_open) return
     rewind(unit=this%unit)
