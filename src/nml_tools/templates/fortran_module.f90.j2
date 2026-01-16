@@ -3,6 +3,9 @@
 
 !> \brief {{ brief_text }}
 !> \details {{ details_text | replace('\n', '\n!! ') }}
+{% if module_doc %}
+{{ module_doc }}
+{% endif %}
 module {{ module_name }}
   use {{ helper_module }}, only: {{ helper_imports | join(', ') }}
 {% if use_ieee %}

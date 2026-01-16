@@ -91,6 +91,7 @@ def generate_fortran(
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
     constants: dict[str, int | float] | None = None,
+    module_doc: str | None = None,
 ) -> None:
     """Generate a Fortran module from *schema* at *output*."""
     output_path = Path(output)
@@ -101,6 +102,7 @@ def generate_fortran(
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         constants=constants,
+        module_doc=module_doc,
     )
     context["file_name"] = output_path.name
     rendered = _TEMPLATE_ENV.get_template("fortran_module.f90.j2").render(context)
@@ -114,6 +116,8 @@ def generate_helper(
     module_name: str = "nml_helper",
     len_buf: int = 1024,
     constants: list[ConstantSpec] | None = None,
+    module_doc: str | None = None,
+    helper_header: str | None = None,
 ) -> None:
     """Generate the helper Fortran module at *output*."""
     if not module_name:
@@ -127,6 +131,8 @@ def generate_helper(
             "module_name": module_name,
             "len_buf": len_buf,
             "constants": constants or [],
+            "module_doc": module_doc,
+            "helper_header": helper_header,
         }
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -141,6 +147,7 @@ def _build_context(
     kind_map: dict[str, str] | None,
     kind_allowlist: Iterable[str] | None,
     constants: dict[str, int | float] | None,
+    module_doc: str | None,
 ) -> dict[str, Any]:
     if not helper_module:
         raise ValueError("helper module name must be a non-empty string")
@@ -465,6 +472,7 @@ def _build_context(
         "doc_class": doc_class,
         "brief_text": brief_text,
         "details_text": details_text,
+        "module_doc": module_doc,
         "namelist_name": namelist_name,
         "fields": fields,
         "namelist_vars": namelist_vars,

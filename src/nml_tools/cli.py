@@ -54,7 +54,7 @@ def _resolve_optional_path(
 def _load_helper_settings(
     config: dict[str, Any],
     base_dir: Path,
-) -> tuple[Path | None, str, int]:
+) -> tuple[Path | None, str, int, str | None]:
     default_buffer = 1024
     helper_raw = config.get("helper")
     if helper_raw is None:
@@ -69,7 +69,7 @@ def _load_helper_settings(
         helper_module = helper_module_raw.strip()
         if not helper_module:
             raise click.ClickException("config 'helper_module' must be a non-empty string")
-        return helper_path, helper_module, default_buffer
+        return helper_path, helper_module, default_buffer, None
 
     if not isinstance(helper_raw, dict):
         raise click.ClickException("config 'helper' must be a table")
@@ -86,12 +86,21 @@ def _load_helper_settings(
     helper_module = helper_module_raw.strip()
     if not helper_module:
         raise click.ClickException("config 'helper.module' must be a non-empty string")
+    header_raw = helper_raw.get("header")
+    if header_raw is None:
+        header = None
+    else:
+        if not isinstance(header_raw, str):
+            raise click.ClickException("config 'helper.header' must be a string")
+        header = header_raw.rstrip()
+        if not header:
+            header = None
     buffer_raw = helper_raw.get("buffer", default_buffer)
     if isinstance(buffer_raw, bool) or not isinstance(buffer_raw, int):
         raise click.ClickException("config 'helper.buffer' must be an integer")
     if buffer_raw <= 0:
         raise click.ClickException("config 'helper.buffer' must be positive")
-    return helper_path, helper_module, buffer_raw
+    return helper_path, helper_module, buffer_raw, header
 
 
 def _load_kind_settings(config: dict[str, Any]) -> tuple[str, dict[str, str], set[str]]:
@@ -188,6 +197,19 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
     return constants, specs
 
 
+def _load_documentation(config: dict[str, Any]) -> str | None:
+    doc_raw = config.get("documentation")
+    if doc_raw is None:
+        return None
+    if not isinstance(doc_raw, dict):
+        raise click.ClickException("config 'documentation' must be a table")
+    module_raw = doc_raw.get("module")
+    if not isinstance(module_raw, str):
+        raise click.ClickException("config 'documentation.module' must be a string")
+    module_doc = module_raw.strip()
+    return module_doc or None
+
+
 def _iter_nml_files(config: dict[str, Any], base_dir: Path) -> list[dict[str, Path | None]]:
     raw_entries = config.get("nml-files")
     if not isinstance(raw_entries, list) or not raw_entries:
@@ -246,7 +268,11 @@ def generate(config_path: Path) -> None:
     config = _load_config(config_path)
     base_dir = config_path.parent
     logger.debug("Base directory: %s", base_dir)
-    helper_path, helper_module, helper_buffer = _load_helper_settings(config, base_dir)
+    helper_path, helper_module, helper_buffer, helper_header = _load_helper_settings(
+        config,
+        base_dir,
+    )
+    module_doc = _load_documentation(config)
     constants, constant_specs = _load_constants(config)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     if helper_path is not None:
@@ -257,6 +283,8 @@ def generate(config_path: Path) -> None:
                 module_name=helper_module,
                 len_buf=helper_buffer,
                 constants=constant_specs,
+                module_doc=module_doc,
+                helper_header=helper_header,
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
@@ -283,6 +311,7 @@ def generate(config_path: Path) -> None:
                     kind_map=kind_map,
                     kind_allowlist=kind_allowlist,
                     constants=constants,
+                    module_doc=module_doc,
                 )
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc

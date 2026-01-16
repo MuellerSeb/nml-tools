@@ -1,7 +1,14 @@
+{% if helper_header %}
+{{ helper_header }}
+ 
+{% endif %}
 !> \file {{ file_name }}
 !> \copydoc {{ module_name }}
 
 !> \brief Helper module for namelist file operations
+{% if module_doc %}
+{{ module_doc }}
+{% endif %}
 module {{ module_name }}
 
   !> \brief Buffer length for reading lines
