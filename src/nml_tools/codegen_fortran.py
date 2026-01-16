@@ -199,7 +199,13 @@ def _build_context(
             kind_ids.append(type_info.kind)
 
         declaration = _render_declaration(type_info.type_spec, type_info.dimensions, name)
-        title = prop.get("title", name)
+        title_raw = prop.get("title")
+        if title_raw is None:
+            title = name
+        elif not isinstance(title_raw, str):
+            raise ValueError(f"property '{name}' title must be a string")
+        else:
+            title = title_raw.strip() or name
         description = prop.get("description")
         declaration_with_doc = f"{declaration} !< {title}"
 
@@ -250,8 +256,9 @@ def _build_context(
                     requires_ieee = True
                 set_sentinel_condition = set_condition_expr
                 if needs_sentinel:
+                    sent_com = _sentinel_comment(type_info, required=False)
                     set_optional_defaults.append(
-                        f"this%{name} = {set_value_expr}{_sentinel_comment(type_info, required=False)}"
+                        f"this%{name} = {set_value_expr}{sent_com}"
                     )
 
         default_assignment: str | None = None

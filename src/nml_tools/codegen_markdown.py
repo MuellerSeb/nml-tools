@@ -121,7 +121,7 @@ def generate_docs(
             lines.append(f"- Examples: {examples_text}")
         lines.append("")
 
-    lines.append("## Examples")
+    lines.append("## Example")
     lines.append("")
     lines.append("```fortran")
     filled_template = render_template(

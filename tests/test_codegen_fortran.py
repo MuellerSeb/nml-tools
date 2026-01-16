@@ -38,9 +38,10 @@ def _import_load_schema():
 
 def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
-    schema_path = root / "examples" / "optimization.yml"
-    expected_path = root / "examples" / "nml_optimization.f90"
-    config_path = root / "nml-config.toml"
+    fixture_root = root / "tests" / "fixtures" / "01_simple"
+    schema_path = fixture_root / "optimization.yml"
+    expected_path = fixture_root / "out" / "nml_optimization.f90"
+    config_path = fixture_root / "nml-config.toml"
 
     with config_path.open("rb") as handle:
         config = tomllib.load(handle)
@@ -48,6 +49,27 @@ def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
     kind_module = kinds["module"]
     kind_map = kinds["map"]
     kind_allowlist = set(kinds["real"] + kinds["integer"])
+    constants_raw = config.get("constants", {})
+    if not isinstance(constants_raw, dict):
+        raise ValueError("config constants must be a table")
+    constants: dict[str, int | float] = {}
+    for name, entry in constants_raw.items():
+        if not isinstance(entry, dict) or "value" not in entry:
+            raise ValueError("config constant entries must define a value")
+        value = entry.get("value")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("config constants must be integers or reals")
+        constants[name] = value
+    doc_raw = config.get("documentation")
+    if doc_raw is None:
+        module_doc = None
+    elif not isinstance(doc_raw, dict):
+        raise ValueError("config documentation must be a table")
+    else:
+        module_raw = doc_raw.get("module")
+        if not isinstance(module_raw, str):
+            raise ValueError("config documentation module must be a string")
+        module_doc = module_raw.strip() or None
 
     load_schema = _import_load_schema()
     schema = load_schema(schema_path)
@@ -60,6 +82,8 @@ def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
         kind_module=kind_module,
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
+        constants=constants,
+        module_doc=module_doc,
     )
 
     generated = output.read_text()
@@ -172,6 +196,34 @@ def test_generate_fortran_accepts_string_length_constants(tmp_path: Path) -> Non
     generated = output.read_text()
     assert "character(len=name_len) :: name" in generated
     assert "use nml_helper, only: nml_file_t, name_len" in generated
+
+
+def test_generate_fortran_array_default_pad_order(tmp_path: Path) -> None:
+    schema = {
+        "title": "Array default pad",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "matrix": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": [2, 2],
+                "x-fortran-default-order": "C",
+                "x-fortran-default-pad": 0,
+                "default": [1, 2, 3],
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(schema, output, kind_module="mo_kind")
+
+    generated = output.read_text()
+    assert "matrix_default(3) = [1_i4, 2_i4, 3_i4]" in generated
+    assert "matrix_pad = 0_i4" in generated
+    assert "order=[2, 1]" in generated
+    assert "pad=[matrix_pad]" in generated
 
 
 def test_generate_fortran_allows_plain_kinds(tmp_path: Path) -> None:

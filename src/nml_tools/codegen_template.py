@@ -248,7 +248,7 @@ def _array_list_entries(
     type_info: FieldTypeInfo,
     prop: dict[str, Any],
     constants: dict[str, int | float] | None,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str | None]]:
     rank = len(type_info.dimensions)
     if rank <= 1:
         entry_name = f"{name}{_array_slice(rank)}"
@@ -256,28 +256,68 @@ def _array_list_entries(
 
     dims = _parse_default_dimensions(type_info.dimensions, constants)
     order = _resolve_default_order(prop)
-    row_values = _values_for_row_slices(values, dims, order)
-    chunk_size = _product(dims[1:])
-    entries: list[tuple[str, str]] = []
+    slice_dim = _slice_dim_for_order(rank, order)
+    slice_size = dims[slice_dim]
+    fixed_dims = [dims[idx] for idx in range(rank) if idx != slice_dim]
+    entries: list[tuple[str, str | None]] = []
     offset = 0
-    for row_index in range(1, dims[0] + 1):
-        if offset >= len(row_values):
+    for fixed_indices in _iter_fixed_indices(fixed_dims, order):
+        if offset >= len(values):
             break
-        chunk = row_values[offset : offset + chunk_size]
+        chunk = values[offset : offset + slice_size]
         if not chunk:
             break
-        entry_name = _row_slice_name(name, rank, row_index)
+        entry_name = _slice_entry_name(
+            name,
+            rank,
+            slice_dim,
+            [index + 1 for index in fixed_indices],
+        )
         entries.append((entry_name, _format_value_list(chunk, type_info)))
-        offset += chunk_size
+        offset += slice_size
     if not entries:
         entry_name = f"{name}{_array_slice(rank)}"
-        entries.append((entry_name, _format_value_list(row_values, type_info)))
+        entries.append((entry_name, _format_value_list(values, type_info)))
     return entries
 
 
-def _row_slice_name(name: str, rank: int, row_index: int) -> str:
-    slices = [str(row_index)] + [":" for _ in range(rank - 1)]
-    return f"{name}({', '.join(slices)})"
+def _slice_dim_for_order(rank: int, order: str) -> int:
+    if order == "F":
+        return 0
+    return rank - 1
+
+
+def _iter_fixed_indices(dims: list[int], order: str) -> Iterable[list[int]]:
+    if not dims:
+        yield []
+        return
+    indices = [0] * len(dims)
+    while True:
+        yield indices.copy()
+        positions = range(len(dims)) if order == "F" else range(len(dims) - 1, -1, -1)
+        for pos in positions:
+            indices[pos] += 1
+            if indices[pos] < dims[pos]:
+                break
+            indices[pos] = 0
+        else:
+            break
+
+
+def _slice_entry_name(
+    name: str,
+    rank: int,
+    slice_dim: int,
+    fixed_indices: list[int],
+) -> str:
+    indices: list[str] = []
+    fixed_iter = iter(fixed_indices)
+    for idx in range(rank):
+        if idx == slice_dim:
+            indices.append(":")
+        else:
+            indices.append(str(next(fixed_iter)))
+    return f"{name}({', '.join(indices)})"
 
 
 def _format_value_list(values: list[Any], type_info: FieldTypeInfo) -> str:
@@ -294,7 +334,7 @@ def _entries_from_value(
     type_info: FieldTypeInfo,
     prop: dict[str, Any],
     constants: dict[str, int | float] | None,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str | None]]:
     if type_info.category == "array":
         if isinstance(value, list):
             _validate_example_list(value)
@@ -375,44 +415,3 @@ def _resolve_default_order(prop: dict[str, Any]) -> str:
     if order not in {"F", "C"}:
         raise ValueError("array default order must be 'F' or 'C'")
     return order
-
-
-def _values_for_row_slices(values: list[Any], dims: list[int], order: str) -> list[Any]:
-    total = _product(dims)
-    if len(values) != total:
-        return values
-    if order == "C":
-        return values
-    return _reorder_fortran_to_c(values, dims)
-
-
-def _reorder_fortran_to_c(values: list[Any], dims: list[int]) -> list[Any]:
-    rank = len(dims)
-    c_strides = [1] * rank
-    for idx in range(rank - 2, -1, -1):
-        c_strides[idx] = c_strides[idx + 1] * dims[idx + 1]
-
-    f_strides = [1] * rank
-    for idx in range(1, rank):
-        f_strides[idx] = f_strides[idx - 1] * dims[idx - 1]
-
-    indexed: list[tuple[int, Any]] = []
-    for f_index, value in enumerate(values):
-        remainder = f_index
-        indices = [0] * rank
-        for idx in range(rank):
-            stride = f_strides[idx]
-            indices[idx] = remainder // stride
-            remainder = remainder % stride
-        c_index = sum(indices[idx] * c_strides[idx] for idx in range(rank))
-        indexed.append((c_index, value))
-
-    indexed.sort(key=lambda item: item[0])
-    return [value for _, value in indexed]
-
-
-def _product(values: list[int]) -> int:
-    total = 1
-    for value in values:
-        total *= value
-    return total

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,9 +16,9 @@ from .codegen_markdown import generate_docs
 from .codegen_template import generate_template
 from .schema import load_schema
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:  # pragma: no cover - python<3.11
+else:  # pragma: no cover - python<3.11
     import tomli as tomllib
 
 logger = logging.getLogger(__name__)
@@ -178,6 +179,8 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
         if "value" not in entry:
             raise click.ClickException(f"config constant '{name}' must define 'value'")
         value = entry.get("value")
+        if not isinstance(value, (int, float)):
+            raise click.ClickException("config constants must be integers or reals")
         type_spec, literal = _format_constant_literal(value)
         doc = entry.get("doc")
         if doc is not None:
@@ -211,18 +214,20 @@ def _load_documentation(config: dict[str, Any]) -> str | None:
     return module_doc or None
 
 
-def _iter_nml_files(config: dict[str, Any], base_dir: Path) -> list[dict[str, Path | None]]:
-    raw_entries = config.get("nml-files")
+def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, Path | None]]:
+    raw_entries = config.get("namelists")
+    if raw_entries is None and "nml-files" in config:
+        raise click.ClickException("config uses deprecated 'nml-files'; rename to 'namelists'")
     if not isinstance(raw_entries, list) or not raw_entries:
-        raise click.ClickException("config must define non-empty 'nml-files'")
+        raise click.ClickException("config must define non-empty 'namelists'")
 
     entries: list[dict[str, Path | None]] = []
     for entry in raw_entries:
         if not isinstance(entry, dict):
-            raise click.ClickException("each nml-files entry must be a table")
+            raise click.ClickException("each namelists entry must be a table")
         schema_raw = entry.get("schema")
         if not isinstance(schema_raw, str):
-            raise click.ClickException("nml-files entry must define string 'schema'")
+            raise click.ClickException("namelists entry must define string 'schema'")
         schema_path = base_dir / schema_raw
         entries.append(
             {
@@ -336,18 +341,18 @@ def generate(config_path: Path) -> None:
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
-    entries = _iter_nml_files(config, base_dir)
+    entries = _iter_namelists(config, base_dir)
     logger.info("Found %d schema entries", len(entries))
-    for entry in entries:
-        schema_path = entry["schema"]
+    for namelist_entry in entries:
+        schema_path = namelist_entry["schema"]
         if schema_path is None:
-            raise click.ClickException("nml-files entry missing schema path")
+            raise click.ClickException("namelists entry missing schema path")
         try:
             logger.info("Loading schema %s", schema_path)
             schema = load_schema(schema_path)
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
-        mod_path = entry["mod_path"]
+        mod_path = namelist_entry["mod_path"]
         if mod_path is not None:
             try:
                 logger.info("Generating Fortran module at %s", mod_path)
@@ -363,7 +368,7 @@ def generate(config_path: Path) -> None:
                 )
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc
-        doc_path = entry["doc_path"]
+        doc_path = namelist_entry["doc_path"]
         if doc_path is not None:
             try:
                 logger.info("Generating Markdown docs at %s", doc_path)
@@ -374,22 +379,22 @@ def generate(config_path: Path) -> None:
     template_entries = _iter_templates(config, base_dir)
     if template_entries:
         logger.info("Found %d template entries", len(template_entries))
-    for entry in template_entries:
+    for template_entry in template_entries:
         try:
             schemas = []
-            for schema_path in entry["schemas"]:
+            for schema_path in template_entry["schemas"]:
                 logger.info("Loading schema %s", schema_path)
                 schemas.append(load_schema(schema_path))
-            logger.info("Generating template at %s", entry["output"])
+            logger.info("Generating template at %s", template_entry["output"])
             generate_template(
                 schemas,
-                entry["output"],
-                doc_mode=entry["doc_mode"],
-                value_mode=entry["value_mode"],
+                template_entry["output"],
+                doc_mode=template_entry["doc_mode"],
+                value_mode=template_entry["value_mode"],
                 constants=constants,
                 kind_map=kind_map,
                 kind_allowlist=kind_allowlist,
-                values=entry["values"],
+                values=template_entry["values"],
             )
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
@@ -415,12 +420,12 @@ def gen_markdown(config_path: Path) -> None:
     config = _load_config(config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
-    entries = _iter_nml_files(config, base_dir)
+    entries = _iter_namelists(config, base_dir)
     logger.info("Found %d schema entries", len(entries))
     for entry in entries:
         schema_path = entry["schema"]
         if schema_path is None:
-            raise click.ClickException("nml-files entry missing schema path")
+            raise click.ClickException("namelists entry missing schema path")
         try:
             logger.info("Loading schema %s", schema_path)
             schema = load_schema(schema_path)
