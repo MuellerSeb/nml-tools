@@ -3,7 +3,6 @@
 All relevant configurations for the optimization parameters of MHM.
 This namelist corresponds to the `optimization` section in the MHM configuration.
 
-
 **Namelist**: `optimization`
 
 ## Fields
@@ -78,11 +77,11 @@ Summary:
 Parameters for the MCMC error model: err = a + b+Q
 
 Summary:
-- Type: `real(dp), dimension(2, max_iter)`
+- Type: `real(dp), dimension(3, 2, max_iter)`
 - Required: no
 - Default: `[0.01, 0.6, 0.2, 0.3]` (repeated, order: C)
 
-## Examples
+## Example
 
 ```fortran
 &optimization
@@ -92,7 +91,7 @@ Summary:
   seed = -9
   dds_r = 0.2
   mcmc_opti = .true.
-  mcmc_error_params(1, :) = 0.01, 0.6, 0.2, 0.3
+  mcmc_error_params(1, 1, :) = 0.01, 0.6, 0.2, 0.3
 /
 ```
 

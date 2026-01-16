@@ -1,5 +1,5 @@
 title: MHM optimization namelist
-description: |
+description: |-
   All relevant configurations for the optimization parameters of MHM.
   This namelist corresponds to the `optimization` section in the MHM configuration.
 x-fortran-namelist: optimization
@@ -46,7 +46,7 @@ properties:
     items:
       type: number
       x-fortran-kind: dp
-    x-fortran-shape: [2, max_iter]
+    x-fortran-shape: [3, 2, max_iter]
     x-fortran-default-repeat: true
     x-fortran-default-order: C
     default: [0.01, 0.6, 0.2, 0.3]

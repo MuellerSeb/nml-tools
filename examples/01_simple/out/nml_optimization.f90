@@ -4,7 +4,7 @@
 !> \brief MHM optimization namelist
 !> \details All relevant configurations for the optimization parameters of MHM.
 !! This namelist corresponds to the `optimization` section in the MHM configuration.
-!! 
+!> \version 0.1
 module nml_optimization
   use nml_helper, only: nml_file_t, buf, max_iter
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
@@ -23,7 +23,6 @@ module nml_optimization
   !> \brief MHM optimization namelist
   !> \details All relevant configurations for the optimization parameters of MHM.
   !! This namelist corresponds to the `optimization` section in the MHM configuration.
-  !! 
   type, public :: nml_optimization_t
     logical :: is_configured = .false. !< whether the namelist has been configured
     character(len=buf) :: name !< Optimization name
@@ -32,7 +31,7 @@ module nml_optimization
     integer(i4) :: seed !< Random seed
     real(dp) :: dds_r !< DDS perturbation rate
     logical :: mcmc_opti !< MCMC optimization
-    real(dp), dimension(2, max_iter) :: mcmc_error_params !< MCMC error parameters per domain
+    real(dp), dimension(3, 2, max_iter) :: mcmc_error_params !< MCMC error parameters per domain
   contains
     procedure :: init => nml_optimization_init
     procedure :: from_file => nml_optimization_from_file
@@ -56,7 +55,7 @@ contains
     this%seed = seed_default
     this%dds_r = dds_r_default
     this%mcmc_opti = mcmc_opti_default ! bool values always need a default
-    this%mcmc_error_params = reshape(mcmc_error_params_default, shape=[2, max_iter], order=[2, 1], pad=mcmc_error_params_default)
+    this%mcmc_error_params = reshape(mcmc_error_params_default, shape=[3, 2, max_iter], order=[3, 2, 1], pad=mcmc_error_params_default)
   end subroutine nml_optimization_init
 
   !> \brief Read optimization namelist from file
@@ -72,7 +71,7 @@ contains
     integer(i4) :: seed
     real(dp) :: dds_r
     logical :: mcmc_opti
-    real(dp), dimension(2, max_iter) :: mcmc_error_params
+    real(dp), dimension(3, 2, max_iter) :: mcmc_error_params
     ! locals
     type(nml_file_t) :: nml
     logical :: found
@@ -147,7 +146,7 @@ contains
     integer(i4), intent(in), optional :: seed
     real(dp), intent(in), optional :: dds_r
     logical, intent(in), optional :: mcmc_opti
-    real(dp), dimension(2, max_iter), intent(in), optional :: mcmc_error_params
+    real(dp), dimension(3, 2, max_iter), intent(in), optional :: mcmc_error_params
 
     call this%init()
 
@@ -204,7 +203,7 @@ contains
       is_set = .true.
     case ("mcmc_error_params")
       if (present(idx)) then
-        if (size(idx) /= 2) then
+        if (size(idx) /= 3) then
           error stop "nml_optimization%is_set: index rank mismatch for 'mcmc_error_params'"
         end if
         if (any(idx < lbound(this%mcmc_error_params)) .or. any(idx > ubound(this%mcmc_error_params))) then

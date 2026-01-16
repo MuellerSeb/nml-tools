@@ -1,7 +1,10 @@
+! created with nml-tools
+ 
 !> \file nml_helper.f90
 !> \copydoc nml_helper
 
 !> \brief Helper module for namelist file operations
+!> \version 0.1
 module nml_helper
 
   !> \brief Buffer length for reading lines

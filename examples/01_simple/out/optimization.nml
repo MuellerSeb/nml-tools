@@ -13,6 +13,5 @@
   ! MCMC optimization
   mcmc_opti = .true.
   ! MCMC error parameters per domain
-  mcmc_error_params(1, :) = 0.01, 0.6, 0.2, 0.6
-  mcmc_error_params(2, :) = 0.2
+  mcmc_error_params(1, 1, :) = 0.01, 0.6, 0.2, 0.6
 /
