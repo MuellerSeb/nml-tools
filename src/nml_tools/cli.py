@@ -276,6 +276,11 @@ def _iter_templates(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
         value_mode = entry.get("value_mode", "empty")
         if not isinstance(value_mode, str):
             raise click.ClickException("templates 'value_mode' must be a string")
+        values_raw = entry.get("values", {})
+        if values_raw is None:
+            values_raw = {}
+        if not isinstance(values_raw, dict):
+            raise click.ClickException("templates 'values' must be a table")
 
         entries.append(
             {
@@ -283,6 +288,7 @@ def _iter_templates(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
                 "schemas": schema_paths,
                 "doc_mode": doc_mode,
                 "value_mode": value_mode,
+                "values": values_raw,
             }
         )
     return entries
@@ -383,6 +389,7 @@ def generate(config_path: Path) -> None:
                 constants=constants,
                 kind_map=kind_map,
                 kind_allowlist=kind_allowlist,
+                values=entry["values"],
             )
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
@@ -463,6 +470,7 @@ def gen_template(config_path: Path) -> None:
                 constants=constants,
                 kind_map=kind_map,
                 kind_allowlist=kind_allowlist,
+                values=entry["values"],
             )
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc

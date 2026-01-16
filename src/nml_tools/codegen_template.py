@@ -13,6 +13,8 @@ from .codegen_fortran import (
     _parse_default_dimensions,
 )
 
+_MISSING = object()
+
 
 def generate_template(
     schemas: Iterable[dict[str, Any]],
@@ -23,8 +25,34 @@ def generate_template(
     constants: dict[str, int | float] | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: set[str] | None = None,
+    values: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Generate a template namelist file for *schemas* at *output*."""
+    rendered = render_template(
+        schemas,
+        doc_mode=doc_mode,
+        value_mode=value_mode,
+        constants=constants,
+        kind_map=kind_map,
+        kind_allowlist=kind_allowlist,
+        values=values,
+    )
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(rendered, encoding="ascii")
+
+
+def render_template(
+    schemas: Iterable[dict[str, Any]],
+    *,
+    doc_mode: str = "plain",
+    value_mode: str = "empty",
+    constants: dict[str, int | float] | None = None,
+    kind_map: dict[str, str] | None = None,
+    kind_allowlist: set[str] | None = None,
+    values: dict[str, dict[str, Any]] | None = None,
+) -> str:
+    """Render a template namelist file for *schemas*."""
     doc_mode = doc_mode.strip().lower()
     value_mode = value_mode.strip().lower()
     if doc_mode not in {"plain", "documented"}:
@@ -34,17 +62,15 @@ def generate_template(
             "template value_mode must be one of: empty, filled, minimal-empty, minimal-filled"
         )
 
-    rendered = _render_template(
+    return _render_template(
         schemas,
         doc_mode=doc_mode,
         value_mode=value_mode,
         constants=constants,
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
+        values=values,
     )
-    output_path = Path(output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(rendered, encoding="ascii")
 
 
 def _render_template(
@@ -55,9 +81,46 @@ def _render_template(
     constants: dict[str, int | float] | None,
     kind_map: dict[str, str] | None,
     kind_allowlist: set[str] | None,
+    values: dict[str, dict[str, Any]] | None,
 ) -> str:
     lines: list[str] = []
-    for schema in schemas:
+    schemas_list = list(schemas)
+    values_map = values or {}
+    if not isinstance(values_map, dict):
+        raise ValueError("template values must be a table of namelist tables")
+
+    schema_by_name: dict[str, dict[str, Any]] = {}
+    for schema in schemas_list:
+        namelist_name = schema.get("x-fortran-namelist")
+        if not isinstance(namelist_name, str):
+            raise ValueError("schema must define 'x-fortran-namelist'")
+        schema_by_name[namelist_name] = schema
+
+    for namelist_name, namelist_values in values_map.items():
+        if not isinstance(namelist_name, str):
+            raise ValueError("template values namelist names must be strings")
+        if namelist_name not in schema_by_name:
+            raise ValueError(
+                f"template values namelist '{namelist_name}' not found in schemas"
+            )
+        if not isinstance(namelist_values, dict):
+            raise ValueError(
+                f"template values for namelist '{namelist_name}' must be a table"
+            )
+        properties = schema_by_name[namelist_name].get("properties")
+        if not isinstance(properties, dict) or not properties:
+            raise ValueError("schema must define object 'properties'")
+        for key in namelist_values:
+            if not isinstance(key, str):
+                raise ValueError(
+                    f"template values for namelist '{namelist_name}' must use string keys"
+                )
+            if key not in properties:
+                raise ValueError(
+                    f"template values for namelist '{namelist_name}' include unknown field '{key}'"
+                )
+
+    for schema in schemas_list:
         namelist_name = schema.get("x-fortran-namelist")
         if not isinstance(namelist_name, str):
             raise ValueError("schema must define 'x-fortran-namelist'")
@@ -66,6 +129,11 @@ def _render_template(
         properties = schema.get("properties")
         if not isinstance(properties, dict) or not properties:
             raise ValueError("schema must define object 'properties'")
+        override_values = (
+            values_map.get(namelist_name, {})
+            if value_mode in {"filled", "minimal-filled"}
+            else {}
+        )
 
         if doc_mode == "documented":
             title = schema.get("title")
@@ -82,8 +150,12 @@ def _render_template(
             _validate_kind_allowlist(type_info, kind_map, kind_allowlist)
 
             has_default = "default" in prop
+            has_override = name in override_values
             if value_mode in {"minimal-empty", "minimal-filled"} and has_default:
-                continue
+                if value_mode == "minimal-filled" and has_override:
+                    pass
+                else:
+                    continue
 
             if doc_mode == "documented":
                 title = prop.get("title")
@@ -95,6 +167,7 @@ def _render_template(
                 prop,
                 type_info,
                 value_mode=value_mode,
+                override=override_values.get(name, _MISSING),
                 constants=constants,
             )
             for entry_name, value_text in entries:
@@ -121,6 +194,7 @@ def _value_entries(
     type_info: FieldTypeInfo,
     *,
     value_mode: str,
+    override: Any,
     constants: dict[str, int | float] | None,
 ) -> list[tuple[str, str | None]]:
     if value_mode in {"empty", "minimal-empty"}:
@@ -128,6 +202,13 @@ def _value_entries(
         if type_info.category == "array":
             entry_name = f"{name}{_array_slice(len(type_info.dimensions))}"
         return [(entry_name, None)]
+
+    if override is not _MISSING:
+        return _entries_from_value(name, override, type_info, prop, constants)
+
+    example_value = _get_first_example(prop, type_info)
+    if example_value is not None:
+        return _entries_from_value(name, example_value, type_info, prop, constants)
 
     if "default" in prop:
         default_value = prop["default"]
@@ -205,6 +286,50 @@ def _format_value_list(values: list[Any], type_info: FieldTypeInfo) -> str:
         for value in values
     ]
     return ", ".join(formatted)
+
+
+def _entries_from_value(
+    name: str,
+    value: Any,
+    type_info: FieldTypeInfo,
+    prop: dict[str, Any],
+    constants: dict[str, int | float] | None,
+) -> list[tuple[str, str]]:
+    if type_info.category == "array":
+        if isinstance(value, list):
+            _validate_example_list(value)
+            return _array_list_entries(name, value, type_info, prop, constants)
+        scalar = _format_scalar_default(value, None, type_info.element_category)
+        entry_name = f"{name}{_array_slice(len(type_info.dimensions))}"
+        return [(entry_name, scalar)]
+    if isinstance(value, list):
+        raise ValueError("scalar template values must not be lists")
+    scalar = _format_scalar_default(value, None, type_info.category)
+    return [(name, scalar)]
+
+
+def _get_first_example(prop: dict[str, Any], type_info: FieldTypeInfo) -> Any | None:
+    examples = prop.get("examples")
+    if examples is None:
+        return None
+    if not isinstance(examples, list):
+        raise ValueError("property examples must be a list")
+    if not examples:
+        return None
+    first = examples[0]
+    if type_info.category == "array":
+        if isinstance(first, list):
+            _validate_example_list(first)
+        return first
+    if isinstance(first, list):
+        raise ValueError("scalar examples must not be lists")
+    return first
+
+
+def _validate_example_list(values: list[Any]) -> None:
+    for value in values:
+        if isinstance(value, list):
+            raise ValueError("array examples must be flat lists")
 
 
 def _fallback_scalar_value(type_info: FieldTypeInfo) -> Any:

@@ -13,6 +13,7 @@ from .codegen_fortran import (
     _parse_default_dimensions,
     _prepare_array_default,
 )
+from .codegen_template import render_template
 
 
 def generate_docs(
@@ -88,6 +89,7 @@ def generate_docs(
         required_label = "yes" if name in required_set else "no"
         default_label = _get_default_value(prop, type_info, constants)
         enum_label = _get_enum_values(prop, type_info, constants)
+        example_values = _get_example_values(prop, type_info)
         title = _get_title(prop)
         description_text = _get_description(prop)
 
@@ -114,7 +116,25 @@ def generate_docs(
                 lines.append(f"- Default: `{default_label}`")
         if enum_label is not None:
             lines.append(f"- Allowed values: {enum_label}")
+        if example_values is not None:
+            examples_text = ", ".join(f"`{value}`" for value in example_values)
+            lines.append(f"- Examples: {examples_text}")
         lines.append("")
+
+    lines.append("## Examples")
+    lines.append("")
+    lines.append("```fortran")
+    filled_template = render_template(
+        [schema],
+        doc_mode="plain",
+        value_mode="filled",
+        constants=constants,
+        kind_map=None,
+        kind_allowlist=None,
+    )
+    lines.extend(filled_template.rstrip("\n").splitlines())
+    lines.append("```")
+    lines.append("")
 
     rendered = "\n".join(lines) + "\n"
     output_path = Path(output)
@@ -211,6 +231,34 @@ def _get_enum_values(
 def _escape_table_cell(value: str) -> str:
     escaped = value.replace("|", "\\|").replace("\n", " ").strip()
     return escaped or "n/a"
+
+
+def _get_example_values(
+    prop: dict[str, Any],
+    type_info: FieldTypeInfo,
+) -> list[str] | None:
+    examples = prop.get("examples")
+    if examples is None:
+        return None
+    if not isinstance(examples, list):
+        raise ValueError("property examples must be a list")
+    if not examples:
+        return None
+    return [_format_example_value(value, type_info) for value in examples]
+
+
+def _format_example_value(value: Any, type_info: FieldTypeInfo) -> str:
+    if type_info.category == "array":
+        if isinstance(value, list):
+            formatted = [
+                _format_scalar_default(item, None, type_info.element_category)
+                for item in value
+            ]
+            return f"[{', '.join(formatted)}]"
+        return _format_scalar_default(value, None, type_info.element_category)
+    if isinstance(value, list):
+        raise ValueError("scalar examples must not be lists")
+    return _format_scalar_default(value, None, type_info.category)
 
 
 def _format_default_plain(
