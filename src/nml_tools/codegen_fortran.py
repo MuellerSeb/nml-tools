@@ -187,333 +187,343 @@ def _build_context(
     requires_ieee = False
     helper_imports = ["nml_file_t"]
 
-    for index, (name, prop) in enumerate(properties.items()):
-        if not isinstance(prop, dict):
-            raise ValueError(f"property '{name}' must be an object")
-        type_info = _field_type_info(prop, constants)
-        for const_name in _collect_dimension_constants(type_info.dimensions, constants):
-            if const_name not in helper_imports:
-                helper_imports.append(const_name)
-        if type_info.length_expr and not _is_int_literal(type_info.length_expr):
-            if type_info.length_expr not in helper_imports:
-                helper_imports.append(type_info.length_expr)
-        if type_info.kind:
-            kind_ids.append(type_info.kind)
+    current_property: str | None = None
+    try:
+        for index, (name, prop) in enumerate(properties.items()):
+            current_property = name
+            if not isinstance(prop, dict):
+                raise ValueError(f"property '{name}' must be an object")
+            type_info = _field_type_info(prop, constants)
+            for const_name in _collect_dimension_constants(type_info.dimensions, constants):
+                if const_name not in helper_imports:
+                    helper_imports.append(const_name)
+            if type_info.length_expr and not _is_int_literal(type_info.length_expr):
+                if type_info.length_expr not in helper_imports:
+                    helper_imports.append(type_info.length_expr)
+            if type_info.kind:
+                kind_ids.append(type_info.kind)
 
-        declaration = _render_declaration(type_info.type_spec, type_info.dimensions, name)
-        title_raw = prop.get("title")
-        if title_raw is None:
-            title = name
-        elif not isinstance(title_raw, str):
-            raise ValueError(f"property '{name}' title must be a string")
-        else:
-            title = title_raw.strip() or name
-        description = prop.get("description")
-        declaration_with_doc = f"{declaration} !< {title}"
+            declaration = _render_declaration(type_info.type_spec, type_info.dimensions, name)
+            title_raw = prop.get("title")
+            if title_raw is None:
+                title = name
+            elif not isinstance(title_raw, str):
+                raise ValueError(f"property '{name}' title must be a string")
+            else:
+                title = title_raw.strip() or name
+            description = prop.get("description")
+            declaration_with_doc = f"{declaration} !< {title}"
 
-        local_decl = _render_declaration(type_info.type_spec, type_info.dimensions, name)
+            local_decl = _render_declaration(type_info.type_spec, type_info.dimensions, name)
 
-        is_required = name in required_set
-        has_default = "default" in prop
-        needs_sentinel = (not is_required) and (not has_default)
-        requires_sentinel = is_required or needs_sentinel
+            is_required = name in required_set
+            has_default = "default" in prop
+            needs_sentinel = (not is_required) and (not has_default)
+            requires_sentinel = is_required or needs_sentinel
 
-        argument_decl = _render_argument_declaration(
-            name=name,
-            type_info=type_info,
-            is_required=is_required,
-        )
-        local_init_assignments.append(f"{name} = this%{name}")
-
-        sentinel_assignment: str | None = None
-        sentinel_condition: str | None = None
-        set_sentinel_condition: str | None = None
-        if requires_sentinel:
-            if is_required and type_info.category in {"boolean", "array"}:
-                raise ValueError(f"required {type_info.category} '{name}' is not supported")
-            if needs_sentinel and type_info.category == "boolean":
-                raise ValueError(f"optional boolean '{name}' must define a default")
-            value_expr, condition_expr, uses_ieee = _sentinel_expressions(
-                type_info,
-                var_ref=f"this%{name}",
+            argument_decl = _render_argument_declaration(
+                name=name,
+                type_info=type_info,
+                is_required=is_required,
             )
-            sentinel_assignment = (
-                f"this%{name} = {value_expr}{_sentinel_comment(type_info, required=is_required)}"
-            )
-            sentinel_condition = condition_expr
-            sentinel_assignments.append(sentinel_assignment)
-            if uses_ieee:
-                requires_ieee = True
-            if not has_default and type_info.category != "boolean":
-                set_value_expr, set_condition_expr, set_uses_ieee = _sentinel_expressions(
+            local_init_assignments.append(f"{name} = this%{name}")
+
+            sentinel_assignment: str | None = None
+            sentinel_condition: str | None = None
+            set_sentinel_condition: str | None = None
+            if requires_sentinel:
+                if is_required and type_info.category in {"boolean", "array"}:
+                    raise ValueError(f"required {type_info.category} '{name}' is not supported")
+                if needs_sentinel and type_info.category == "boolean":
+                    raise ValueError(f"optional boolean '{name}' must define a default")
+                value_expr, condition_expr, uses_ieee = _sentinel_expressions(
                     type_info,
                     var_ref=f"this%{name}",
                 )
-                if set_uses_ieee:
+                sentinel_assignment = (
+                    f"this%{name} = {value_expr}{_sentinel_comment(type_info, required=is_required)}"
+                )
+                sentinel_condition = condition_expr
+                sentinel_assignments.append(sentinel_assignment)
+                if uses_ieee:
                     requires_ieee = True
-                set_sentinel_condition = set_condition_expr
-                if needs_sentinel:
-                    sent_com = _sentinel_comment(type_info, required=False)
-                    set_optional_defaults.append(
-                        f"this%{name} = {set_value_expr}{sent_com}"
+                if not has_default and type_info.category != "boolean":
+                    set_value_expr, set_condition_expr, set_uses_ieee = _sentinel_expressions(
+                        type_info,
+                        var_ref=f"this%{name}",
                     )
-
-        default_assignment: str | None = None
-        set_default_assignment: str | None = None
-        if has_default and is_required:
-            raise ValueError(f"required property '{name}' cannot define a default")
-        if has_default:
-            default_const_name = f"{name}_default"
-            if type_info.category == "array":
-                default_raw = prop["default"]
-                default_is_scalar = not isinstance(default_raw, list)
-                default_values = default_raw if isinstance(default_raw, list) else [default_raw]
-                parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
-                array_default = _prepare_array_default(default_values, parsed_dims, prop)
-                repeat_raw = prop.get("x-fortran-default-repeat", False)
-                if not isinstance(repeat_raw, bool):
-                    raise ValueError("array default repeat must be a boolean")
-                repeat = bool(repeat_raw)
-
-                pad_raw = prop.get("x-fortran-default-pad")
-                pad_const_name: str | None = None
-                pad_is_scalar = False
-                if pad_raw is not None:
-                    pad_const_name = f"{name}_pad"
-                    pad_is_scalar = not isinstance(pad_raw, list)
-                    pad_values = pad_raw if isinstance(pad_raw, list) else [pad_raw]
-                    pad_values = _ensure_flat_scalar_list(pad_values, "array default pad")
-                    pad_elements = [
-                        _format_scalar_default(
-                            element, type_info.kind, type_info.element_category
+                    if set_uses_ieee:
+                        requires_ieee = True
+                    set_sentinel_condition = set_condition_expr
+                    if needs_sentinel:
+                        sent_com = _sentinel_comment(type_info, required=False)
+                        set_optional_defaults.append(
+                            f"this%{name} = {set_value_expr}{sent_com}"
                         )
-                        for element in pad_values
-                    ]
-                    if pad_is_scalar:
-                        pad_literal = _format_scalar_default(
-                            pad_raw, type_info.kind, type_info.element_category
+
+            default_assignment: str | None = None
+            set_default_assignment: str | None = None
+            if has_default and is_required:
+                raise ValueError(f"required property '{name}' cannot define a default")
+            if has_default:
+                default_const_name = f"{name}_default"
+                if type_info.category == "array":
+                    default_raw = prop["default"]
+                    default_is_scalar = not isinstance(default_raw, list)
+                    default_values = default_raw if isinstance(default_raw, list) else [default_raw]
+                    parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
+                    array_default = _prepare_array_default(default_values, parsed_dims, prop)
+                    repeat_raw = prop.get("x-fortran-default-repeat", False)
+                    if not isinstance(repeat_raw, bool):
+                        raise ValueError("array default repeat must be a boolean")
+                    repeat = bool(repeat_raw)
+
+                    pad_raw = prop.get("x-fortran-default-pad")
+                    pad_const_name: str | None = None
+                    pad_is_scalar = False
+                    if pad_raw is not None:
+                        pad_const_name = f"{name}_pad"
+                        pad_is_scalar = not isinstance(pad_raw, list)
+                        pad_values = pad_raw if isinstance(pad_raw, list) else [pad_raw]
+                        pad_values = _ensure_flat_scalar_list(pad_values, "array default pad")
+                        pad_elements = [
+                            _format_scalar_default(
+                                element, type_info.kind, type_info.element_category
+                            )
+                            for element in pad_values
+                        ]
+                        if pad_is_scalar:
+                            pad_literal = _format_scalar_default(
+                                pad_raw, type_info.kind, type_info.element_category
+                            )
+                            default_parameters.append(
+                                f"{type_info.type_spec}, parameter, public :: "
+                                f"{pad_const_name} = {pad_literal}"
+                            )
+                        else:
+                            default_parameters.append(
+                                f"{type_info.type_spec}, parameter, public :: "
+                                f"{pad_const_name}({len(pad_elements)}) = [{', '.join(pad_elements)}]"
+                            )
+
+                    if default_is_scalar:
+                        default_literal = _format_scalar_default(
+                            default_raw, type_info.kind, type_info.element_category
                         )
                         default_parameters.append(
                             f"{type_info.type_spec}, parameter, public :: "
-                            f"{pad_const_name} = {pad_literal}"
+                            f"{default_const_name} = {default_literal}"
                         )
                     else:
+                        default_elements = [
+                            _format_scalar_default(
+                                element, type_info.kind, type_info.element_category
+                            )
+                            for element in array_default.source_values
+                        ]
                         default_parameters.append(
                             f"{type_info.type_spec}, parameter, public :: "
-                            f"{pad_const_name}({len(pad_elements)}) = [{', '.join(pad_elements)}]"
+                            f"{default_const_name}({len(default_elements)}) = "
+                            f"[{', '.join(default_elements)}]"
                         )
 
-                if default_is_scalar:
-                    default_literal = _format_scalar_default(
-                        default_raw, type_info.kind, type_info.element_category
-                    )
+                    if repeat and default_is_scalar:
+                        default_assignment = f"this%{name} = {default_const_name}"
+                    else:
+                        if (
+                            not default_is_scalar
+                            and len(type_info.dimensions) == 1
+                            and array_default.order_values is None
+                            and array_default.pad_values is None
+                        ):
+                            default_assignment = f"this%{name} = {default_const_name}"
+                        else:
+                            source_expr = (
+                                default_const_name
+                                if not default_is_scalar
+                                else f"[{default_const_name}]"
+                            )
+                            shape_expr = ", ".join(type_info.dimensions)
+                            arguments = [source_expr, f"shape=[{shape_expr}]"]
+                            if array_default.order_values is not None:
+                                order_literal = ", ".join(
+                                    str(index) for index in array_default.order_values
+                                )
+                                arguments.append(f"order=[{order_literal}]")
+                            if array_default.pad_values is not None:
+                                if repeat:
+                                    pad_expr = (
+                                        default_const_name
+                                        if not default_is_scalar
+                                        else f"[{default_const_name}]"
+                                    )
+                                else:
+                                    if pad_const_name is None:
+                                        raise ValueError(
+                                            f"missing pad values for array default '{name}'"
+                                        )
+                                    pad_expr = (
+                                        pad_const_name
+                                        if not pad_is_scalar
+                                        else f"[{pad_const_name}]"
+                                    )
+                                arguments.append(f"pad={pad_expr}")
+                            default_assignment = _format_reshape_assignment(name, arguments)
+                    set_default_assignment = default_assignment
+                else:
+                    default_literal = _format_default(prop["default"], type_info, prop, constants)
                     default_parameters.append(
                         f"{type_info.type_spec}, parameter, public :: "
                         f"{default_const_name} = {default_literal}"
                     )
-                else:
-                    default_elements = [
-                        _format_scalar_default(
-                            element, type_info.kind, type_info.element_category
+                    if type_info.category == "boolean":
+                        default_assignment = (
+                            f"this%{name} = {default_const_name} ! bool values always need a default"
                         )
-                        for element in array_default.source_values
-                    ]
-                    default_parameters.append(
-                        f"{type_info.type_spec}, parameter, public :: "
-                        f"{default_const_name}({len(default_elements)}) = "
-                        f"[{', '.join(default_elements)}]"
-                    )
-
-                if repeat and default_is_scalar:
-                    default_assignment = f"this%{name} = {default_const_name}"
-                else:
-                    if (
-                        not default_is_scalar
-                        and len(type_info.dimensions) == 1
-                        and array_default.order_values is None
-                        and array_default.pad_values is None
-                    ):
-                        default_assignment = f"this%{name} = {default_const_name}"
                     else:
-                        source_expr = (
-                            default_const_name
-                            if not default_is_scalar
-                            else f"[{default_const_name}]"
-                        )
-                        shape_expr = ", ".join(type_info.dimensions)
-                        arguments = [source_expr, f"shape=[{shape_expr}]"]
-                        if array_default.order_values is not None:
-                            order_literal = ", ".join(
-                                str(index) for index in array_default.order_values
-                            )
-                            arguments.append(f"order=[{order_literal}]")
-                        if array_default.pad_values is not None:
-                            if repeat:
-                                pad_expr = (
-                                    default_const_name
-                                    if not default_is_scalar
-                                    else f"[{default_const_name}]"
-                                )
-                            else:
-                                if pad_const_name is None:
-                                    raise ValueError(
-                                        f"missing pad values for array default '{name}'"
-                                    )
-                                pad_expr = (
-                                    pad_const_name
-                                    if not pad_is_scalar
-                                    else f"[{pad_const_name}]"
-                                )
-                            arguments.append(f"pad={pad_expr}")
-                        default_assignment = _format_reshape_assignment(name, arguments)
-                set_default_assignment = default_assignment
-            else:
-                default_literal = _format_default(prop["default"], type_info, prop, constants)
-                default_parameters.append(
-                    f"{type_info.type_spec}, parameter, public :: "
-                    f"{default_const_name} = {default_literal}"
-                )
-                if type_info.category == "boolean":
-                    default_assignment = (
-                        f"this%{name} = {default_const_name} ! bool values always need a default"
+                        default_assignment = f"this%{name} = {default_const_name}"
+                    set_default_assignment = f"this%{name} = {default_const_name}"
+
+                if default_assignment is None or set_default_assignment is None:
+                    raise ValueError(f"missing default assignment for '{name}'")
+                default_assignments.append(default_assignment)
+                set_optional_defaults.append(set_default_assignment)
+
+            enum_values = _enum_values(prop, type_info, constants)
+            if enum_values is not None:
+                enum_category = _enum_category(type_info)
+                enum_const_name = f"{name}_enum_values"
+                enum_literals = [
+                    _format_scalar_default(value, type_info.kind, enum_category)
+                    for value in enum_values
+                ]
+                if enum_category == "string":
+                    enum_array_literal = (
+                        f"[{type_info.type_spec} :: {', '.join(enum_literals)}]"
                     )
                 else:
-                    default_assignment = f"this%{name} = {default_const_name}"
-                set_default_assignment = f"this%{name} = {default_const_name}"
-
-            if default_assignment is None or set_default_assignment is None:
-                raise ValueError(f"missing default assignment for '{name}'")
-            default_assignments.append(default_assignment)
-            set_optional_defaults.append(set_default_assignment)
-
-        enum_values = _enum_values(prop, type_info, constants)
-        if enum_values is not None:
-            enum_category = _enum_category(type_info)
-            enum_const_name = f"{name}_enum_values"
-            enum_literals = [
-                _format_scalar_default(value, type_info.kind, enum_category)
-                for value in enum_values
-            ]
-            if enum_category == "string":
-                enum_array_literal = (
-                    f"[{type_info.type_spec} :: {', '.join(enum_literals)}]"
+                    enum_array_literal = f"[{', '.join(enum_literals)}]"
+                enum_parameters.append(
+                    f"{type_info.type_spec}, parameter, public :: "
+                    f"{enum_const_name}({len(enum_literals)}) = {enum_array_literal}"
                 )
-            else:
-                enum_array_literal = f"[{', '.join(enum_literals)}]"
-            enum_parameters.append(
-                f"{type_info.type_spec}, parameter, public :: "
-                f"{enum_const_name}({len(enum_literals)}) = {enum_array_literal}"
-            )
-            enum_type_info = (
-                _element_type_info(type_info) if type_info.category == "array" else type_info
-            )
-            _, missing_condition, _ = _sentinel_expressions(
-                enum_type_info,
-                var_ref="val",
-                len_ref="val",
-            )
-            enum_functions.append(
-                {
-                    "name": name,
-                    "func_name": f"{name}_in_enum",
-                    "arg_type_spec": _enum_arg_type_spec(type_info),
-                    "enum_values_name": enum_const_name,
-                    "use_trim": enum_category == "string",
-                    "missing_condition": missing_condition,
-                }
-            )
-            if type_info.category == "array":
-                enum_checks.append(
+                enum_type_info = (
+                    _element_type_info(type_info) if type_info.category == "array" else type_info
+                )
+                _, missing_condition, _ = _sentinel_expressions(
+                    enum_type_info,
+                    var_ref="val",
+                    len_ref="val",
+                )
+                enum_functions.append(
                     {
                         "name": name,
                         "func_name": f"{name}_in_enum",
-                        "is_array": True,
-                        "array_ref": f"this%{name}",
+                        "arg_type_spec": _enum_arg_type_spec(type_info),
+                        "enum_values_name": enum_const_name,
+                        "use_trim": enum_category == "string",
+                        "missing_condition": missing_condition,
+                    }
+                )
+                if type_info.category == "array":
+                    enum_checks.append(
+                        {
+                            "name": name,
+                            "func_name": f"{name}_in_enum",
+                            "is_array": True,
+                            "array_ref": f"this%{name}",
+                        }
+                    )
+                else:
+                    enum_checks.append(
+                        {
+                            "name": name,
+                            "func_name": f"{name}_in_enum",
+                            "is_array": False,
+                            "element_ref": f"this%{name}",
+                        }
+                    )
+
+            if is_required:
+                set_required_assignments.append(f"this%{name} = {name}")
+
+            if not is_required:
+                set_present_assignment = f"if (present({name})) this%{name} = {name}"
+            else:
+                set_present_assignment = None
+
+            is_array = type_info.category == "array"
+            array_rank = len(type_info.dimensions) if is_array else 0
+            element_condition: str | None = None
+
+            if is_array and not has_default:
+                element_type = _element_type_info(type_info)
+                index_args = ", ".join(f"idx({idx})" for idx in range(1, array_rank + 1))
+                element_ref = f"this%{name}({index_args})"
+                _, element_condition, element_uses_ieee = _sentinel_expressions(
+                    element_type,
+                    var_ref=element_ref,
+                    len_ref=f"this%{name}",
+                )
+                if element_uses_ieee:
+                    requires_ieee = True
+
+            if has_default or type_info.category == "boolean":
+                presence_cases.append(
+                    {
+                        "name": name,
+                        "always_true": True,
+                        "sentinel_condition": None,
+                        "is_array": is_array,
+                        "rank": array_rank,
+                        "element_condition": element_condition,
                     }
                 )
             else:
-                enum_checks.append(
+                if set_sentinel_condition is None:
+                    raise ValueError(f"missing sentinel condition for '{name}'")
+                presence_cases.append(
                     {
                         "name": name,
-                        "func_name": f"{name}_in_enum",
-                        "is_array": False,
-                        "element_ref": f"this%{name}",
+                        "always_true": False,
+                        "sentinel_condition": set_sentinel_condition,
+                        "is_array": is_array,
+                        "rank": array_rank,
+                        "element_condition": element_condition,
                     }
                 )
 
-        if is_required:
-            set_required_assignments.append(f"this%{name} = {name}")
-
-        if not is_required:
-            set_present_assignment = f"if (present({name})) this%{name} = {name}"
-        else:
-            set_present_assignment = None
-
-        is_array = type_info.category == "array"
-        array_rank = len(type_info.dimensions) if is_array else 0
-        element_condition: str | None = None
-
-        if is_array and not has_default:
-            element_type = _element_type_info(type_info)
-            index_args = ", ".join(f"idx({idx})" for idx in range(1, array_rank + 1))
-            element_ref = f"this%{name}({index_args})"
-            _, element_condition, element_uses_ieee = _sentinel_expressions(
-                element_type,
-                var_ref=element_ref,
-                len_ref=f"this%{name}",
-            )
-            if element_uses_ieee:
-                requires_ieee = True
-
-        if has_default or type_info.category == "boolean":
-            presence_cases.append(
-                {
-                    "name": name,
-                    "always_true": True,
-                    "sentinel_condition": None,
-                    "is_array": is_array,
-                    "rank": array_rank,
-                    "element_condition": element_condition,
-                }
-            )
-        else:
-            if set_sentinel_condition is None:
-                raise ValueError(f"missing sentinel condition for '{name}'")
-            presence_cases.append(
-                {
-                    "name": name,
-                    "always_true": False,
-                    "sentinel_condition": set_sentinel_condition,
-                    "is_array": is_array,
-                    "rank": array_rank,
-                    "element_condition": element_condition,
-                }
+            fields.append(
+                FieldSpec(
+                    order=index,
+                    name=name,
+                    title=title,
+                    description=description,
+                    declaration=declaration_with_doc,
+                    local_declaration=local_decl,
+                    required=is_required,
+                    sentinel_assignment=sentinel_assignment,
+                    sentinel_check=(
+                        f"if ({sentinel_condition}) error stop "
+                        f"\"{module_name}%from_file: '{name}' is required\""
+                        if sentinel_condition and is_required
+                        else None
+                    ),
+                    default_assignment=default_assignment,
+                    set_default_assignment=set_default_assignment,
+                    set_present_assignment=set_present_assignment,
+                    argument_declaration=argument_decl,
+                    type_category=type_info.category,
+                )
             )
 
-        fields.append(
-            FieldSpec(
-                order=index,
-                name=name,
-                title=title,
-                description=description,
-                declaration=declaration_with_doc,
-                local_declaration=local_decl,
-                required=is_required,
-                sentinel_assignment=sentinel_assignment,
-                sentinel_check=(
-                    f"if ({sentinel_condition}) error stop "
-                    f"\"{module_name}%from_file: '{name}' is required\""
-                    if sentinel_condition and is_required
-                    else None
-                ),
-                default_assignment=default_assignment,
-                set_default_assignment=set_default_assignment,
-                set_present_assignment=set_present_assignment,
-                argument_declaration=argument_decl,
-                type_category=type_info.category,
-            )
-        )
-
+    except ValueError as exc:
+        if current_property is None:
+            raise
+        msg = str(exc)
+        if f"property '{current_property}'" in msg:
+            raise
+        raise ValueError(f"property '{current_property}': {msg}") from exc
     namelist_vars = [field.name for field in fields]
     required_fields_specs = [field for field in fields if field.required]
     optional_fields_specs = [field for field in fields if not field.required]

@@ -163,7 +163,7 @@ def test_generate_fortran_requires_array_shape(tmp_path: Path) -> None:
     }
 
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match="x-fortran-shape"):
+    with pytest.raises(ValueError, match=r".*x-fortran-shape"):
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
@@ -186,7 +186,7 @@ def test_generate_fortran_rejects_nested_arrays(tmp_path: Path) -> None:
     }
 
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match="nested array properties"):
+    with pytest.raises(ValueError, match=r".*nested array properties"):
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
@@ -207,7 +207,7 @@ def test_generate_fortran_requires_dimension_constants(tmp_path: Path) -> None:
     generate_fortran = _import_generate_fortran()
     with pytest.raises(
         ValueError,
-        match="dimension constant 'max_layers' is not defined in config",
+        match=r".*dimension constant 'max_layers' is not defined in config",
     ):
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 

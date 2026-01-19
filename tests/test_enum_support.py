@@ -100,7 +100,7 @@ def test_generate_fortran_rejects_array_enum_at_top_level(tmp_path: Path) -> Non
     }
 
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match="array enum must be defined on items"):
+    with pytest.raises(ValueError, match=r".*array enum must be defined on items"):
         generate_fortran(schema, tmp_path / "nml_bad.f90")
 
 

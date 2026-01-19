@@ -63,65 +63,85 @@ def generate_docs(
     lines.append(f"| {' | '.join(header)} |")
     lines.append(f"| {' | '.join('---' for _ in header)} |")
 
-    for name, prop in properties.items():
-        if not isinstance(prop, dict):
-            raise ValueError(f"property '{name}' must be an object")
-        type_info = _field_type_info(prop, constants)
-        _collect_dimension_constants(type_info.dimensions, constants)
-        type_label = _format_table_type(type_info)
-        info_label = _format_info(prop)
-        required_label = "yes" if name in required_set else "no"
-        row = [
-            f"`{name}`",
-            type_label,
-            required_label,
-            info_label,
-        ]
-        lines.append(f"| {' | '.join(_escape_table_cell(cell) for cell in row)} |")
+    current_property: str | None = None
+    try:
+        for name, prop in properties.items():
+            current_property = name
+            if not isinstance(prop, dict):
+                raise ValueError(f"property '{name}' must be an object")
+            type_info = _field_type_info(prop, constants)
+            _collect_dimension_constants(type_info.dimensions, constants)
+            type_label = _format_table_type(type_info)
+            info_label = _format_info(prop)
+            required_label = "yes" if name in required_set else "no"
+            row = [
+                f"`{name}`",
+                type_label,
+                required_label,
+                info_label,
+            ]
+            lines.append(f"| {' | '.join(_escape_table_cell(cell) for cell in row)} |")
+    except ValueError as exc:
+        if current_property is None:
+            raise
+        msg = str(exc)
+        if f"property '{current_property}'" in msg:
+            raise
+        raise ValueError(f"property '{current_property}': {msg}") from exc
 
     lines.append("")
 
     lines.append("## Field details")
     lines.append("")
 
-    for name, prop in properties.items():
-        if not isinstance(prop, dict):
-            raise ValueError(f"property '{name}' must be an object")
-        type_info = _field_type_info(prop, constants)
-        required_label = "yes" if name in required_set else "no"
-        default_label = _get_default_value(prop, type_info, constants)
-        enum_label = _get_enum_values(prop, type_info, constants)
-        example_values = _get_example_values(prop, type_info)
-        title = _get_title(prop)
-        description_text = _get_description(prop)
+    current_property = None
+    try:
+        for name, prop in properties.items():
+            current_property = name
+            if not isinstance(prop, dict):
+                raise ValueError(f"property '{name}' must be an object")
+            type_info = _field_type_info(prop, constants)
+            required_label = "yes" if name in required_set else "no"
+            default_label = _get_default_value(prop, type_info, constants)
+            enum_label = _get_enum_values(prop, type_info, constants)
+            example_values = _get_example_values(prop, type_info)
+            title = _get_title(prop)
+            description_text = _get_description(prop)
 
-        if title:
-            lines.append(f"### `{name}` - {title}")
-        else:
-            lines.append(f"### `{name}`")
-        lines.append("")
-        if description_text:
-            lines.append(description_text)
-            lines.append("")
-
-        lines.append("Summary:")
-        lines.append(f"- Type: `{_format_specific_type(type_info)}`")
-        lines.append(f"- Required: {required_label}")
-        if default_label is not None:
-            if isinstance(default_label, tuple):
-                base, note = default_label
-                if note:
-                    lines.append(f"- Default: `{base}` {note}")
-                else:
-                    lines.append(f"- Default: `{base}`")
+            if title:
+                lines.append(f"### `{name}` - {title}")
             else:
-                lines.append(f"- Default: `{default_label}`")
-        if enum_label is not None:
-            lines.append(f"- Allowed values: {enum_label}")
-        if example_values is not None:
-            examples_text = ", ".join(f"`{value}`" for value in example_values)
-            lines.append(f"- Examples: {examples_text}")
-        lines.append("")
+                lines.append(f"### `{name}`")
+            lines.append("")
+            if description_text:
+                lines.append(description_text)
+                lines.append("")
+
+            lines.append("Summary:")
+            lines.append(f"- Type: `{_format_specific_type(type_info)}`")
+            lines.append(f"- Required: {required_label}")
+            if default_label is not None:
+                if isinstance(default_label, tuple):
+                    base, note = default_label
+                    if note:
+                        lines.append(f"- Default: `{base}` {note}")
+                    else:
+                        lines.append(f"- Default: `{base}`")
+                else:
+                    lines.append(f"- Default: `{default_label}`")
+            if enum_label is not None:
+                lines.append(f"- Allowed values: {enum_label}")
+            if example_values is not None:
+                examples_text = ", ".join(f"`{value}`" for value in example_values)
+                lines.append(f"- Examples: {examples_text}")
+            lines.append("")
+    except ValueError as exc:
+        if current_property is None:
+            raise
+        msg = str(exc)
+        if f"property '{current_property}'" in msg:
+            raise
+        raise ValueError(f"property '{current_property}': {msg}") from exc
 
     lines.append("## Example")
     lines.append("")

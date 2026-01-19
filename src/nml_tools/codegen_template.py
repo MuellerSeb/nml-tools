@@ -143,39 +143,49 @@ def _render_template(
 
         lines.append(f"&{namelist_name}")
 
-        for name, prop in properties.items():
-            if not isinstance(prop, dict):
-                raise ValueError(f"property '{name}' must be an object")
-            type_info = _field_type_info(prop, constants)
-            _collect_dimension_constants(type_info.dimensions, constants)
-            _validate_kind_allowlist(type_info, kind_map, kind_allowlist)
+        current_property: str | None = None
+        try:
+            for name, prop in properties.items():
+                current_property = name
+                if not isinstance(prop, dict):
+                    raise ValueError(f"property '{name}' must be an object")
+                type_info = _field_type_info(prop, constants)
+                _collect_dimension_constants(type_info.dimensions, constants)
+                _validate_kind_allowlist(type_info, kind_map, kind_allowlist)
 
-            has_default = "default" in prop
-            has_override = name in override_values
-            if value_mode in {"minimal-empty", "minimal-filled"} and has_default:
-                if value_mode == "minimal-filled" and has_override:
-                    pass
-                else:
-                    continue
+                has_default = "default" in prop
+                has_override = name in override_values
+                if value_mode in {"minimal-empty", "minimal-filled"} and has_default:
+                    if value_mode == "minimal-filled" and has_override:
+                        pass
+                    else:
+                        continue
 
-            if doc_mode == "documented":
-                title = prop.get("title")
-                if isinstance(title, str) and title.strip():
-                    lines.append(f"  ! {title.strip()}")
+                if doc_mode == "documented":
+                    title = prop.get("title")
+                    if isinstance(title, str) and title.strip():
+                        lines.append(f"  ! {title.strip()}")
 
-            entries = _value_entries(
-                name,
-                prop,
-                type_info,
-                value_mode=value_mode,
-                override=override_values.get(name, _MISSING),
-                constants=constants,
-            )
-            for entry_name, value_text in entries:
-                if value_text is None:
-                    lines.append(f"  {entry_name} =")
-                else:
-                    lines.append(f"  {entry_name} = {value_text}")
+                entries = _value_entries(
+                    name,
+                    prop,
+                    type_info,
+                    value_mode=value_mode,
+                    override=override_values.get(name, _MISSING),
+                    constants=constants,
+                )
+                for entry_name, value_text in entries:
+                    if value_text is None:
+                        lines.append(f"  {entry_name} =")
+                    else:
+                        lines.append(f"  {entry_name} = {value_text}")
+        except ValueError as exc:
+            if current_property is None:
+                raise
+            msg = str(exc)
+            if f"property '{current_property}'" in msg:
+                raise
+            raise ValueError(f"property '{current_property}': {msg}") from exc
 
         lines.append("/")
         lines.append("")
