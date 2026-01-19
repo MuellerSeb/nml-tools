@@ -13,6 +13,17 @@ small JSON Schema-like specification with Fortran-focused extensions.
 - Outputs: Fortran module, helper module, Markdown docs, template namelist.
 - Config-driven CLI for batching multiple schemas.
 
+## Enum support
+
+- Enums are supported for strings and integers only.
+- For arrays, enums are defined on `items` (not on the array itself).
+- The generated Fortran module exposes public `*_enum_values` arrays and
+  elemental `*_in_enum` helpers.
+- Validation is opt-in: call `is_valid()` on the generated type to check
+  required values and enum constraints.
+- String enums compare against `trim(value)`; enum literals are stored with the
+  field length.
+
 ## Installation
 
 ```bash
