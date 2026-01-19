@@ -8,6 +8,8 @@ from typing import Any
 from .codegen_fortran import (
     FieldTypeInfo,
     _collect_dimension_constants,
+    _enum_category,
+    _enum_values,
     _field_type_info,
     _format_scalar_default,
     _parse_default_dimensions,
@@ -219,12 +221,11 @@ def _get_enum_values(
     type_info: FieldTypeInfo,
     constants: dict[str, int | float] | None,
 ) -> str | None:
-    enum = prop.get("enum")
-    if enum is None:
+    enum_values = _enum_values(prop, type_info, constants)
+    if enum_values is None:
         return None
-    if not isinstance(enum, list) or not enum:
-        raise ValueError("property enum must be a non-empty list")
-    values = [_format_default_plain(value, type_info, prop, constants) for value in enum]
+    category = _enum_category(type_info)
+    values = [_format_scalar_default(value, None, category) for value in enum_values]
     return ", ".join(f"`{value}`" for value in values)
 
 

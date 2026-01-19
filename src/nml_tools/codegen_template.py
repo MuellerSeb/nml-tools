@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from .codegen_fortran import (
     FieldTypeInfo,
     _collect_dimension_constants,
+    _enum_values,
     _field_type_info,
     _format_scalar_default,
     _parse_default_dimensions,
@@ -203,6 +204,8 @@ def _value_entries(
             entry_name = f"{name}{_array_slice(len(type_info.dimensions))}"
         return [(entry_name, None)]
 
+    enum_values = _enum_values(prop, type_info, constants)
+
     if override is not _MISSING:
         return _entries_from_value(name, override, type_info, prop, constants)
 
@@ -224,6 +227,9 @@ def _value_entries(
             return [(entry_name, scalar)]
         scalar = _format_scalar_default(default_value, None, type_info.category)
         return [(name, scalar)]
+
+    if enum_values:
+        return _entries_from_value(name, enum_values[0], type_info, prop, constants)
 
     if type_info.category == "array":
         scalar = _format_scalar_default(

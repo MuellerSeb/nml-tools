@@ -174,13 +174,15 @@ def _build_context(
 
     fields: list[FieldSpec] = []
     sentinel_assignments: list[str] = []
-    required_checks: list[str] = []
     default_assignments: list[str] = []
     set_optional_defaults: list[str] = []
     local_init_assignments: list[str] = []
     set_required_assignments: list[str] = []
     presence_cases: list[dict[str, Any]] = []
     default_parameters: list[str] = []
+    enum_parameters: list[str] = []
+    enum_functions: list[dict[str, Any]] = []
+    enum_checks: list[dict[str, Any]] = []
     kind_ids: list[str] = []
     requires_ieee = False
     helper_imports = ["nml_file_t"]
@@ -242,11 +244,6 @@ def _build_context(
             sentinel_assignments.append(sentinel_assignment)
             if uses_ieee:
                 requires_ieee = True
-            if is_required:
-                required_checks.append(
-                    f"if (.not. this%is_set('{name}')) error stop "
-                    f"\"{module_name}%from_file: '{name}' is required\""
-                )
             if not has_default and type_info.category != "boolean":
                 set_value_expr, set_condition_expr, set_uses_ieee = _sentinel_expressions(
                     type_info,
@@ -391,6 +388,61 @@ def _build_context(
             default_assignments.append(default_assignment)
             set_optional_defaults.append(set_default_assignment)
 
+        enum_values = _enum_values(prop, type_info, constants)
+        if enum_values is not None:
+            enum_category = _enum_category(type_info)
+            enum_const_name = f"{name}_enum_values"
+            enum_literals = [
+                _format_scalar_default(value, type_info.kind, enum_category)
+                for value in enum_values
+            ]
+            if enum_category == "string":
+                enum_array_literal = (
+                    f"[{type_info.type_spec} :: {', '.join(enum_literals)}]"
+                )
+            else:
+                enum_array_literal = f"[{', '.join(enum_literals)}]"
+            enum_parameters.append(
+                f"{type_info.type_spec}, parameter, public :: "
+                f"{enum_const_name}({len(enum_literals)}) = {enum_array_literal}"
+            )
+            enum_type_info = (
+                _element_type_info(type_info) if type_info.category == "array" else type_info
+            )
+            _, missing_condition, _ = _sentinel_expressions(
+                enum_type_info,
+                var_ref="val",
+                len_ref="val",
+            )
+            enum_functions.append(
+                {
+                    "name": name,
+                    "func_name": f"{name}_in_enum",
+                    "arg_type_spec": _enum_arg_type_spec(type_info),
+                    "enum_values_name": enum_const_name,
+                    "use_trim": enum_category == "string",
+                    "missing_condition": missing_condition,
+                }
+            )
+            if type_info.category == "array":
+                enum_checks.append(
+                    {
+                        "name": name,
+                        "func_name": f"{name}_in_enum",
+                        "is_array": True,
+                        "array_ref": f"this%{name}",
+                    }
+                )
+            else:
+                enum_checks.append(
+                    {
+                        "name": name,
+                        "func_name": f"{name}_in_enum",
+                        "is_array": False,
+                        "element_ref": f"this%{name}",
+                    }
+                )
+
         if is_required:
             set_required_assignments.append(f"this%{name} = {name}")
 
@@ -486,8 +538,9 @@ def _build_context(
         "sentinel_assignments": sentinel_assignments,
         "default_assignments": default_assignments,
         "default_parameters": default_parameters,
+        "enum_parameters": enum_parameters,
         "local_init_assignments": local_init_assignments,
-        "required_checks": required_checks,
+        "required_validations": required_fields,
         "assignments": [f"this%{field.name} = {field.name}" for field in fields],
         "argument_list": [field.name for field in required_fields_specs + optional_fields_specs],
         "required_argument_declarations": [
@@ -503,6 +556,8 @@ def _build_context(
             for field in optional_fields_specs
             if field.set_present_assignment
         ],
+        "enum_functions": enum_functions,
+        "enum_checks": enum_checks,
         "kind_module": resolved_kind_module,
         "kind_imports": _resolve_kind_imports(
             kind_ids,
@@ -619,6 +674,21 @@ def _element_type_info(type_info: FieldTypeInfo) -> FieldTypeInfo:
         length_expr=type_info.length_expr,
         element_category=None,
     )
+
+
+def _enum_category(type_info: FieldTypeInfo) -> str:
+    if type_info.category == "array":
+        if type_info.element_category is None:
+            raise ValueError("array field missing element category")
+        return type_info.element_category
+    return type_info.category
+
+
+def _enum_arg_type_spec(type_info: FieldTypeInfo) -> str:
+    category = _enum_category(type_info)
+    if category == "string":
+        return "character(len=*)"
+    return type_info.type_spec
 
 
 def _scalar_type_info(
@@ -1040,3 +1110,112 @@ def _ensure_flat_scalar_list(values: list[Any], description: str) -> list[Any]:
             raise ValueError(f"{description} must be a flat list")
         normalized.append(element)
     return normalized
+
+
+def _enum_values(
+    prop: dict[str, Any],
+    type_info: FieldTypeInfo,
+    constants: dict[str, int | float] | None,
+) -> list[Any] | None:
+    if type_info.category == "array":
+        enum_raw = _array_items_enum(prop)
+    else:
+        enum_raw = prop.get("enum")
+    if enum_raw is None:
+        return None
+    if not isinstance(enum_raw, list) or not enum_raw:
+        raise ValueError("property enum must be a non-empty list")
+    enum_values = _ensure_flat_scalar_list(enum_raw, "enum")
+    category = _enum_category(type_info)
+    if category not in {"integer", "string"}:
+        raise ValueError("enum only supported for integer or string values")
+    for value in enum_values:
+        _validate_enum_scalar(value, category, "enum")
+    _validate_enum_defaults(prop, type_info, enum_values, category, constants)
+    _validate_enum_examples(prop, type_info, enum_values, category)
+    return enum_values
+
+
+def _array_items_enum(prop: dict[str, Any]) -> list[Any] | None:
+    current = prop
+    while current.get("type") == "array":
+        if "enum" in current:
+            raise ValueError("array enum must be defined on items")
+        items = current.get("items")
+        if not isinstance(items, dict):
+            raise ValueError("array property must define 'items'")
+        current = items
+    return current.get("enum")
+
+
+def _validate_enum_scalar(value: Any, category: str, label: str) -> None:
+    if category == "integer":
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{label} values must be integers")
+        return
+    if category == "string":
+        if not isinstance(value, str):
+            raise ValueError(f"{label} values must be strings")
+        return
+    raise ValueError("enum only supported for integer or string values")
+
+
+def _ensure_enum_member(value: Any, enum_values: list[Any], category: str, label: str) -> None:
+    _validate_enum_scalar(value, category, label)
+    if value not in enum_values:
+        raise ValueError(f"{label} value must be one of enum values")
+
+
+def _validate_enum_defaults(
+    prop: dict[str, Any],
+    type_info: FieldTypeInfo,
+    enum_values: list[Any],
+    category: str,
+    constants: dict[str, int | float] | None,
+) -> None:
+    if "default" not in prop:
+        return
+    default_value = prop["default"]
+    if type_info.category == "array":
+        if isinstance(default_value, list):
+            values = _ensure_flat_scalar_list(default_value, "array default")
+            _parse_default_dimensions(type_info.dimensions, constants)
+            for value in values:
+                _ensure_enum_member(value, enum_values, category, "default")
+        else:
+            _ensure_enum_member(default_value, enum_values, category, "default")
+        pad_raw = prop.get("x-fortran-default-pad")
+        if pad_raw is not None:
+            pad_values = pad_raw if isinstance(pad_raw, list) else [pad_raw]
+            pad_values = _ensure_flat_scalar_list(pad_values, "array default pad")
+            for value in pad_values:
+                _ensure_enum_member(value, enum_values, category, "pad")
+        return
+    if isinstance(default_value, list):
+        raise ValueError("scalar default must not be a list")
+    _ensure_enum_member(default_value, enum_values, category, "default")
+
+
+def _validate_enum_examples(
+    prop: dict[str, Any],
+    type_info: FieldTypeInfo,
+    enum_values: list[Any],
+    category: str,
+) -> None:
+    examples = prop.get("examples")
+    if examples is None:
+        return
+    if not isinstance(examples, list):
+        raise ValueError("property examples must be a list")
+    for example in examples:
+        if type_info.category == "array":
+            if isinstance(example, list):
+                values = _ensure_flat_scalar_list(example, "array examples")
+                for value in values:
+                    _ensure_enum_member(value, enum_values, category, "example")
+            else:
+                _ensure_enum_member(example, enum_values, category, "example")
+        else:
+            if isinstance(example, list):
+                raise ValueError("scalar examples must not be lists")
+            _ensure_enum_member(example, enum_values, category, "example")
