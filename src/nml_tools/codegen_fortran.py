@@ -365,9 +365,7 @@ def _build_context(
                                     else f"[{pad_const_name}]"
                                 )
                             arguments.append(f"pad={pad_expr}")
-                        default_assignment = (
-                            f"this%{name} = reshape({', '.join(arguments)})"
-                        )
+                        default_assignment = _format_reshape_assignment(name, arguments)
                 set_default_assignment = default_assignment
             else:
                 default_literal = _format_default(prop["default"], type_info, prop, constants)
@@ -950,6 +948,14 @@ def _sentinel_expressions(
     if category == "boolean":
         raise ValueError("boolean values cannot use sentinels")
     raise ValueError(f"unsupported sentinel category '{category}'")
+
+
+def _format_reshape_assignment(name: str, arguments: list[str]) -> str:
+    lines = [f"this%{name} = reshape( &"]
+    for index, arg in enumerate(arguments):
+        suffix = ", &" if index < len(arguments) - 1 else ")"
+        lines.append(f"  {arg}{suffix}")
+    return "\n".join(lines)
 
 
 def _format_default(

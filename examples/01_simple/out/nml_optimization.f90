@@ -65,7 +65,11 @@ contains
     this%seed = seed_default
     this%dds_r = dds_r_default
     this%mcmc_opti = mcmc_opti_default ! bool values always need a default
-    this%mcmc_error_params = reshape(mcmc_error_params_default, shape=[3, 2, max_iter], order=[3, 2, 1], pad=mcmc_error_params_default)
+    this%mcmc_error_params = reshape( &
+      mcmc_error_params_default, &
+      shape=[3, 2, max_iter], &
+      order=[3, 2, 1], &
+      pad=mcmc_error_params_default)
   end subroutine nml_optimization_init
 
   !> \brief Read optimization namelist from file
