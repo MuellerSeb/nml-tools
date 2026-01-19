@@ -24,6 +24,112 @@ small JSON Schema-like specification with Fortran-focused extensions.
 - String enums compare against `trim(value)`; enum literals are stored with the
   field length.
 
+## Fortran extensions (x-fortran-*)
+
+These keywords extend JSON Schema with Fortran-specific requirements.
+
+### x-fortran-namelist
+
+- Location: schema root.
+- Type: string.
+- Meaning: name of the Fortran namelist block.
+
+Example:
+
+```yaml
+x-fortran-namelist: optimization
+```
+
+### x-fortran-kind
+
+- Location: integer/number properties or array `items`.
+- Type: string.
+- Meaning: Fortran kind identifier (mapped via `[kinds]` in the config).
+- If omitted, plain `integer`/`real` is used.
+
+Example:
+
+```yaml
+count:
+  type: integer
+  x-fortran-kind: i4
+```
+
+### x-fortran-len
+
+- Location: string properties or array `items`.
+- Type: integer literal or identifier.
+- Meaning: Fortran character length (`character(len=...)`).
+- Identifiers must be defined in `[constants]` in the config and be integers.
+
+Example:
+
+```yaml
+name:
+  type: string
+  x-fortran-len: buf
+```
+
+### x-fortran-shape
+
+- Location: array properties.
+- Type: integer, identifier, or list of integers/identifiers.
+- Meaning: Fortran array dimensions; identifiers are resolved via `[constants]`.
+- Required; deferred-size dimensions are not supported.
+- Nested arrays are not supported. Use a single array with a shape list for
+  multi-dimensional arrays.
+
+Example:
+
+```yaml
+values:
+  type: array
+  x-fortran-shape: [3, 2, max_iter]
+  items:
+    type: number
+    x-fortran-kind: dp
+```
+
+### x-fortran-default-order
+
+- Location: array properties with `default`.
+- Type: string (`F` or `C`, default `F`).
+- Meaning: memory order used when reshaping defaults.
+
+Example:
+
+```yaml
+x-fortran-default-order: C
+```
+
+### x-fortran-default-repeat
+
+- Location: array properties with `default`.
+- Type: boolean.
+- Meaning: repeat the provided default values to fill the full shape.
+- When the default is a scalar, it is broadcast to the whole array.
+- Cannot be used together with `x-fortran-default-pad`.
+
+Example:
+
+```yaml
+x-fortran-default-repeat: true
+```
+
+### x-fortran-default-pad
+
+- Location: array properties with `default`.
+- Type: scalar or list of scalars.
+- Meaning: pad values used to fill the array if the default list is shorter
+  than the shape.
+- Cannot be used together with `x-fortran-default-repeat`.
+
+Example:
+
+```yaml
+x-fortran-default-pad: 0
+```
+
 ## Installation
 
 ```bash
