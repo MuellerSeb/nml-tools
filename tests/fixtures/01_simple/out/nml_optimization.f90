@@ -37,6 +37,7 @@ module nml_optimization
     procedure :: from_file => nml_optimization_from_file
     procedure :: set => nml_optimization_set
     procedure :: is_set => nml_optimization_is_set
+    procedure :: is_valid => nml_optimization_is_valid
   end type nml_optimization_t
 
 contains
@@ -55,7 +56,11 @@ contains
     this%seed = seed_default
     this%dds_r = dds_r_default
     this%mcmc_opti = mcmc_opti_default ! bool values always need a default
-    this%mcmc_error_params = reshape(mcmc_error_params_default, shape=[3, 2, max_iter], order=[3, 2, 1], pad=mcmc_error_params_default)
+    this%mcmc_error_params = reshape( &
+      mcmc_error_params_default, &
+      shape=[3, 2, max_iter], &
+      order=[3, 2, 1], &
+      pad=mcmc_error_params_default)
   end subroutine nml_optimization_init
 
   !> \brief Read optimization namelist from file
@@ -122,9 +127,6 @@ contains
     this%mcmc_opti = mcmc_opti
     this%mcmc_error_params = mcmc_error_params
 
-    ! check required parameters
-    if (.not. this%is_set('niterations')) error stop "nml_optimization%from_file: 'niterations' is required"
-    if (.not. this%is_set('tolerance')) error stop "nml_optimization%from_file: 'tolerance' is required"
     ! mark as configured
     this%is_configured = .true.
   end subroutine nml_optimization_from_file
@@ -217,5 +219,22 @@ contains
       error stop "nml_optimization%is_set: unknown field '" // trim(name) // "'"
     end select
   end function nml_optimization_is_set
+
+  !> \brief Validate required values and constraints
+  logical function nml_optimization_is_valid(this) result(is_valid)
+    class(nml_optimization_t), intent(in) :: this
+
+    is_valid = .true.
+
+    ! required parameters
+    if (.not. this%is_set("niterations")) then
+      is_valid = .false.
+      return
+    end if
+    if (.not. this%is_set("tolerance")) then
+      is_valid = .false.
+      return
+    end if
+  end function nml_optimization_is_valid
 
 end module nml_optimization
