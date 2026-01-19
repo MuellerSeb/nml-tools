@@ -1,7 +1,6 @@
-title: MHM optimization namelist
+title: Optimization configurations
 description: |-
-  All relevant configurations for the optimization parameters of MHM.
-  This namelist corresponds to the `optimization` section in the MHM configuration.
+  All relevant configurations for the optimization parameters.
 x-fortran-namelist: optimization
 type: object
 properties:
@@ -11,6 +10,32 @@ properties:
     type: string
     x-fortran-len: buf
     examples: [test_optimization]
+  method:
+    title: Optimization method
+    description: Optimization algorithm to be used.
+    type: string
+    x-fortran-len: buf
+    enum: [DDS, MCMC, SCE]
+  try_methods:
+    title: Try alternative methods
+    description: Whether to try alternative optimization methods if the primary fails.
+    type: array
+    items:
+      type: string
+      x-fortran-len: buf
+      enum: [DDS, MCMC, SCE]
+    x-fortran-shape: [3]
+    examples: [[MCMC, DDS, SCE]]
+  complex_sizes:
+    title: Complex sizes for SCE
+    description: Sizes of complexes for the SCE optimization method.
+    type: array
+    items:
+      type: integer
+      x-fortran-kind: i4
+      enum: [5, 10, 15, 20, 30]
+    x-fortran-shape: [3]
+    examples: [[5, 10, 15]]
   niterations:
     title: Number of iterations
     description: Number of iterations for the optimization algorithm
@@ -51,5 +76,6 @@ properties:
     x-fortran-default-order: C
     default: [0.01, 0.6, 0.2, 0.3]
 required:
+  - method
   - niterations
   - tolerance
