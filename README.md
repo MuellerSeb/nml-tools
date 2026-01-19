@@ -130,6 +130,76 @@ Example:
 x-fortran-default-pad: 0
 ```
 
+## Configuration (nml-config.toml)
+
+The CLI reads a TOML config file. Paths are resolved relative to the config
+file location.
+
+### [helper]
+
+Controls the generated helper module.
+
+- `path` (string, required to generate helper): output file for the helper module.
+- `module` (string, optional): Fortran module name (default: `nml_helper`).
+- `buffer` (int, optional): line buffer length for the helper module.
+- `header` (string, optional): text inserted at the top of the helper file.
+
+### [constants]
+
+Named constants used for dimensions and string lengths.
+
+- Each entry is a table with `value` (int/float) and optional `doc`.
+- Values must be plain numbers (no kind suffixes).
+
+Example:
+
+```toml
+[constants.max_iter]
+value = 4
+doc = "Maximum number of iterations."
+```
+
+### [kinds]
+
+Defines the kind module and allowed kinds.
+
+- `module` (string): Fortran module to `use`.
+- `real` (list of strings): allowed real kinds.
+- `integer` (list of strings): allowed integer kinds.
+- `map` (table, optional): schema kind name → module kind name.
+
+### [documentation]
+
+Optional extra module documentation appended after the generated `\brief` and
+`\details`. Multiline strings are supported and Doxygen formatting is allowed.
+
+### namelists (array)
+
+Schema entries to generate per-namelist outputs.
+
+- `schema` (string): schema file path.
+- `mod_path` (string, optional): Fortran module output path.
+- `doc_path` (string, optional): Markdown output path.
+
+If a path is omitted, that output is not generated.
+
+### templates (array)
+
+Template namelist output configuration.
+
+- `output` (string): template namelist output path.
+- `schemas` (list of strings): schemas included in the template file.
+- `doc_mode`: `plain` or `documented`.
+- `value_mode`: `empty`, `filled`, `minimal-empty`, or `minimal-filled`.
+
+Optional values can override per-namelist fields for filled modes:
+
+```toml
+[templates.values.optimization]
+niterations = 4
+tolerance = 0.1
+```
+
 ## Installation
 
 ```bash
