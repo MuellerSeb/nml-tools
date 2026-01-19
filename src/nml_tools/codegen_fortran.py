@@ -633,6 +633,10 @@ def _field_type_info(
             items = current.get("items")
             if not isinstance(items, dict):
                 raise ValueError("array property must define 'items'")
+            if items.get("type") == "array":
+                raise ValueError(
+                    "nested array properties are not supported; use x-fortran-shape"
+                )
             current = items
         scalar = _scalar_type_info(current, constants)
         return FieldTypeInfo(
@@ -810,7 +814,7 @@ def _extract_dimensions(prop: dict[str, Any]) -> list[str]:
             dimensions.append(dim_literal)
         return dimensions
     if shape is None:
-        return [":"]
+        raise ValueError("array property must define 'x-fortran-shape'")
     raise ValueError("array property 'x-fortran-shape' must be an int, string, or list")
 
 
