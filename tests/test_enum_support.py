@@ -109,9 +109,7 @@ def test_template_uses_enum_fallback_value() -> None:
         "title": "Enum template",
         "x-fortran-namelist": "enum_nml",
         "type": "object",
-        "properties": {
-            "method": {"type": "string", "x-fortran-len": 4, "enum": ["DDS", "MCMC"]}
-        },
+        "properties": {"method": {"type": "string", "x-fortran-len": 4, "enum": ["DDS", "MCMC"]}},
     }
 
     render_template = _import_render_template()
@@ -125,9 +123,7 @@ def test_generate_docs_includes_enum_values_and_example(tmp_path: Path) -> None:
         "title": "Enum docs",
         "x-fortran-namelist": "enum_nml",
         "type": "object",
-        "properties": {
-            "method": {"type": "string", "x-fortran-len": 4, "enum": ["DDS", "MCMC"]}
-        },
+        "properties": {"method": {"type": "string", "x-fortran-len": 4, "enum": ["DDS", "MCMC"]}},
     }
 
     output = tmp_path / "enum.md"

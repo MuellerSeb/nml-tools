@@ -272,8 +272,7 @@ def _format_example_value(value: Any, type_info: FieldTypeInfo) -> str:
     if type_info.category == "array":
         if isinstance(value, list):
             formatted = [
-                _format_scalar_default(item, None, type_info.element_category)
-                for item in value
+                _format_scalar_default(item, None, type_info.element_category) for item in value
             ]
             return f"[{', '.join(formatted)}]"
         return _format_scalar_default(value, None, type_info.element_category)
@@ -364,8 +363,7 @@ def _format_array_default_display(
     if pad_raw is not None:
         pad_list = pad_raw if isinstance(pad_raw, list) else [pad_raw]
         pad_elements = [
-            _format_scalar_default(value, None, type_info.element_category)
-            for value in pad_list
+            _format_scalar_default(value, None, type_info.element_category) for value in pad_list
         ]
         if isinstance(pad_raw, list):
             pad_text = f"[{', '.join(pad_elements)}]"

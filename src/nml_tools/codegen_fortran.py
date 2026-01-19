@@ -241,7 +241,8 @@ def _build_context(
                     var_ref=f"this%{name}",
                 )
                 sentinel_assignment = (
-                    f"this%{name} = {value_expr}{_sentinel_comment(type_info, required=is_required)}"
+                    f"this%{name} = {value_expr}"
+                    f"{_sentinel_comment(type_info, required=is_required)}"
                 )
                 sentinel_condition = condition_expr
                 sentinel_assignments.append(sentinel_assignment)
@@ -257,9 +258,7 @@ def _build_context(
                     set_sentinel_condition = set_condition_expr
                     if needs_sentinel:
                         sent_com = _sentinel_comment(type_info, required=False)
-                        set_optional_defaults.append(
-                            f"this%{name} = {set_value_expr}{sent_com}"
-                        )
+                        set_optional_defaults.append(f"this%{name} = {set_value_expr}{sent_com}")
 
             default_assignment: str | None = None
             set_default_assignment: str | None = None
@@ -303,7 +302,8 @@ def _build_context(
                         else:
                             default_parameters.append(
                                 f"{type_info.type_spec}, parameter, public :: "
-                                f"{pad_const_name}({len(pad_elements)}) = [{', '.join(pad_elements)}]"
+                                f"{pad_const_name}({len(pad_elements)}) = "
+                                f"[{', '.join(pad_elements)}]"
                             )
 
                     if default_is_scalar:
@@ -378,7 +378,8 @@ def _build_context(
                     )
                     if type_info.category == "boolean":
                         default_assignment = (
-                            f"this%{name} = {default_const_name} ! bool values always need a default"
+                            f"this%{name} = {default_const_name} "
+                            "! bool values always need a default"
                         )
                     else:
                         default_assignment = f"this%{name} = {default_const_name}"
@@ -398,9 +399,7 @@ def _build_context(
                     for value in enum_values
                 ]
                 if enum_category == "string":
-                    enum_array_literal = (
-                        f"[{type_info.type_spec} :: {', '.join(enum_literals)}]"
-                    )
+                    enum_array_literal = f"[{type_info.type_spec} :: {', '.join(enum_literals)}]"
                 else:
                     enum_array_literal = f"[{', '.join(enum_literals)}]"
                 enum_parameters.append(
@@ -608,9 +607,7 @@ def _resolve_kind_imports(
                 raise ValueError(f"kind map target for '{kind_id}' must be a string")
             target = mapped
         elif allowlist is not None and kind_id not in allowlist:
-            raise ValueError(
-                f"kind '{kind_id}' not present in kind map or kind module list"
-            )
+            raise ValueError(f"kind '{kind_id}' not present in kind map or kind module list")
 
         if allowlist is not None and target not in allowlist:
             raise ValueError(
@@ -644,9 +641,7 @@ def _field_type_info(
             if not isinstance(items, dict):
                 raise ValueError("array property must define 'items'")
             if items.get("type") == "array":
-                raise ValueError(
-                    "nested array properties are not supported; use x-fortran-shape"
-                )
+                raise ValueError("nested array properties are not supported; use x-fortran-shape")
             current = items
         scalar = _scalar_type_info(current, constants)
         return FieldTypeInfo(
@@ -731,13 +726,9 @@ def _scalar_type_info(
                     )
                 value = constants[length_expr]
                 if isinstance(value, bool) or not isinstance(value, int):
-                    raise ValueError(
-                        f"string length constant '{length_expr}' must be an integer"
-                    )
+                    raise ValueError(f"string length constant '{length_expr}' must be an integer")
                 if value <= 0:
-                    raise ValueError(
-                        f"string length constant '{length_expr}' must be positive"
-                    )
+                    raise ValueError(f"string length constant '{length_expr}' must be positive")
         else:
             raise ValueError("string property must define integer 'x-fortran-len'")
         return ScalarTypeInfo(
@@ -813,13 +804,9 @@ def _extract_dimensions(prop: dict[str, Any]) -> list[str]:
             elif isinstance(dim, str):
                 dim_literal = dim.strip()
                 if not dim_literal:
-                    raise ValueError(
-                        "array property 'x-fortran-shape' entries must be non-empty"
-                    )
+                    raise ValueError("array property 'x-fortran-shape' entries must be non-empty")
             else:
-                raise ValueError(
-                    "array property 'x-fortran-shape' must be an int, string, or list"
-                )
+                raise ValueError("array property 'x-fortran-shape' must be an int, string, or list")
             _validate_dimension_token(dim_literal)
             dimensions.append(dim_literal)
         return dimensions

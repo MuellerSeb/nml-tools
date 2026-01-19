@@ -101,13 +101,9 @@ def _render_template(
         if not isinstance(namelist_name, str):
             raise ValueError("template values namelist names must be strings")
         if namelist_name not in schema_by_name:
-            raise ValueError(
-                f"template values namelist '{namelist_name}' not found in schemas"
-            )
+            raise ValueError(f"template values namelist '{namelist_name}' not found in schemas")
         if not isinstance(namelist_values, dict):
-            raise ValueError(
-                f"template values for namelist '{namelist_name}' must be a table"
-            )
+            raise ValueError(f"template values for namelist '{namelist_name}' must be a table")
         properties = schema_by_name[namelist_name].get("properties")
         if not isinstance(properties, dict) or not properties:
             raise ValueError("schema must define object 'properties'")
@@ -131,9 +127,7 @@ def _render_template(
         if not isinstance(properties, dict) or not properties:
             raise ValueError("schema must define object 'properties'")
         override_values = (
-            values_map.get(namelist_name, {})
-            if value_mode in {"filled", "minimal-filled"}
-            else {}
+            values_map.get(namelist_name, {}) if value_mode in {"filled", "minimal-filled"} else {}
         )
 
         if doc_mode == "documented":
@@ -338,8 +332,7 @@ def _slice_entry_name(
 
 def _format_value_list(values: list[Any], type_info: FieldTypeInfo) -> str:
     formatted = [
-        _format_scalar_default(value, None, type_info.element_category)
-        for value in values
+        _format_scalar_default(value, None, type_info.element_category) for value in values
     ]
     return ", ".join(formatted)
 
