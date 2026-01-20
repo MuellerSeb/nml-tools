@@ -185,7 +185,23 @@ def _build_context(
     enum_checks: list[dict[str, Any]] = []
     kind_ids: list[str] = []
     requires_ieee = False
-    helper_imports = ["nml_file_t"]
+    helper_imports = [
+        "nml_file_t",
+        "nml_line_buffer",
+        "NML_OK",
+        "NML_ERR_FILE_NOT_FOUND",
+        "NML_ERR_OPEN",
+        "NML_ERR_NOT_OPEN",
+        "NML_ERR_NML_NOT_FOUND",
+        "NML_ERR_READ",
+        "NML_ERR_CLOSE",
+        "NML_ERR_REQUIRED",
+        "NML_ERR_ENUM",
+        "NML_ERR_NOT_SET",
+        "NML_ERR_INVALID_NAME",
+        "NML_ERR_INVALID_INDEX",
+        "idx_check",
+    ]
 
     current_property: str | None = None
     try:
