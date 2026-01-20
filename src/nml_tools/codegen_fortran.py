@@ -257,7 +257,7 @@ def _build_context(
             requires_sentinel = is_required or needs_sentinel
 
             arg_dimensions = type_info.dimensions
-            if flex_dim > 0 and type_info.category == "array":
+            if type_info.category == "array" and (flex_dim > 0 or has_default):
                 arg_dimensions = [":" for _ in type_info.dimensions]
             argument_decl = _render_argument_declaration(
                 name=name,
@@ -326,6 +326,8 @@ def _build_context(
                 if uses_ieee:
                     requires_ieee = True
 
+            flex_bounds: list[dict[str, Any]] | None = None
+            partial_bounds: list[dict[str, Any]] | None = None
             if flex_dim > 0:
                 rank = len(type_info.dimensions)
                 element_category = type_info.element_category
@@ -361,6 +363,7 @@ def _build_context(
                     len_ref=f"this%{name}",
                 )
                 prefix_any_missing_condition = f"any({prefix_missing_expr})"
+                flex_bounds = bounds
                 flex_arrays.append(
                     {
                         "name": name,
@@ -375,6 +378,15 @@ def _build_context(
                 uses_partly_set = True
                 if slice_uses_ieee or uses_ieee_prefix:
                     requires_ieee = True
+            elif type_info.category == "array" and has_default:
+                rank = len(type_info.dimensions)
+                bounds = []
+                for dim in range(1, rank + 1):
+                    lb_var, ub_var = _flex_bound_vars(dim)
+                    bounds.append({"dim": dim, "lb_var": lb_var, "ub_var": ub_var})
+                    flex_bound_vars.add(lb_var)
+                    flex_bound_vars.add(ub_var)
+                partial_bounds = bounds
 
             default_assignment: str | None = None
             set_default_assignment: str | None = None
@@ -567,7 +579,15 @@ def _build_context(
                             name,
                             len(type_info.dimensions),
                             flex_dim,
-                            bounds,
+                            flex_bounds or [],
+                        )
+                    )
+                elif is_array and has_default:
+                    set_required_assignments.append(
+                        _render_partial_set_block(
+                            name,
+                            len(type_info.dimensions),
+                            partial_bounds or [],
                         )
                     )
                 else:
@@ -579,7 +599,17 @@ def _build_context(
                         name,
                         len(type_info.dimensions),
                         flex_dim,
-                        bounds,
+                        flex_bounds or [],
+                    )
+                    indented_block = "\n".join(f"  {line}" for line in block.splitlines())
+                    set_present_assignment = (
+                        f"if (present({name})) then\n{indented_block}\nend if"
+                    )
+                elif is_array and has_default:
+                    block = _render_partial_set_block(
+                        name,
+                        len(type_info.dimensions),
+                        partial_bounds or [],
                     )
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
@@ -1217,6 +1247,28 @@ def _render_flex_set_block(
         lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
         lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
     lines.append(f"{_slice_ref_bounds(name, rank, flex_dims, lb_vars, ub_vars)} = {name}")
+    return "\n".join(lines)
+
+
+def _render_partial_set_block(name: str, rank: int, bounds: list[dict[str, Any]]) -> str:
+    lb_vars = {entry["dim"]: entry["lb_var"] for entry in bounds}
+    ub_vars = {entry["dim"]: entry["ub_var"] for entry in bounds}
+    dims_all = [entry["dim"] for entry in bounds]
+    lines: list[str] = []
+    for entry in bounds:
+        dim = entry["dim"]
+        lb_var = entry["lb_var"]
+        ub_var = entry["ub_var"]
+        lines.append(f"if (size({name}, {dim}) > size(this%{name}, {dim})) then")
+        lines.append("  status = NML_ERR_INVALID_INDEX")
+        lines.append(
+            f"  if (present(errmsg)) errmsg = \"dimension {dim} exceeds bounds for '{name}'\""
+        )
+        lines.append("  return")
+        lines.append("end if")
+        lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
+        lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
+    lines.append(f"{_slice_ref_bounds(name, rank, dims_all, lb_vars, ub_vars)} = {name}")
     return "\n".join(lines)
 
 
