@@ -228,6 +228,12 @@ Notes:
 - `is_set` returns `NML_ERR_NOT_SET` if a value is missing, and
   `NML_ERR_INVALID_NAME`/`NML_ERR_INVALID_INDEX` on misuse.
 
+## Documentation format
+
+Generated Fortran doc-strings are currently tailored for Doxygen. Future
+versions may make this configurable to support other tools such as FORD or the
+Sphinx Fortran domain.
+
 ## Installation
 
 ```bash
