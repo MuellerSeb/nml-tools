@@ -22,7 +22,8 @@ module nml_optimization
     NML_ERR_INVALID_INDEX, &
     idx_check, &
     buf, &
-    max_iter
+    max_iter, &
+    NML_ERR_PARTLY_SET
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -35,7 +36,6 @@ module nml_optimization
   integer(i4), parameter, public :: seed_default = -9_i4
   real(dp), parameter, public :: dds_r_default = 0.2_dp
   logical, parameter, public :: mcmc_opti_default = .true.
-  real(dp), parameter, public :: mcmc_error_params_default(4) = [0.01_dp, 0.6_dp, 0.2_dp, 0.3_dp]
 
   ! enum values
   character(len=buf), parameter, public :: method_enum_values(3) = [character(len=buf) :: 'DDS', 'MCMC', 'SCE']
@@ -62,6 +62,7 @@ module nml_optimization
     procedure :: from_file => nml_optimization_from_file
     procedure :: set => nml_optimization_set
     procedure :: is_set => nml_optimization_is_set
+    procedure :: filled_shape => nml_optimization_filled_shape
     procedure :: is_valid => nml_optimization_is_valid
   end type nml_optimization_t
 
@@ -131,15 +132,11 @@ contains
     this%complex_sizes = -huge(this%complex_sizes) ! sentinel for optional integer array
     this%niterations = -huge(this%niterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
+    this%mcmc_error_params = ieee_value(this%mcmc_error_params, ieee_quiet_nan) ! sentinel for required real array
     ! default values
     this%seed = seed_default
     this%dds_r = dds_r_default
     this%mcmc_opti = mcmc_opti_default ! bool values always need a default
-    this%mcmc_error_params = reshape( &
-      mcmc_error_params_default, &
-      shape=[3, 2, max_iter], &
-      order=[3, 2, 1], &
-      pad=mcmc_error_params_default)
   end function nml_optimization_init
 
   !> \brief Read optimization namelist from file
@@ -234,13 +231,13 @@ contains
     method, &
     niterations, &
     tolerance, &
+    mcmc_error_params, &
     name, &
     try_methods, &
     complex_sizes, &
     seed, &
     dds_r, &
     mcmc_opti, &
-    mcmc_error_params, &
     errmsg) result(status)
 
     class(nml_optimization_t), intent(inout) :: this
@@ -248,13 +245,18 @@ contains
     character(len=*), intent(in) :: method
     integer, intent(in) :: niterations
     real, intent(in) :: tolerance
+    real(dp), dimension(:, :, :), intent(in) :: mcmc_error_params
     character(len=*), intent(in), optional :: name
     character(len=*), dimension(3), intent(in), optional :: try_methods
     integer(i4), dimension(3), intent(in), optional :: complex_sizes
     integer(i4), intent(in), optional :: seed
     real(dp), intent(in), optional :: dds_r
     logical, intent(in), optional :: mcmc_opti
-    real(dp), dimension(3, 2, max_iter), intent(in), optional :: mcmc_error_params
+    integer :: &
+      lb_2, &
+      lb_3, &
+      ub_2, &
+      ub_3
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -263,6 +265,26 @@ contains
     this%method = method
     this%niterations = niterations
     this%tolerance = tolerance
+    if (size(mcmc_error_params, 1) /= size(this%mcmc_error_params, 1)) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "dimension 1 mismatch for 'mcmc_error_params'"
+      return
+    end if
+    if (size(mcmc_error_params, 2) > size(this%mcmc_error_params, 2)) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'mcmc_error_params'"
+      return
+    end if
+    lb_2 = lbound(this%mcmc_error_params, 2)
+    ub_2 = lb_2 + size(mcmc_error_params, 2) - 1
+    if (size(mcmc_error_params, 3) > size(this%mcmc_error_params, 3)) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "dimension 3 exceeds bounds for 'mcmc_error_params'"
+      return
+    end if
+    lb_3 = lbound(this%mcmc_error_params, 3)
+    ub_3 = lb_3 + size(mcmc_error_params, 3) - 1
+    this%mcmc_error_params(:, lb_2:ub_2, lb_3:ub_3) = mcmc_error_params
     ! override with provided values
     if (present(name)) this%name = name
     if (present(try_methods)) this%try_methods = try_methods
@@ -270,7 +292,6 @@ contains
     if (present(seed)) this%seed = seed
     if (present(dds_r)) this%dds_r = dds_r
     if (present(mcmc_opti)) this%mcmc_opti = mcmc_opti
-    if (present(mcmc_error_params)) this%mcmc_error_params = mcmc_error_params
 
     ! mark as configured
     this%is_configured = .true.
@@ -356,7 +377,9 @@ contains
         status = idx_check(idx, lbound(this%mcmc_error_params), ubound(this%mcmc_error_params), &
           "mcmc_error_params", errmsg)
         if (status /= NML_OK) return
+        if (ieee_is_nan(this%mcmc_error_params(idx(1), idx(2), idx(3)))) status = NML_ERR_NOT_SET
       else
+        if (all(ieee_is_nan(this%mcmc_error_params))) status = NML_ERR_NOT_SET
       end if
     case default
       status = NML_ERR_INVALID_NAME
@@ -367,11 +390,71 @@ contains
     end if
   end function nml_optimization_is_set
 
+  !> \brief Determine the filled shape along flexible dimensions
+  integer function nml_optimization_filled_shape(this, name, filled, errmsg) result(status)
+    class(nml_optimization_t), intent(in) :: this
+    character(len=*), intent(in) :: name
+    integer, intent(out) :: filled(:)
+    character(len=*), intent(out), optional :: errmsg
+    integer :: idx
+    integer :: dim
+    integer :: &
+      lb_2, &
+      lb_3, &
+      ub_2, &
+      ub_3
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    select case (trim(name))
+    case ("mcmc_error_params")
+      if (size(filled) /= 3) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "shape rank mismatch for 'mcmc_error_params'"
+        return
+      end if
+      do dim = 1, 3
+        filled(dim) = size(this%mcmc_error_params, dim)
+      end do
+      filled(2) = 0
+      do idx = ubound(this%mcmc_error_params, 2), &
+        lbound(this%mcmc_error_params, 2), -1
+        if (.not. (all(ieee_is_nan(this%mcmc_error_params(:, idx, :))))) then
+          filled(2) = idx - lbound(this%mcmc_error_params, 2) + 1
+          exit
+        end if
+      end do
+      filled(3) = 0
+      do idx = ubound(this%mcmc_error_params, 3), &
+        lbound(this%mcmc_error_params, 3), -1
+        if (.not. (all(ieee_is_nan(this%mcmc_error_params(:, :, idx))))) then
+          filled(3) = idx - lbound(this%mcmc_error_params, 3) + 1
+          exit
+        end if
+      end do
+      if (minval(filled) > 0) then
+        lb_2 = lbound(this%mcmc_error_params, 2)
+        ub_2 = lb_2 + filled(2) - 1
+        lb_3 = lbound(this%mcmc_error_params, 3)
+        ub_3 = lb_3 + filled(3) - 1
+        if (any(ieee_is_nan(this%mcmc_error_params(:, lb_2:ub_2, lb_3:ub_3)))) then
+          status = NML_ERR_PARTLY_SET
+          if (present(errmsg)) errmsg = "array partly set: mcmc_error_params"
+          return
+        end if
+      end if
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "field is not a flexible array: " // trim(name)
+    end select
+  end function nml_optimization_filled_shape
+
   !> \brief Validate required values and constraints
   integer function nml_optimization_is_valid(this, errmsg) result(status)
     class(nml_optimization_t), intent(in) :: this
     character(len=*), intent(out), optional :: errmsg
     integer :: istat
+    integer, allocatable :: filled(:)
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -420,6 +503,26 @@ contains
     end if
     if (istat /= NML_OK) then
       status = istat
+      return
+    end if
+    ! flexible arrays
+    if (allocated(filled)) deallocate(filled)
+    allocate(filled(3))
+    istat = this%filled_shape("mcmc_error_params", filled, errmsg=errmsg)
+    if (istat == NML_ERR_PARTLY_SET) then
+      status = istat
+      if (present(errmsg)) then
+        if (len_trim(errmsg) == 0) errmsg = "array partly set: mcmc_error_params"
+      end if
+      return
+    end if
+    if (istat /= NML_OK) then
+      status = istat
+      return
+    end if
+    if (minval(filled) == 0) then
+      status = NML_ERR_REQUIRED
+      if (present(errmsg)) errmsg = "required field not set: mcmc_error_params"
       return
     end if
     ! enum constraints

@@ -7,7 +7,7 @@ program main
 
   type(nml_optimization_t) :: cfg
   character(len=256) :: file
-  integer :: status
+  integer :: status, shp(3)
   character(len=256) :: errmsg
 
   ! shorten string lengths for easier handling
@@ -47,10 +47,12 @@ program main
     size(cfg%mcmc_error_params, 2), &
     size(cfg%mcmc_error_params, 3)))
 
-  status = cfg%is_set("mcmc_error_params", idx=[1,2,3], errmsg=errmsg)
+  status = cfg%filled_shape("mcmc_error_params", filled=shp, errmsg=errmsg)
   if (status /= NML_OK) then
-    write(error_unit, '(a)') "field check failed: " // trim(errmsg)
+    write(error_unit, '(a)') "failed to get filled shape: " // trim(errmsg)
     stop status
+  else
+    write(*,*) "filled shape of mcmc_error_params: ", shp
   end if
 
   name = cfg%name

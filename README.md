@@ -9,7 +9,8 @@ small JSON Schema-like specification with Fortran-focused extensions.
 - Core keywords: `type`, `properties`, `required`, `default`, `enum`,
   `examples`, `title`, `description`.
 - Fortran extensions: `x-fortran-namelist`, `x-fortran-kind`,
-  `x-fortran-len`, `x-fortran-shape`, `x-fortran-default-*`.
+  `x-fortran-len`, `x-fortran-shape`, `x-fortran-flex-tail-dims`,
+  `x-fortran-default-*`.
 - Outputs: Fortran module, helper module, Markdown docs, template namelist.
 - Config-driven CLI for batching multiple schemas.
 
@@ -85,6 +86,28 @@ Example:
 values:
   type: array
   x-fortran-shape: [3, 2, max_iter]
+  items:
+    type: number
+    x-fortran-kind: dp
+```
+
+### x-fortran-flex-tail-dims
+
+- Location: array properties.
+- Type: integer.
+- Meaning: number of trailing dimensions that may be shorter than the declared
+  shape (0 disables flexibility).
+- Must be between 0 and the array rank; only trailing dimensions are supported.
+- Defaults and logical arrays are not supported for flexible arrays.
+- The generated type exposes `filled_shape()` to compute the used extent.
+
+Example:
+
+```yaml
+values:
+  type: array
+  x-fortran-shape: [3, 2, max_iter]
+  x-fortran-flex-tail-dims: 1
   items:
     type: number
     x-fortran-kind: dp
@@ -219,6 +242,7 @@ Status codes (defined in the helper module):
 | `NML_ERR_REQUIRED` (10) | required field missing |
 | `NML_ERR_ENUM` (11) | enum constraint failed |
 | `NML_ERR_NOT_SET` (12) | field not set (sentinel) |
+| `NML_ERR_PARTLY_SET` (13) | array partially set |
 | `NML_ERR_INVALID_NAME` (20) | unknown field name |
 | `NML_ERR_INVALID_INDEX` (21) | invalid index for array access |
 
