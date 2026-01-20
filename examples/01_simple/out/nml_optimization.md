@@ -1,7 +1,6 @@
-# MHM optimization namelist
+# Optimization configurations
 
-All relevant configurations for the optimization parameters of MHM.
-This namelist corresponds to the `optimization` section in the MHM configuration.
+All relevant configurations for the optimization parameters.
 
 **Namelist**: `optimization`
 
@@ -10,6 +9,9 @@ This namelist corresponds to the `optimization` section in the MHM configuration
 | Name | Type | Required | Info |
 | --- | --- | --- | --- |
 | `name` | string | no | Optimization name |
+| `method` | string | yes | Optimization method |
+| `try_methods` | string array | no | Try alternative methods |
+| `complex_sizes` | integer array | no | Complex sizes for SCE |
 | `niterations` | integer | yes | Number of iterations |
 | `tolerance` | real | yes | Convergence tolerance |
 | `seed` | integer | no | Random seed |
@@ -27,6 +29,35 @@ Summary:
 - Type: `character(len=buf)`
 - Required: no
 - Examples: `'test_optimization'`
+
+### `method` - Optimization method
+
+Optimization algorithm to be used.
+
+Summary:
+- Type: `character(len=buf)`
+- Required: yes
+- Allowed values: `'DDS'`, `'MCMC'`, `'SCE'`
+
+### `try_methods` - Try alternative methods
+
+Whether to try alternative optimization methods if the primary fails.
+
+Summary:
+- Type: `character(len=buf), dimension(3)`
+- Required: no
+- Allowed values: `'DDS'`, `'MCMC'`, `'SCE'`
+- Examples: `['MCMC', 'DDS', 'SCE']`
+
+### `complex_sizes` - Complex sizes for SCE
+
+Sizes of complexes for the SCE optimization method.
+
+Summary:
+- Type: `integer(i4), dimension(3)`
+- Required: no
+- Allowed values: `5`, `10`, `15`, `20`, `30`
+- Examples: `[5, 10, 15]`
 
 ### `niterations` - Number of iterations
 
@@ -86,6 +117,9 @@ Summary:
 ```fortran
 &optimization
   name = 'test_optimization'
+  method = 'DDS'
+  try_methods(:) = 'MCMC', 'DDS', 'SCE'
+  complex_sizes(:) = 5, 10, 15
   niterations = 100
   tolerance = 0.0
   seed = -9

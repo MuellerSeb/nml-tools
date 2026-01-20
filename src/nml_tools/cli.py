@@ -129,9 +129,7 @@ def _load_kind_settings(config: dict[str, Any]) -> tuple[str, dict[str, str], se
     integer_raw = kinds_raw.get("integer", [])
     if not isinstance(real_raw, list) or not all(isinstance(item, str) for item in real_raw):
         raise click.ClickException("config 'kinds.real' must be a list of strings")
-    if not isinstance(integer_raw, list) or not all(
-        isinstance(item, str) for item in integer_raw
-    ):
+    if not isinstance(integer_raw, list) or not all(isinstance(item, str) for item in integer_raw):
         raise click.ClickException("config 'kinds.integer' must be a list of strings")
     allowlist = set(real_raw) | set(integer_raw)
 
@@ -173,9 +171,7 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
                 f"config constant '{name}' must be a valid Fortran identifier"
             )
         if not isinstance(entry, dict):
-            raise click.ClickException(
-                f"config constant '{name}' must be a table with 'value'"
-            )
+            raise click.ClickException(f"config constant '{name}' must be a table with 'value'")
         if "value" not in entry:
             raise click.ClickException(f"config constant '{name}' must define 'value'")
         value = entry.get("value")
@@ -185,9 +181,7 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
         doc = entry.get("doc")
         if doc is not None:
             if not isinstance(doc, str):
-                raise click.ClickException(
-                    f"config constant '{name}' doc must be a string"
-                )
+                raise click.ClickException(f"config constant '{name}' doc must be a string")
             doc = " ".join(doc.splitlines()).strip() or None
         specs.append(
             ConstantSpec(

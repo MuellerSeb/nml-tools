@@ -25,6 +25,13 @@ module {{ module_name }}
 {% endfor %}
 
 {% endif %}
+{% if enum_parameters %}
+  ! enum values
+{% for stmt in enum_parameters %}
+  {{ stmt }}
+{% endfor %}
+
+{% endif %}
   !> \class {{ doc_class }}
   !> \brief {{ brief_text }}
   !> \details {{ details_text | replace('\n', '\n  !! ') }}
@@ -38,6 +45,7 @@ module {{ module_name }}
     procedure :: from_file => {{ type_prefix }}_from_file
     procedure :: set => {{ type_prefix }}_set
     procedure :: is_set => {{ type_prefix }}_is_set
+    procedure :: is_valid => {{ type_prefix }}_is_valid
   end type {{ type_name }}
 
 contains
@@ -108,12 +116,6 @@ contains
 {{ stmt | indent(4, True) }}
 {% endfor %}
 
-{% if required_checks %}
-    ! check required parameters
-{% for stmt in required_checks %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-{% endif %}
     ! mark as configured
     this%is_configured = .true.
   end subroutine {{ type_prefix }}_from_file
@@ -195,5 +197,64 @@ contains
       error stop "{{ type_prefix }}%is_set: unknown field '" // trim(name) // "'"
     end select
   end function {{ type_prefix }}_is_set
+
+{% if enum_functions %}
+  !> \brief Check whether a value is part of an enum
+{% for enum in enum_functions %}
+  elemental logical function {{ enum.func_name }}(val, allow_missing) result(in_enum)
+    {{ enum.arg_type_spec }}, intent(in) :: val
+    logical, intent(in), optional :: allow_missing
+
+    if (present(allow_missing)) then
+      if (allow_missing) then
+        if ({{ enum.missing_condition }}) then
+          in_enum = .true.
+          return
+        end if
+      end if
+    end if
+{% if enum.use_trim %}
+    in_enum = any(trim(val) == {{ enum.enum_values_name }})
+{% else %}
+    in_enum = any(val == {{ enum.enum_values_name }})
+{% endif %}
+  end function {{ enum.func_name }}
+
+{% endfor %}
+{% endif %}
+  !> \brief Validate required values and constraints
+  logical function {{ type_prefix }}_is_valid(this) result(is_valid)
+    class({{ type_name }}), intent(in) :: this
+
+    is_valid = .true.
+
+{% if required_validations %}
+    ! required parameters
+{% for name in required_validations %}
+    if (.not. this%is_set("{{ name }}")) then
+      is_valid = .false.
+      return
+    end if
+{% endfor %}
+{% endif %}
+{% if enum_checks %}
+    ! enum constraints
+{% for check in enum_checks %}
+{% if check.is_array %}
+    if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
+      is_valid = .false.
+      return
+    end if
+{% else %}
+    if (this%is_set("{{ check.name }}")) then
+      if (.not. {{ check.func_name }}({{ check.element_ref }})) then
+        is_valid = .false.
+        return
+      end if
+    end if
+{% endif %}
+{% endfor %}
+{% endif %}
+  end function {{ type_prefix }}_is_valid
 
 end module {{ module_name }}
