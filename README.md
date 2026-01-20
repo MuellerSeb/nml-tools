@@ -153,6 +153,29 @@ Example:
 x-fortran-default-pad: 0
 ```
 
+Combined example:
+
+```yaml
+values_repeat:
+  type: array
+  x-fortran-shape: [2, 3]
+  items:
+    type: integer
+    x-fortran-kind: i4
+  default: [1, 2]
+  x-fortran-default-repeat: true
+
+values_pad_c:
+  type: array
+  x-fortran-shape: [2, 3]
+  items:
+    type: integer
+    x-fortran-kind: i4
+  default: [1, 2, 3]
+  x-fortran-default-order: C
+  x-fortran-default-pad: 0
+```
+
 ## Configuration (nml-config.toml)
 
 The CLI reads a TOML config file. Paths are resolved relative to the config
