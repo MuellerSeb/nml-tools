@@ -7,13 +7,15 @@
 {{ module_doc }}
 {% endif %}
 module {{ module_name }}
-  use {{ helper_module }}, only: {{ helper_imports | join(', ') }}
+  use {{ helper_module }}, only: &
+    {{ helper_imports | join(', &\n    ') }}
 {% if use_ieee %}
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
 {% endif %}
 {% if kind_imports %}
   ! kind specifiers listed in the nml-tools configuration file
-  use {{ kind_module }}, only: {{ kind_imports | join(', ') }}
+  use {{ kind_module }}, only: &
+    {{ kind_imports | join(', &\n    ') }}
 {% endif %}
 
   implicit none
@@ -50,157 +52,9 @@ module {{ module_name }}
 
 contains
 
-  !> \brief Initialize defaults and sentinels for {{ namelist_name }}
-  subroutine {{ type_prefix }}_init(this)
-    class({{ type_name }}), intent(inout) :: this
-
-    this%is_configured = .false.
-
-{% if sentinel_assignments %}
-    ! sentinel values for required/optional parameters
-{% for stmt in sentinel_assignments %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-{% endif %}
-{% if default_assignments %}
-    ! default values
-{% for stmt in default_assignments %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-{% endif %}
-  end subroutine {{ type_prefix }}_init
-
-  !> \brief Read {{ namelist_name }} namelist from file
-  subroutine {{ type_prefix }}_from_file(this, file, nml_found)
-    class({{ type_name }}), intent(inout) :: this
-    character(len=*), intent(in) :: file !< path to namelist file
-    !> whether namelist was found, if present this will prevent error raises, in case the namelist was not found
-    logical, intent(out), optional :: nml_found
-    ! namelist variables
-{% for field in fields %}
-{{ field.local_declaration | indent(4, True) }}
-{% endfor %}
-    ! locals
-    type(nml_file_t) :: nml
-    logical :: found
-
-    namelist /{{ namelist_name }}/ &
-      {{ namelist_vars | join(', &\n      ') }}
-
-    call this%init()
-{% for stmt in local_init_assignments %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-
-    call nml%open(file)
-    if (present(nml_found)) nml_found = nml%is_open
-    if (.not. nml%is_open) then
-      if (present(nml_found)) return
-      error stop "{{ type_prefix }}%from_file: could not open file"
-    end if
-
-    found = nml%find("{{ namelist_name }}")
-    if (present(nml_found)) nml_found = found
-    if (.not. found) then
-      call nml%close()
-      if (present(nml_found)) return
-      error stop "{{ type_prefix }}%from_file: namelist {{ namelist_name }} not found"
-    end if
-
-    ! read namelist
-    read(nml%unit, nml={{ namelist_name }})
-    call nml%close()
-
-    ! assign values
-{% for stmt in assignments %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-
-    ! mark as configured
-    this%is_configured = .true.
-  end subroutine {{ type_prefix }}_from_file
-
-  !> \brief Set {{ namelist_name }} values
-{% if argument_list %}
-  subroutine {{ type_prefix }}_set(this, &
-    {{ argument_list | join(', &\n    ') }})
-{% else %}
-  subroutine {{ type_prefix }}_set(this)
-{% endif %}
-
-    class({{ type_name }}), intent(inout) :: this
-{% for decl in required_argument_declarations %}
-{{ decl | indent(4, True) }}
-{% endfor %}
-{% for decl in optional_argument_declarations %}
-{{ decl | indent(4, True) }}
-{% endfor %}
-
-    call this%init()
-
-    ! required parameters
-{% for stmt in set_required_assignments %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-{% if set_optional_present %}
-    ! override with provided values
-{% for stmt in set_optional_present %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-{% endif %}
-
-    ! mark as configured
-    this%is_configured = .true.
-  end subroutine {{ type_prefix }}_set
-
-  !> \brief Check whether a namelist value was set
-  logical function {{ type_prefix }}_is_set(this, name, idx) result(is_set)
-    class({{ type_name }}), intent(in) :: this
-    character(len=*), intent(in) :: name
-    integer, intent(in), optional :: idx(:)
-
-    select case (trim(name))
-{% for case in presence_cases %}
-    case ("{{ case.name }}")
-{% if case.is_array %}
-      if (present(idx)) then
-        if (size(idx) /= {{ case.rank }}) then
-          error stop "{{ type_prefix }}%is_set: index rank mismatch for '{{ case.name }}'"
-        end if
-        if (any(idx < lbound(this%{{ case.name }})) .or. any(idx > ubound(this%{{ case.name }}))) then
-          error stop "{{ type_prefix }}%is_set: index out of bounds for '{{ case.name }}'"
-        end if
-{% if case.always_true %}
-        is_set = .true.
-{% else %}
-        is_set = .not. ({{ case.element_condition }})
-{% endif %}
-      else
-{% if case.always_true %}
-        is_set = .true.
-{% else %}
-        is_set = .not. ({{ case.sentinel_condition }})
-{% endif %}
-      end if
-{% else %}
-      if (present(idx)) then
-        error stop "{{ type_prefix }}%is_set: index not supported for '{{ case.name }}'"
-      end if
-{% if case.always_true %}
-      is_set = .true.
-{% else %}
-      is_set = .not. ({{ case.sentinel_condition }})
-{% endif %}
-{% endif %}
-{% endfor %}
-    case default
-      error stop "{{ type_prefix }}%is_set: unknown field '" // trim(name) // "'"
-    end select
-  end function {{ type_prefix }}_is_set
-
 {% if enum_functions %}
-  !> \brief Check whether a value is part of an enum
 {% for enum in enum_functions %}
+  !> \brief Check whether a value is part of an enum
   elemental logical function {{ enum.func_name }}(val, allow_missing) result(in_enum)
     {{ enum.arg_type_spec }}, intent(in) :: val
     logical, intent(in), optional :: allow_missing
@@ -222,17 +76,193 @@ contains
 
 {% endfor %}
 {% endif %}
-  !> \brief Validate required values and constraints
-  logical function {{ type_prefix }}_is_valid(this) result(is_valid)
-    class({{ type_name }}), intent(in) :: this
+  !> \brief Initialize defaults and sentinels for {{ namelist_name }}
+  integer function {{ type_prefix }}_init(this, errmsg) result(status)
+    class({{ type_name }}), intent(inout) :: this
+    character(len=*), intent(out), optional :: errmsg
 
-    is_valid = .true.
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    this%is_configured = .false.
+
+{% if sentinel_assignments %}
+    ! sentinel values for required/optional parameters
+{% for stmt in sentinel_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+{% if default_assignments %}
+    ! default values
+{% for stmt in default_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+  end function {{ type_prefix }}_init
+
+  !> \brief Read {{ namelist_name }} namelist from file
+  integer function {{ type_prefix }}_from_file(this, file, errmsg) result(status)
+    class({{ type_name }}), intent(inout) :: this
+    character(len=*), intent(in) :: file !< path to namelist file
+    character(len=*), intent(out), optional :: errmsg
+    ! namelist variables
+{% for field in fields %}
+{{ field.local_declaration | indent(4, True) }}
+{% endfor %}
+    ! locals
+    type(nml_file_t) :: nml
+    integer :: iostat
+    integer :: close_status
+    character(len=nml_line_buffer) :: iomsg
+
+    namelist /{{ namelist_name }}/ &
+      {{ namelist_vars | join(', &\n      ') }}
+
+    status = this%init(errmsg=errmsg)
+    if (status /= NML_OK) return
+{% for stmt in local_init_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+
+    status = nml%open(file, errmsg=errmsg)
+    if (status /= NML_OK) return
+
+    status = nml%find("{{ namelist_name }}", errmsg=errmsg)
+    if (status /= NML_OK) then
+      close_status = nml%close()
+      return
+    end if
+
+    ! read namelist
+    read(nml%unit, nml={{ namelist_name }}, iostat=iostat, iomsg=iomsg)
+    if (iostat /= 0) then
+      status = NML_ERR_READ
+      if (present(errmsg)) errmsg = trim(iomsg)
+      close_status = nml%close()
+      return
+    end if
+    close_status = nml%close(errmsg=errmsg)
+    if (close_status /= NML_OK) then
+      status = close_status
+      return
+    end if
+
+    ! assign values
+{% for stmt in assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+
+    ! mark as configured
+    this%is_configured = .true.
+    status = NML_OK
+  end function {{ type_prefix }}_from_file
+
+  !> \brief Set {{ namelist_name }} values
+{% if argument_list %}
+  integer function {{ type_prefix }}_set(this, &
+    {{ argument_list | join(', &\n    ') }}, &
+    errmsg) result(status)
+{% else %}
+  integer function {{ type_prefix }}_set(this, errmsg) result(status)
+{% endif %}
+
+    class({{ type_name }}), intent(inout) :: this
+    character(len=*), intent(out), optional :: errmsg
+{% for decl in required_argument_declarations %}
+{{ decl | indent(4, True) }}
+{% endfor %}
+{% for decl in optional_argument_declarations %}
+{{ decl | indent(4, True) }}
+{% endfor %}
+
+    status = this%init(errmsg=errmsg)
+    if (status /= NML_OK) return
+
+    ! required parameters
+{% for stmt in set_required_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% if set_optional_present %}
+    ! override with provided values
+{% for stmt in set_optional_present %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+
+    ! mark as configured
+    this%is_configured = .true.
+    status = NML_OK
+  end function {{ type_prefix }}_set
+
+  !> \brief Check whether a namelist value was set
+  integer function {{ type_prefix }}_is_set(this, name, idx, errmsg) result(status)
+    class({{ type_name }}), intent(in) :: this
+    character(len=*), intent(in) :: name
+    integer, intent(in), optional :: idx(:)
+    character(len=*), intent(out), optional :: errmsg
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    select case (trim(name))
+{% for case in presence_cases %}
+    case ("{{ case.name }}")
+{% if case.is_array %}
+      if (present(idx)) then
+        status = idx_check(idx, lbound(this%{{ case.name }}), ubound(this%{{ case.name }}), &
+          "{{ case.name }}", errmsg)
+        if (status /= NML_OK) return
+{% if not case.always_true %}
+        if ({{ case.element_condition }}) status = NML_ERR_NOT_SET
+{% endif %}
+      else
+{% if not case.always_true %}
+        if ({{ case.sentinel_condition }}) status = NML_ERR_NOT_SET
+{% endif %}
+      end if
+{% else %}
+      if (present(idx)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "index not supported for '{{ case.name }}'"
+        return
+      end if
+{% if not case.always_true %}
+      if ({{ case.sentinel_condition }}) status = NML_ERR_NOT_SET
+{% endif %}
+{% endif %}
+{% endfor %}
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+    end select
+    if (status == NML_ERR_NOT_SET .and. present(errmsg)) then
+      if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
+    end if
+  end function {{ type_prefix }}_is_set
+
+  !> \brief Validate required values and constraints
+  integer function {{ type_prefix }}_is_valid(this, errmsg) result(status)
+    class({{ type_name }}), intent(in) :: this
+    character(len=*), intent(out), optional :: errmsg
+    integer :: istat
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
 
 {% if required_validations %}
     ! required parameters
 {% for name in required_validations %}
-    if (.not. this%is_set("{{ name }}")) then
-      is_valid = .false.
+    istat = this%is_set("{{ name }}", errmsg=errmsg)
+    if (istat == NML_ERR_NOT_SET) then
+      status = NML_ERR_REQUIRED
+      if (present(errmsg)) then
+        if (len_trim(errmsg) == 0) then
+          errmsg = "field not set: {{ name }}"
+        end if
+        errmsg = "required " // trim(errmsg)
+      end if
+      return
+    end if
+    if (istat /= NML_OK) then
+      status = istat
       return
     end if
 {% endfor %}
@@ -242,15 +272,21 @@ contains
 {% for check in enum_checks %}
 {% if check.is_array %}
     if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
-      is_valid = .false.
+      status = NML_ERR_ENUM
+      if (present(errmsg)) errmsg = "enum constraint failed: {{ check.name }}"
       return
     end if
 {% else %}
-    if (this%is_set("{{ check.name }}")) then
+    istat = this%is_set("{{ check.name }}", errmsg=errmsg)
+    if (istat == NML_OK) then
       if (.not. {{ check.func_name }}({{ check.element_ref }})) then
-        is_valid = .false.
+        status = NML_ERR_ENUM
+        if (present(errmsg)) errmsg = "enum constraint failed: {{ check.name }}"
         return
       end if
+    else if (istat /= NML_ERR_NOT_SET) then
+      status = istat
+      return
     end if
 {% endif %}
 {% endfor %}
