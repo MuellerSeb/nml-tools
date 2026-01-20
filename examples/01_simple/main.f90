@@ -1,14 +1,14 @@
 program main
   use iso_fortran_env, only: error_unit, int32, real64
-  use nml_helper, only: buf, max_iter
+  use nml_helper, only: buf, max_iter, NML_OK
   use nml_optimization, only: nml_optimization_t
 
   implicit none
 
   type(nml_optimization_t) :: cfg
   character(len=256) :: file
-  logical :: found
-  logical :: ok
+  integer :: status
+  character(len=256) :: errmsg
 
   ! shorten string lengths for easier handling
   character(len=20) :: name
@@ -26,20 +26,18 @@ program main
     seed, dds_r, mcmc_opti, mcmc_error_params
 
   call get_command_argument(1, file)
-  if (len_trim(file) == 0) then
-    file = "out/optimization.nml"
+  if (len_trim(file) == 0) file = "out/optimization.nml"
+
+  status = cfg%from_file(trim(file), errmsg=errmsg)
+  if (status /= NML_OK) then
+    write(error_unit, '(a)') "failed to read namelist: " // trim(errmsg)
+    stop status
   end if
 
-  call cfg%from_file(trim(file), nml_found=found)
-  if (.not. found) then
-    write(error_unit, '(a)') "namelist not found: " // trim(file)
-    stop 1
-  end if
-
-  ok = cfg%is_valid()
-  if (.not. ok) then
-    write(error_unit, '(a)') "namelist validation failed"
-    stop 2
+  status = cfg%is_valid(errmsg=errmsg)
+  if (status /= NML_OK) then
+    write(error_unit, '(a)') "namelist validation failed: " // trim(errmsg)
+    stop status
   end if
 
   allocate(try_methods(size(cfg%try_methods)))
@@ -48,6 +46,12 @@ program main
     size(cfg%mcmc_error_params, 1), &
     size(cfg%mcmc_error_params, 2), &
     size(cfg%mcmc_error_params, 3)))
+
+  status = cfg%is_set("mcmc_error_params", idx=[1,2,3], errmsg=errmsg)
+  if (status /= NML_OK) then
+    write(error_unit, '(a)') "field check failed: " // trim(errmsg)
+    stop status
+  end if
 
   name = cfg%name
   method = cfg%method

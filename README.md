@@ -200,6 +200,34 @@ niterations = 4
 tolerance = 0.1
 ```
 
+## Error handling
+
+Generated type-bound procedures return integer status codes and accept an
+optional `errmsg` argument. No `error stop` is emitted by generated code.
+
+Status codes (defined in the helper module):
+
+| Code | Meaning |
+| --- | --- |
+| `NML_OK` (0) | success |
+| `NML_ERR_FILE_NOT_FOUND` (1) | file does not exist |
+| `NML_ERR_OPEN` (2) | failed to open file |
+| `NML_ERR_NOT_OPEN` (3) | file not open |
+| `NML_ERR_NML_NOT_FOUND` (4) | namelist not found |
+| `NML_ERR_READ` (5) | read/parse error |
+| `NML_ERR_CLOSE` (6) | close error |
+| `NML_ERR_REQUIRED` (10) | required field missing |
+| `NML_ERR_ENUM` (11) | enum constraint failed |
+| `NML_ERR_NOT_SET` (12) | field not set (sentinel) |
+| `NML_ERR_INVALID_NAME` (20) | unknown field name |
+| `NML_ERR_INVALID_INDEX` (21) | invalid index for array access |
+
+Notes:
+
+- `errmsg`, when present, is filled with a short message (including `iomsg` on read errors).
+- `is_set` returns `NML_ERR_NOT_SET` if a value is missing, and
+  `NML_ERR_INVALID_NAME`/`NML_ERR_INVALID_INDEX` on misuse.
+
 ## Installation
 
 ```bash
