@@ -39,3 +39,32 @@ def test_generate_docs_shows_items_default(tmp_path: Path) -> None:
     rendered = output.read_text()
     assert "Default: `7`" in rendered
     assert "(repeated)" not in rendered
+
+
+def test_generate_docs_shows_bounds(tmp_path: Path) -> None:
+    schema = {
+        "title": "Bounds docs",
+        "x-fortran-namelist": "bounds_nml",
+        "type": "object",
+        "properties": {
+            "tolerance": {
+                "type": "number",
+                "minimum": 0.0,
+                "exclusiveMaximum": 1.0,
+            },
+            "counts": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "items": {"type": "integer", "minimum": 1},
+            },
+        },
+    }
+
+    output = tmp_path / "bounds.md"
+    generate_docs = _import_generate_docs()
+    generate_docs(schema, output)
+
+    rendered = output.read_text()
+    assert "Minimum: `>= 0.0`" in rendered
+    assert "Maximum: `< 1.0`" in rendered
+    assert "Minimum: `>= 1`" in rendered

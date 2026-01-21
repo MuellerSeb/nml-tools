@@ -270,6 +270,39 @@ def test_generate_fortran_rejects_partial_array_default(tmp_path: Path) -> None:
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
+def test_generate_fortran_emits_bounds_helpers(tmp_path: Path) -> None:
+    schema = {
+        "title": "Bounds test",
+        "x-fortran-namelist": "bounds_nml",
+        "type": "object",
+        "properties": {
+            "tolerance": {
+                "type": "number",
+                "x-fortran-kind": "dp",
+                "minimum": 0.0,
+                "exclusiveMaximum": 1.0,
+            },
+            "counts": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "items": {"type": "integer", "x-fortran-kind": "i4", "minimum": 1},
+            },
+        },
+    }
+
+    output = tmp_path / "nml_bounds.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(schema, output, kind_module="mo_kind")
+
+    generated = output.read_text()
+    assert "real(dp), parameter, public :: tolerance_min = 0.0_dp" in generated
+    assert "real(dp), parameter, public :: tolerance_max_excl = 1.0_dp" in generated
+    assert "integer(i4), parameter, public :: counts_min = 1_i4" in generated
+    assert "elemental logical function tolerance_in_bounds" in generated
+    assert "elemental logical function counts_in_bounds" in generated
+    assert "all(counts_in_bounds(this%counts, allow_missing=.true.))" in generated
+
+
 def test_generate_fortran_rejects_flex_dim_boolean_array(tmp_path: Path) -> None:
     schema = {
         "title": "Flex dim boolean",

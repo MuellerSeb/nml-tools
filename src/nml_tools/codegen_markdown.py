@@ -8,6 +8,7 @@ from typing import Any
 from .codegen_fortran import (
     FieldTypeInfo,
     _array_default_value,
+    _bounds_spec,
     _collect_dimension_constants,
     _enum_category,
     _enum_values,
@@ -135,6 +136,8 @@ def generate_docs(
                         lines.append(f"- Default: `{base}`")
                 else:
                     lines.append(f"- Default: `{default_label}`")
+            for bounds_label in _get_bounds_labels(prop, type_info):
+                lines.append(bounds_label)
             if enum_label is not None:
                 lines.append(f"- Allowed values: {enum_label}")
             if example_values is not None:
@@ -263,6 +266,28 @@ def _get_enum_values(
     category = _enum_category(type_info)
     values = [_format_scalar_default(value, None, category) for value in enum_values]
     return ", ".join(f"`{value}`" for value in values)
+
+
+def _get_bounds_labels(
+    prop: dict[str, Any],
+    type_info: FieldTypeInfo,
+) -> list[str]:
+    bounds = _bounds_spec(prop, type_info)
+    if bounds is None:
+        return []
+    category = bounds["category"]
+    labels: list[str] = []
+    min_value = bounds["min_value"]
+    max_value = bounds["max_value"]
+    if min_value is not None:
+        op = ">" if bounds["min_exclusive"] else ">="
+        literal = _format_scalar_default(min_value, None, category)
+        labels.append(f"- Minimum: `{op} {literal}`")
+    if max_value is not None:
+        op = "<" if bounds["max_exclusive"] else "<="
+        literal = _format_scalar_default(max_value, None, category)
+        labels.append(f"- Maximum: `{op} {literal}`")
+    return labels
 
 
 def _get_flex_tail_dims(
