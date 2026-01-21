@@ -17,17 +17,6 @@ Generate Fortran namelist modules, Markdown docs, and template namelists from a 
 - Outputs: Fortran module, helper module, Markdown docs, template namelist.
 - Config-driven CLI for batching multiple schemas.
 
-## Enum support
-
-- Enums are supported for strings and integers only.
-- For arrays, enums are defined on `items` (not on the array itself).
-- The generated Fortran module exposes public `*_enum_values` arrays and
-  elemental `*_in_enum` helpers.
-- Validation is opt-in: call `is_valid()` on the generated type to check
-  required values and enum constraints.
-- String enums compare against `trim(value)`; enum literals are stored with the
-  field length.
-
 ## Fortran extensions (x-fortran-*)
 
 These keywords extend JSON Schema with Fortran-specific requirements.
@@ -180,10 +169,25 @@ values_pad_c:
   x-fortran-default-pad: 0
 ```
 
+## Validation keywords
+
+Only a subset of JSON Schema validation keywords is implemented.
+Validation is opt-in: call `is_valid()` on the generated type to check required values, enum and bound constraints.
+
+### Enum support
+Enums are supported for strings and integers only.
+For arrays, enums are defined on `items` (not on the array itself).
+
+- Keywords: `enum`
+- The generated Fortran module exposes public `*_enum_values` arrays and
+  elemental `*_in_enum` helpers.
+- String enums compare against `trim(value)`; enum literals are stored with the
+  field length.
+
 ### Numeric bounds
 
-You can add minimum/maximum constraints for integer or real values. For arrays,
-the bounds apply to each item and must be defined on `items`.
+You can add minimum/maximum constraints for integer or real values.
+For arrays, the bounds apply to each item and must be defined on `items`.
 
 - Keywords: `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`
 - Applies to: `integer` and `number` (`real` in Fortran)
@@ -311,27 +315,23 @@ nml-tools gen-template --config nml-config.toml
 
 ### Validation
 
-Validation is check-only (defaults are not applied). Unknown keys in a namelist
-are errors. Namelist blocks in the input file that are not covered by provided
-schemas are errors.
+Validation is check-only (defaults are not applied) and implements only a
+subset of JSON Schema constraints (types, required, enums, bounds, string
+length, array shape/flex). Unknown keys in a namelist or namelist blocks not
+covered by provided schemas are errors.
 
-Config-driven validation:
+Config-driven:
 
 ```bash
 nml-tools validate --config nml-config.toml input.nml
 ```
 
-- Loads all `[[namelists]]` schemas from the config.
-- Validates each namelist present in `input.nml`.
-
-Schema-only validation:
+Schema-only:
 
 ```bash
 nml-tools validate --schema demo.yml --input demo.nml
 nml-tools validate --schema a.yml --schema b.yml combined.nml
 ```
-
-- Each schema must be present in the input file.
 
 Constants are resolved from `[constants]` in the config, or provided ad hoc:
 
