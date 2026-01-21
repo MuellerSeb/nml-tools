@@ -7,6 +7,7 @@ from typing import Any
 
 from .codegen_fortran import (
     FieldTypeInfo,
+    _array_default_value,
     _collect_dimension_constants,
     _enum_category,
     _enum_values,
@@ -16,6 +17,8 @@ from .codegen_fortran import (
     _prepare_array_default,
 )
 from .codegen_template import render_template
+
+_DEFAULT_MISSING = object()
 
 
 def generate_docs(
@@ -207,10 +210,20 @@ def _get_default_value(
     type_info: FieldTypeInfo,
     constants: dict[str, int | float] | None,
 ) -> str | tuple[str, str | None] | None:
+    if type_info.category == "array":
+        array_default = _array_default_value(prop)
+        if array_default is None:
+            return None
+        default_value, default_from_items = array_default
+        return _format_array_default_display(
+            prop,
+            type_info,
+            constants,
+            default_value=default_value,
+            from_items=default_from_items,
+        )
     if "default" not in prop:
         return None
-    if type_info.category == "array":
-        return _format_array_default_display(prop, type_info, constants)
     return _format_default_plain(prop["default"], type_info, prop, constants)
 
 
@@ -314,7 +327,7 @@ def _format_default_plain(
 ) -> str:
     if type_info.category == "array":
         if not isinstance(value, list):
-            value = [value]
+            raise ValueError("array default must be a list")
         parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
         array_default = _prepare_array_default(value, parsed_dims, prop)
         elements = [
@@ -351,13 +364,23 @@ def _format_array_default_display(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
     constants: dict[str, int | float] | None,
+    *,
+    default_value: Any = _DEFAULT_MISSING,
+    from_items: bool = False,
 ) -> tuple[str, str | None]:
-    default_value = prop["default"]
+    if default_value is _DEFAULT_MISSING:
+        default_value = prop["default"]
+    if not from_items and not isinstance(default_value, list):
+        raise ValueError("array default must be a list")
     default_is_list = isinstance(default_value, list)
     default_list = default_value if default_is_list else [default_value]
 
     parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
-    _prepare_array_default(default_list, parsed_dims, prop)
+    default_prop = prop
+    if from_items:
+        default_prop = dict(prop)
+        default_prop["x-fortran-default-repeat"] = True
+    _prepare_array_default(default_list, parsed_dims, default_prop)
 
     if default_is_list:
         elements = [

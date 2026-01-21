@@ -1,0 +1,41 @@
+"""Tests for Markdown generation."""
+
+from __future__ import annotations
+
+import importlib
+import sys
+from pathlib import Path
+
+
+def _import_generate_docs():
+    root = Path(__file__).resolve().parents[1]
+    src = root / "src"
+    sys.path.insert(0, str(src))
+    try:
+        module = importlib.import_module("nml_tools.codegen_markdown")
+    finally:
+        sys.path.pop(0)
+    return module.generate_docs
+
+
+def test_generate_docs_shows_items_default(tmp_path: Path) -> None:
+    schema = {
+        "title": "Items default docs",
+        "x-fortran-namelist": "grid_nml",
+        "type": "object",
+        "properties": {
+            "grid": {
+                "type": "array",
+                "items": {"type": "integer", "default": 7},
+                "x-fortran-shape": 3,
+            }
+        },
+    }
+
+    output = tmp_path / "grid.md"
+    generate_docs = _import_generate_docs()
+    generate_docs(schema, output)
+
+    rendered = output.read_text()
+    assert "Default: `7`" in rendered
+    assert "(repeated)" not in rendered

@@ -224,11 +224,15 @@ def _build_context(
             if type_info.kind:
                 kind_ids.append(type_info.kind)
 
+            array_default_info: tuple[Any, bool] | None = None
+            if type_info.category == "array":
+                array_default_info = _array_default_value(prop)
+
             flex_dim = _parse_flex_dim(prop, type_info)
             if flex_dim > 0:
                 if type_info.element_category == "boolean":
                     raise ValueError("flex arrays cannot use boolean elements")
-                if "default" in prop or any(
+                if array_default_info is not None or any(
                     key in prop
                     for key in (
                         "x-fortran-default-order",
@@ -252,7 +256,31 @@ def _build_context(
             local_decl = _render_declaration(type_info.type_spec, type_info.dimensions, name)
 
             is_required = name in required_set
-            has_default = "default" in prop
+            if type_info.category == "array":
+                has_default = array_default_info is not None
+            else:
+                has_default = "default" in prop
+
+            default_from_items = False
+            default_values: list[Any] | None = None
+            parsed_dims: list[int] | None = None
+            array_default_spec: ArrayDefaultSpec | None = None
+
+            if type_info.category == "array" and has_default:
+                if array_default_info is None:
+                    raise ValueError(f"missing array default for '{name}'")
+                default_raw, default_from_items = array_default_info
+                if default_from_items:
+                    if isinstance(default_raw, list):
+                        raise ValueError("array items default must be a scalar")
+                    default_values = [default_raw]
+                else:
+                    if not isinstance(default_raw, list):
+                        raise ValueError("array default must be a list")
+                    default_values = default_raw
+                    parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
+                    array_default_spec = _prepare_array_default(default_values, parsed_dims, prop)
+
             needs_sentinel = (not is_required) and (not has_default)
             requires_sentinel = is_required or needs_sentinel
 
@@ -395,59 +423,70 @@ def _build_context(
             if has_default:
                 default_const_name = f"{name}_default"
                 if type_info.category == "array":
-                    default_raw = prop["default"]
-                    default_is_scalar = not isinstance(default_raw, list)
-                    default_values = default_raw if isinstance(default_raw, list) else [default_raw]
-                    parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
-                    array_default = _prepare_array_default(default_values, parsed_dims, prop)
-                    repeat_raw = prop.get("x-fortran-default-repeat", False)
-                    if not isinstance(repeat_raw, bool):
-                        raise ValueError("array default repeat must be a boolean")
-                    repeat = bool(repeat_raw)
+                    if default_values is None:
+                        raise ValueError(f"missing array default for '{name}'")
+                    default_is_scalar = default_from_items
 
-                    pad_raw = prop.get("x-fortran-default-pad")
+                    repeat = False
+                    pad_raw = None
                     pad_const_name: str | None = None
                     pad_is_scalar = False
-                    if pad_raw is not None:
-                        pad_const_name = f"{name}_pad"
-                        pad_is_scalar = not isinstance(pad_raw, list)
-                        pad_values = pad_raw if isinstance(pad_raw, list) else [pad_raw]
-                        pad_values = _ensure_flat_scalar_list(pad_values, "array default pad")
-                        pad_elements = [
-                            _format_scalar_default(
-                                element, type_info.kind, type_info.element_category
-                            )
-                            for element in pad_values
-                        ]
-                        if pad_is_scalar:
-                            pad_literal = _format_scalar_default(
-                                pad_raw, type_info.kind, type_info.element_category
-                            )
-                            default_parameters.append(
-                                f"{type_info.type_spec}, parameter, public :: "
-                                f"{pad_const_name} = {pad_literal}"
-                            )
-                        else:
-                            default_parameters.append(
-                                f"{type_info.type_spec}, parameter, public :: "
-                                f"{pad_const_name}({len(pad_elements)}) = "
-                                f"[{', '.join(pad_elements)}]"
+
+                    if not default_from_items:
+                        repeat_raw = prop.get("x-fortran-default-repeat", False)
+                        if not isinstance(repeat_raw, bool):
+                            raise ValueError("array default repeat must be a boolean")
+                        repeat = bool(repeat_raw)
+                        pad_raw = prop.get("x-fortran-default-pad")
+                        if pad_raw is not None:
+                            pad_const_name = f"{name}_pad"
+                            pad_is_scalar = not isinstance(pad_raw, list)
+                            pad_values = pad_raw if isinstance(pad_raw, list) else [pad_raw]
+                            pad_values = _ensure_flat_scalar_list(pad_values, "array default pad")
+                            pad_elements = [
+                                _format_scalar_default(
+                                    element, type_info.kind, type_info.element_category
+                                )
+                                for element in pad_values
+                            ]
+                            if pad_is_scalar:
+                                pad_literal = _format_scalar_default(
+                                    pad_raw, type_info.kind, type_info.element_category
+                                )
+                                default_parameters.append(
+                                    f"{type_info.type_spec}, parameter, public :: "
+                                    f"{pad_const_name} = {pad_literal}"
+                                )
+                            else:
+                                default_parameters.append(
+                                    f"{type_info.type_spec}, parameter, public :: "
+                                    f"{pad_const_name}({len(pad_elements)}) = "
+                                    f"[{', '.join(pad_elements)}]"
+                                )
+
+                        if parsed_dims is None:
+                            parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
+                        if array_default_spec is None:
+                            array_default_spec = _prepare_array_default(
+                                default_values, parsed_dims, prop
                             )
 
                     if default_is_scalar:
                         default_literal = _format_scalar_default(
-                            default_raw, type_info.kind, type_info.element_category
+                            default_values[0], type_info.kind, type_info.element_category
                         )
                         default_parameters.append(
                             f"{type_info.type_spec}, parameter, public :: "
                             f"{default_const_name} = {default_literal}"
                         )
                     else:
+                        if array_default_spec is None:
+                            raise ValueError(f"missing array default specification for '{name}'")
                         default_elements = [
                             _format_scalar_default(
                                 element, type_info.kind, type_info.element_category
                             )
-                            for element in array_default.source_values
+                            for element in array_default_spec.source_values
                         ]
                         default_parameters.append(
                             f"{type_info.type_spec}, parameter, public :: "
@@ -455,36 +494,28 @@ def _build_context(
                             f"[{', '.join(default_elements)}]"
                         )
 
-                    if repeat and default_is_scalar:
+                    if default_from_items:
+                        default_assignment = f"this%{name} = {default_const_name}"
+                    elif (
+                        len(type_info.dimensions) == 1
+                        and array_default_spec is not None
+                        and array_default_spec.order_values is None
+                        and array_default_spec.pad_values is None
+                    ):
                         default_assignment = f"this%{name} = {default_const_name}"
                     else:
-                        if (
-                            not default_is_scalar
-                            and len(type_info.dimensions) == 1
-                            and array_default.order_values is None
-                            and array_default.pad_values is None
-                        ):
-                            default_assignment = f"this%{name} = {default_const_name}"
-                        else:
-                            source_expr = (
-                                default_const_name
-                                if not default_is_scalar
-                                else f"[{default_const_name}]"
-                            )
-                            shape_expr = ", ".join(type_info.dimensions)
-                            arguments = [source_expr, f"shape=[{shape_expr}]"]
-                            if array_default.order_values is not None:
+                        source_expr = default_const_name
+                        shape_expr = ", ".join(type_info.dimensions)
+                        arguments = [source_expr, f"shape=[{shape_expr}]"]
+                        if array_default_spec is not None:
+                            if array_default_spec.order_values is not None:
                                 order_literal = ", ".join(
-                                    str(index) for index in array_default.order_values
+                                    str(index) for index in array_default_spec.order_values
                                 )
                                 arguments.append(f"order=[{order_literal}]")
-                            if array_default.pad_values is not None:
+                            if array_default_spec.pad_values is not None:
                                 if repeat:
-                                    pad_expr = (
-                                        default_const_name
-                                        if not default_is_scalar
-                                        else f"[{default_const_name}]"
-                                    )
+                                    pad_expr = default_const_name
                                 else:
                                     if pad_const_name is None:
                                         raise ValueError(
@@ -496,7 +527,7 @@ def _build_context(
                                         else f"[{pad_const_name}]"
                                     )
                                 arguments.append(f"pad={pad_expr}")
-                            default_assignment = _format_reshape_assignment(name, arguments)
+                        default_assignment = _format_reshape_assignment(name, arguments)
                     set_default_assignment = default_assignment
                 else:
                     default_literal = _format_default(prop["default"], type_info, prop, constants)
@@ -1299,7 +1330,7 @@ def _format_default(
 ) -> str:
     if type_info.category == "array":
         if not isinstance(value, list):
-            value = [value]
+            raise ValueError("array default must be a list")
         parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
         array_default = _prepare_array_default(value, parsed_dims, prop)
         elements = [
@@ -1475,6 +1506,34 @@ def _enum_values(
     return enum_values
 
 
+def _array_default_value(prop: dict[str, Any]) -> tuple[Any, bool] | None:
+    if prop.get("type") != "array":
+        raise ValueError("array default lookup requires array properties")
+
+    default_defined = "default" in prop
+    items_default = _array_items_default(prop)
+    items_defined = "default" in items_default
+    items_value = items_default.get("default") if items_defined else None
+
+    if default_defined and items_defined:
+        raise ValueError("array default must be defined on property or items, not both")
+
+    if items_defined:
+        for key in ("x-fortran-default-order", "x-fortran-default-repeat", "x-fortran-default-pad"):
+            if key in prop:
+                raise ValueError("array items default must not use x-fortran-default-* options")
+        if isinstance(items_value, list):
+            raise ValueError("array items default must be a scalar")
+        return items_value, True
+
+    if default_defined:
+        default_value = prop.get("default")
+        if not isinstance(default_value, list):
+            raise ValueError("array default must be a list")
+        return default_value, False
+    return None
+
+
 def _array_items_enum(prop: dict[str, Any]) -> list[Any] | None:
     current = prop
     while current.get("type") == "array":
@@ -1485,6 +1544,18 @@ def _array_items_enum(prop: dict[str, Any]) -> list[Any] | None:
             raise ValueError("array property must define 'items'")
         current = items
     return current.get("enum")
+
+
+def _array_items_default(prop: dict[str, Any]) -> dict[str, Any]:
+    current = prop
+    while current.get("type") == "array":
+        items = current.get("items")
+        if not isinstance(items, dict):
+            raise ValueError("array property must define 'items'")
+        if items.get("type") == "array":
+            raise ValueError("nested array properties are not supported; use x-fortran-shape")
+        current = items
+    return current
 
 
 def _validate_enum_scalar(value: Any, category: str, label: str) -> None:
@@ -1512,10 +1583,13 @@ def _validate_enum_defaults(
     category: str,
     constants: dict[str, int | float] | None,
 ) -> None:
-    if "default" not in prop:
-        return
-    default_value = prop["default"]
     if type_info.category == "array":
+        array_default = _array_default_value(prop)
+        if array_default is None:
+            return
+        default_value, default_from_items = array_default
+        if default_from_items and isinstance(default_value, list):
+            raise ValueError("array items default must be a scalar")
         if isinstance(default_value, list):
             values = _ensure_flat_scalar_list(default_value, "array default")
             _parse_default_dimensions(type_info.dimensions, constants)
@@ -1530,6 +1604,9 @@ def _validate_enum_defaults(
             for value in pad_values:
                 _ensure_enum_member(value, enum_values, category, "pad")
         return
+    if "default" not in prop:
+        return
+    default_value = prop["default"]
     if isinstance(default_value, list):
         raise ValueError("scalar default must not be a list")
     _ensure_enum_member(default_value, enum_values, category, "default")

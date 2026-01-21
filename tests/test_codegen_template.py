@@ -66,3 +66,23 @@ def test_render_template_array_default_slices() -> None:
     assert "grid(:, 1) = 1, 2" in rendered
     assert "grid(:, 2) = 3, 4" in rendered
     assert "grid(:, 3) = 5, 6" in rendered
+
+
+def test_render_template_items_default() -> None:
+    schema = {
+        "title": "Items default",
+        "x-fortran-namelist": "grid_nml",
+        "type": "object",
+        "properties": {
+            "grid": {
+                "type": "array",
+                "items": {"type": "integer", "default": 7},
+                "x-fortran-shape": 3,
+            }
+        },
+    }
+
+    render_template = _import_render_template()
+    rendered = render_template([schema], doc_mode="plain", value_mode="filled")
+
+    assert "grid(:) = 7" in rendered
