@@ -277,6 +277,68 @@ niterations = 4
 tolerance = 0.1
 ```
 
+## CLI
+
+The command line interface is available as `nml-tools` or `nmlt`.
+Common flags: `-h`/`--help`, `-V`/`--version`, `-v`/`-q` (repeatable).
+
+Primary subcommands:
+
+- `generate`: run the full pipeline (helper, Fortran modules, docs, templates).
+- `gen-fortran`: generate helper + Fortran modules only.
+- `gen-markdown`: generate Markdown docs only.
+- `gen-template`: generate template namelists only.
+- `validate`: validate a namelist file against schema definitions.
+
+### Generation
+
+Generate all outputs:
+
+```bash
+nml-tools generate --config nml-config.toml
+```
+
+Generate specific outputs:
+
+```bash
+nml-tools gen-fortran --config nml-config.toml
+nml-tools gen-markdown --config nml-config.toml
+nml-tools gen-template --config nml-config.toml
+```
+
+### Validation
+
+Validation is check-only (defaults are not applied). Unknown keys in a namelist
+are errors. Namelist blocks in the input file that are not covered by provided
+schemas are errors.
+
+Config-driven validation:
+
+```bash
+nml-tools validate --config nml-config.toml input.nml
+```
+
+- Loads all `[[namelists]]` schemas from the config.
+- Validates each namelist present in `input.nml`.
+
+Schema-only validation:
+
+```bash
+nml-tools validate --schema demo.yml --input demo.nml
+nml-tools validate --schema a.yml --schema b.yml combined.nml
+```
+
+- Each schema must be present in the input file.
+
+Constants are resolved from `[constants]` in the config, or provided ad hoc:
+
+```bash
+nml-tools validate --schema demo.yml --constants MAX_ITER=10 input.nml
+```
+
+Array values are validated as rectangular lists in Fortran order
+(outer list corresponds to the last Fortran index), matching `f90nml` parsing.
+
 ## Error handling
 
 Generated type-bound procedures return integer status codes and accept an
