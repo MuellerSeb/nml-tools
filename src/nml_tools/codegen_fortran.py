@@ -1671,6 +1671,8 @@ def _validate_bound_scalar(value: Any, category: str, label: str) -> None:
     if category == "real":
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(f"{label} must be a number")
+        if math.isinf(float(value)):
+            raise ValueError(f"{label} must not be infinite")
         if math.isnan(float(value)):
             raise ValueError(f"{label} must not be NaN")
         return
