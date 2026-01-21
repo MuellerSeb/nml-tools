@@ -9,12 +9,15 @@ from pathlib import Path
 from typing import Any
 
 import click
+import f90nml  # type: ignore[import-untyped]
 from click.exceptions import Exit
 
 from .codegen_fortran import ConstantSpec, generate_fortran, generate_helper
 from .codegen_markdown import generate_docs
 from .codegen_template import generate_template
+from ._version import __version__
 from .schema import load_schema
+from .validate import validate_namelist
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -23,6 +26,7 @@ else:  # pragma: no cover - python<3.11
 
 logger = logging.getLogger(__name__)
 _FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+_CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 
 def _configure_logging(verbose: int, quiet: int) -> None:
@@ -208,6 +212,35 @@ def _load_documentation(config: dict[str, Any]) -> str | None:
     return module_doc or None
 
 
+def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
+    constants: dict[str, int | float] = {}
+    for entry in values:
+        if "=" not in entry:
+            raise click.ClickException("constants must be provided as NAME=VALUE")
+        raw_name, raw_value = entry.split("=", 1)
+        name = raw_name.strip()
+        if not name:
+            raise click.ClickException("constants must use non-empty names")
+        if not _FORTRAN_IDENTIFIER.match(name):
+            raise click.ClickException(f"constant '{name}' must be a valid identifier")
+        value_text = raw_value.strip()
+        if not value_text:
+            raise click.ClickException(f"constant '{name}' must define a value")
+        if value_text.lower() in {"nan", "+nan", "-nan", "inf", "+inf", "-inf"}:
+            raise click.ClickException(f"constant '{name}' must be finite")
+        if re.fullmatch(r"[+-]?\d+", value_text):
+            value: int | float = int(value_text)
+        else:
+            try:
+                value = float(value_text)
+            except ValueError as exc:
+                raise click.ClickException(
+                    f"constant '{name}' value '{value_text}' must be numeric"
+                ) from exc
+        constants[name] = value
+    return constants
+
+
 def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, Path | None]]:
     raw_entries = config.get("namelists")
     if raw_entries is None and "nml-files" in config:
@@ -293,7 +326,8 @@ def _iter_templates(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
     return entries
 
 
-@click.group()
+@click.group(context_settings=_CONTEXT_SETTINGS)
+@click.version_option(__version__, "-V", "--version", prog_name="nml-tools")
 @click.option("--verbose", "-v", count=True, help="Increase verbosity (repeatable).")
 @click.option("--quiet", "-q", count=True, help="Decrease verbosity (repeatable).")
 def cli(verbose: int, quiet: int) -> None:
@@ -301,7 +335,7 @@ def cli(verbose: int, quiet: int) -> None:
     _configure_logging(verbose, quiet)
 
 
-@cli.command("generate")
+@cli.command("generate", context_settings=_CONTEXT_SETTINGS)
 @click.option(
     "--config",
     "config_path",
@@ -394,13 +428,206 @@ def generate(config_path: Path) -> None:
             raise click.ClickException(str(exc)) from exc
 
 
-@cli.command("gen-fortran")
-def gen_fortran() -> None:
+@cli.command("gen-fortran", context_settings=_CONTEXT_SETTINGS)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default="nml-config.toml",
+    show_default=True,
+)
+def gen_fortran(config_path: Path) -> None:
     """Generate Fortran module(s)."""
-    click.echo("TODO")
+    logger.info("Loading config from %s", config_path)
+    config = _load_config(config_path)
+    base_dir = config_path.parent
+    logger.debug("Base directory: %s", base_dir)
+    helper_path, helper_module, helper_buffer, helper_header = _load_helper_settings(
+        config,
+        base_dir,
+    )
+    module_doc = _load_documentation(config)
+    constants, constant_specs = _load_constants(config)
+    kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
+    if helper_path is not None:
+        try:
+            logger.info("Generating helper module at %s", helper_path)
+            generate_helper(
+                helper_path,
+                module_name=helper_module,
+                len_buf=helper_buffer,
+                constants=constant_specs,
+                module_doc=module_doc,
+                helper_header=helper_header,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    entries = _iter_namelists(config, base_dir)
+    logger.info("Found %d schema entries", len(entries))
+    for entry in entries:
+        schema_path = entry["schema"]
+        if schema_path is None:
+            raise click.ClickException("namelists entry missing schema path")
+        try:
+            logger.info("Loading schema %s", schema_path)
+            schema = load_schema(schema_path)
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        mod_path = entry["mod_path"]
+        if mod_path is None:
+            continue
+        try:
+            logger.info("Generating Fortran module at %s", mod_path)
+            generate_fortran(
+                schema,
+                mod_path,
+                helper_module=helper_module,
+                kind_module=kind_module,
+                kind_map=kind_map,
+                kind_allowlist=kind_allowlist,
+                constants=constants,
+                module_doc=module_doc,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
 
 
-@cli.command("gen-markdown")
+@cli.command("validate", context_settings=_CONTEXT_SETTINGS)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+)
+@click.option(
+    "--schema",
+    "schema_paths",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    multiple=True,
+)
+@click.option(
+    "--input",
+    "input_option",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--constants",
+    "constant_args",
+    multiple=True,
+    help="Additional constants as NAME=VALUE (repeatable).",
+)
+@click.argument(
+    "input_path",
+    required=False,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+def validate(
+    config_path: Path | None,
+    schema_paths: tuple[Path, ...],
+    input_option: Path | None,
+    constant_args: tuple[str, ...],
+    input_path: Path | None,
+) -> None:
+    """Validate a namelist file against schema definitions."""
+    if input_option is not None and input_path is not None:
+        raise click.ClickException("input path provided twice")
+    input_path = input_option or input_path
+    if input_path is None:
+        raise click.ClickException("input path is required")
+    constants = _parse_cli_constants(constant_args)
+    schemas: list[dict[str, Any]] = []
+
+    if schema_paths:
+        if config_path is not None:
+            logger.info("Loading config from %s", config_path)
+            config = _load_config(config_path)
+            cfg_constants, _ = _load_constants(config)
+            constants = {**cfg_constants, **constants}
+        for schema_file in schema_paths:
+            try:
+                logger.info("Loading schema %s", schema_file)
+                schemas.append(load_schema(schema_file))
+            except (FileNotFoundError, ValueError) as exc:
+                raise click.ClickException(str(exc)) from exc
+        require_all = True
+    else:
+        if config_path is None:
+            config_path = Path("nml-config.toml")
+        logger.info("Loading config from %s", config_path)
+        try:
+            config = _load_config(config_path)
+        except FileNotFoundError as exc:
+            raise click.ClickException(str(exc)) from exc
+        base_dir = config_path.parent
+        cfg_constants, _ = _load_constants(config)
+        constants = {**cfg_constants, **constants}
+        entries = _iter_namelists(config, base_dir)
+        logger.info("Found %d schema entries", len(entries))
+        for entry in entries:
+            schema_path = entry["schema"]
+            if schema_path is None:
+                raise click.ClickException("namelists entry missing schema path")
+            try:
+                logger.info("Loading schema %s", schema_path)
+                schemas.append(load_schema(schema_path))
+            except (FileNotFoundError, ValueError) as exc:
+                raise click.ClickException(str(exc)) from exc
+        require_all = False
+
+    if not schemas:
+        raise click.ClickException("no schemas provided for validation")
+
+    try:
+        logger.info("Reading namelist %s", input_path)
+        namelist_file = f90nml.read(input_path)
+    except Exception as exc:  # pragma: no cover - f90nml raises custom errors
+        raise click.ClickException(f"failed to read namelist: {exc}") from exc
+
+    file_entries: dict[str, tuple[str, Any]] = {}
+    for name, values in namelist_file.items():
+        if not isinstance(name, str):
+            raise click.ClickException("namelist names must be strings")
+        key = name.lower()
+        if key in file_entries:
+            raise click.ClickException(f"namelist '{name}' appears multiple times")
+        file_entries[key] = (name, values)
+
+    schema_entries: dict[str, dict[str, Any]] = {}
+    for schema in schemas:
+        namelist_name = schema.get("x-fortran-namelist")
+        if not isinstance(namelist_name, str) or not namelist_name.strip():
+            raise click.ClickException("schema must define non-empty 'x-fortran-namelist'")
+        key = namelist_name.lower()
+        if key in schema_entries:
+            raise click.ClickException(f"duplicate schema for namelist '{namelist_name}'")
+        schema_entries[key] = schema
+
+    for key, (name, _) in file_entries.items():
+        if key not in schema_entries:
+            raise click.ClickException(f"input contains unknown namelist '{name}'")
+
+    validated = 0
+    for key, schema in schema_entries.items():
+        if key not in file_entries:
+            if require_all:
+                raise click.ClickException(
+                    f"input is missing namelist '{schema.get('x-fortran-namelist')}'"
+                )
+            continue
+        try:
+            validate_namelist(
+                schema,
+                file_entries[key][1],
+                constants=constants,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+        validated += 1
+    logger.info("Validation completed (%d namelist%s).", validated, "" if validated == 1 else "s")
+
+
+@cli.command("gen-markdown", context_settings=_CONTEXT_SETTINGS)
 @click.option(
     "--config",
     "config_path",
@@ -411,7 +638,10 @@ def gen_fortran() -> None:
 def gen_markdown(config_path: Path) -> None:
     """Generate Markdown docs."""
     logger.info("Loading config from %s", config_path)
-    config = _load_config(config_path)
+    try:
+        config = _load_config(config_path)
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from exc
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
     entries = _iter_namelists(config, base_dir)
@@ -435,7 +665,7 @@ def gen_markdown(config_path: Path) -> None:
             raise click.ClickException(str(exc)) from exc
 
 
-@cli.command("gen-template")
+@cli.command("gen-template", context_settings=_CONTEXT_SETTINGS)
 @click.option(
     "--config",
     "config_path",
