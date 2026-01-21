@@ -1,6 +1,7 @@
-# Optimization configurations
+# MHM optimization namelist
 
-All relevant configurations for the optimization parameters.
+All relevant configurations for the optimization parameters of MHM.
+This namelist corresponds to the `optimization` section in the MHM configuration.
 
 **Namelist**: `optimization`
 
@@ -9,16 +10,12 @@ All relevant configurations for the optimization parameters.
 | Name | Type | Required | Info |
 | --- | --- | --- | --- |
 | `name` | string | no | Optimization name |
-| `method` | string | yes | Optimization method |
-| `try_methods` | string array | no | Try alternative methods |
-| `complex_sizes` | integer array | no | Complex sizes for SCE |
 | `niterations` | integer | yes | Number of iterations |
 | `tolerance` | real | yes | Convergence tolerance |
 | `seed` | integer | no | Random seed |
 | `dds_r` | real | no | DDS perturbation rate |
 | `mcmc_opti` | logical | no | MCMC optimization |
-| `mcmc_error_params` | real array | yes | MCMC error parameters per domain |
-| `include_parameters` | logical array | no | Include parameters |
+| `mcmc_error_params` | real array | no | MCMC error parameters per domain |
 
 ## Field details
 
@@ -30,35 +27,6 @@ Summary:
 - Type: `character(len=buf)`
 - Required: no
 - Examples: `'test_optimization'`
-
-### `method` - Optimization method
-
-Optimization algorithm to be used.
-
-Summary:
-- Type: `character(len=buf)`
-- Required: yes
-- Allowed values: `'DDS'`, `'MCMC'`, `'SCE'`
-
-### `try_methods` - Try alternative methods
-
-Whether to try alternative optimization methods if the primary fails.
-
-Summary:
-- Type: `character(len=buf), dimension(3)`
-- Required: no
-- Allowed values: `'DDS'`, `'MCMC'`, `'SCE'`
-- Examples: `['MCMC', 'DDS', 'SCE']`
-
-### `complex_sizes` - Complex sizes for SCE
-
-Sizes of complexes for the SCE optimization method.
-
-Summary:
-- Type: `integer(i4), dimension(3)`
-- Required: no
-- Allowed values: `5`, `10`, `15`, `20`, `30`
-- Examples: `[5, 10, 15]`
 
 ### `niterations` - Number of iterations
 
@@ -110,35 +78,20 @@ Parameters for the MCMC error model: err = a + b+Q
 
 Summary:
 - Type: `real(dp), dimension(3, 2, max_iter)`
-- Flexible tail dims: 2
-- Required: yes
-- Examples: `[0.01, 0.6, 0.2]`
-
-### `include_parameters` - Include parameters
-
-List of parameter indices to include in the optimization.
-
-Summary:
-- Type: `logical, dimension(3)`
 - Required: no
-- Default: `.true.`
-- Examples: `[.true., .false., .true.]`
+- Default: `[0.01, 0.6, 0.2, 0.3]` (repeated, order: C)
 
 ## Example
 
 ```fortran
 &optimization
   name = 'test_optimization'
-  method = 'DDS'
-  try_methods(:) = 'MCMC', 'DDS', 'SCE'
-  complex_sizes(:) = 5, 10, 15
   niterations = 100
   tolerance = 0.0
   seed = -9
   dds_r = 0.2
   mcmc_opti = .true.
-  mcmc_error_params(:, 1, 1) = 0.01, 0.6, 0.2
-  include_parameters(:) = .true., .false., .true.
+  mcmc_error_params(1, 1, :) = 0.01, 0.6, 0.2, 0.3
 /
 ```
 

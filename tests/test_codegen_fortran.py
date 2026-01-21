@@ -92,7 +92,7 @@ def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
     assert generated == expected
 
 
-def test_generate_fortran_allows_scalar_array_default(tmp_path: Path) -> None:
+def test_generate_fortran_rejects_scalar_array_default(tmp_path: Path) -> None:
     schema = {
         "title": "Scalar array default",
         "x-fortran-namelist": "test_nml",
@@ -108,12 +108,31 @@ def test_generate_fortran_allows_scalar_array_default(tmp_path: Path) -> None:
         },
     }
 
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match=r".*array default must be a list"):
+        generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
+def test_generate_fortran_allows_items_default(tmp_path: Path) -> None:
+    schema = {
+        "title": "Items default",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4", "default": 2},
+                "x-fortran-shape": 4,
+            }
+        },
+    }
+
     output = tmp_path / "nml_test.f90"
     generate_fortran = _import_generate_fortran()
     generate_fortran(schema, output, kind_module="mo_kind")
 
     generated = output.read_text()
-    assert "integer(i4), parameter, public :: values_default = 1_i4" in generated
+    assert "integer(i4), parameter, public :: values_default = 2_i4" in generated
     assert "this%values = values_default" in generated
 
 
@@ -125,10 +144,8 @@ def test_generate_fortran_accepts_dimension_constants(tmp_path: Path) -> None:
         "properties": {
             "values": {
                 "type": "array",
-                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "items": {"type": "integer", "x-fortran-kind": "i4", "default": 1},
                 "x-fortran-shape": "max_layers",
-                "x-fortran-default-repeat": True,
-                "default": 1,
             }
         },
     }
@@ -189,6 +206,137 @@ def test_generate_fortran_rejects_nested_arrays(tmp_path: Path) -> None:
     generate_fortran = _import_generate_fortran()
     with pytest.raises(ValueError, match=r".*nested array properties"):
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
+def test_generate_fortran_rejects_flex_dim_on_scalar(tmp_path: Path) -> None:
+    schema = {
+        "title": "Flex dim scalar",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "count": {"type": "integer", "x-fortran-flex-tail-dims": 1},
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(
+        ValueError,
+        match=r".*x-fortran-flex-tail-dims is only supported for arrays",
+    ):
+        generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
+def test_generate_fortran_rejects_flex_dim_with_default(tmp_path: Path) -> None:
+    schema = {
+        "title": "Flex dim default",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": [2, 3],
+                "x-fortran-flex-tail-dims": 1,
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "default": [1, 2, 3],
+            }
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match=r".*flex arrays cannot define defaults"):
+        generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
+def test_generate_fortran_rejects_partial_array_default(tmp_path: Path) -> None:
+    schema = {
+        "title": "Partial default",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": [2, 2],
+                "default": [1, 2, 3],
+            }
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(
+        ValueError,
+        match=r".*array default shorter than declared x-fortran-shape",
+    ):
+        generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
+def test_generate_fortran_rejects_flex_dim_boolean_array(tmp_path: Path) -> None:
+    schema = {
+        "title": "Flex dim boolean",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "flags": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "x-fortran-flex-tail-dims": 1,
+                "items": {"type": "boolean"},
+            }
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match=r".*flex arrays cannot use boolean elements"):
+        generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
+def test_generate_fortran_rejects_flex_dim_exceeds_rank(tmp_path: Path) -> None:
+    schema = {
+        "title": "Flex dim exceeds rank",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": [2, 3],
+                "x-fortran-flex-tail-dims": 3,
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+            }
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(
+        ValueError,
+        match=r".*x-fortran-flex-tail-dims must not exceed",
+    ):
+        generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
+def test_generate_fortran_emits_filled_shape_for_flex_arrays(tmp_path: Path) -> None:
+    schema = {
+        "title": "Flex arrays",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "required": ["values"],
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": [2, 3],
+                "x-fortran-flex-tail-dims": 1,
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(schema, output, kind_module="mo_kind")
+
+    generated = output.read_text()
+    assert "procedure :: filled_shape" in generated
+    assert "_filled_shape(this, name, filled, errmsg)" in generated
+    assert "NML_ERR_PARTLY_SET" in generated
 
 
 def test_generate_fortran_requires_dimension_constants(tmp_path: Path) -> None:

@@ -47,6 +47,9 @@ module {{ module_name }}
     procedure :: from_file => {{ type_prefix }}_from_file
     procedure :: set => {{ type_prefix }}_set
     procedure :: is_set => {{ type_prefix }}_is_set
+{% if flex_arrays %}
+    procedure :: filled_shape => {{ type_prefix }}_filled_shape
+{% endif %}
     procedure :: is_valid => {{ type_prefix }}_is_valid
   end type {{ type_name }}
 
@@ -173,6 +176,10 @@ contains
 {% for decl in optional_argument_declarations %}
 {{ decl | indent(4, True) }}
 {% endfor %}
+{% if flex_bound_vars %}
+    integer :: &
+      {{ flex_bound_vars | join(', &\n      ') }}
+{% endif %}
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -238,18 +245,77 @@ contains
     end if
   end function {{ type_prefix }}_is_set
 
+{% if flex_arrays %}
+  !> \brief Determine the filled shape along flexible dimensions
+  integer function {{ type_prefix }}_filled_shape(this, name, filled, errmsg) result(status)
+    class({{ type_name }}), intent(in) :: this
+    character(len=*), intent(in) :: name
+    integer, intent(out) :: filled(:)
+    character(len=*), intent(out), optional :: errmsg
+    integer :: idx
+    integer :: dim
+{% if flex_bound_vars %}
+    integer :: &
+      {{ flex_bound_vars | join(', &\n      ') }}
+{% endif %}
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    select case (trim(name))
+{% for flex in flex_arrays %}
+    case ("{{ flex.name }}")
+      if (size(filled) /= {{ flex.rank }}) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "shape rank mismatch for '{{ flex.name }}'"
+        return
+      end if
+      do dim = 1, {{ flex.rank }}
+        filled(dim) = size(this%{{ flex.name }}, dim)
+      end do
+{% for dim in flex.flex_dims %}
+      filled({{ dim }}) = 0
+      do idx = ubound(this%{{ flex.name }}, {{ dim }}), &
+        lbound(this%{{ flex.name }}, {{ dim }}), -1
+        if (.not. ({{ flex.slice_missing_conditions[loop.index0] }})) then
+          filled({{ dim }}) = idx - lbound(this%{{ flex.name }}, {{ dim }}) + 1
+          exit
+        end if
+      end do
+{% endfor %}
+      if (minval(filled) > 0) then
+{% for bound in flex.bounds %}
+        {{ bound.lb_var }} = lbound(this%{{ flex.name }}, {{ bound.dim }})
+        {{ bound.ub_var }} = {{ bound.lb_var }} + filled({{ bound.dim }}) - 1
+{% endfor %}
+        if ({{ flex.prefix_any_missing_condition }}) then
+          status = NML_ERR_PARTLY_SET
+          if (present(errmsg)) errmsg = "array partly set: {{ flex.name }}"
+          return
+        end if
+      end if
+{% endfor %}
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "field is not a flexible array: " // trim(name)
+    end select
+  end function {{ type_prefix }}_filled_shape
+
+{% endif %}
   !> \brief Validate required values and constraints
   integer function {{ type_prefix }}_is_valid(this, errmsg) result(status)
     class({{ type_name }}), intent(in) :: this
     character(len=*), intent(out), optional :: errmsg
     integer :: istat
+{% if flex_arrays %}
+    integer, allocatable :: filled(:)
+{% endif %}
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
 
-{% if required_validations %}
+{% if required_scalar_validations %}
     ! required parameters
-{% for name in required_validations %}
+{% for name in required_scalar_validations %}
     istat = this%is_set("{{ name }}", errmsg=errmsg)
     if (istat == NML_ERR_NOT_SET) then
       status = NML_ERR_REQUIRED
@@ -265,6 +331,47 @@ contains
       status = istat
       return
     end if
+{% endfor %}
+{% endif %}
+{% if required_array_validations %}
+    ! required arrays
+{% for entry in required_array_validations %}
+    if ({{ entry.all_missing_condition }}) then
+      status = NML_ERR_REQUIRED
+      if (present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
+      return
+    end if
+    if ({{ entry.any_missing_condition }}) then
+      status = NML_ERR_PARTLY_SET
+      if (present(errmsg)) errmsg = "array partly set: {{ entry.name }}"
+      return
+    end if
+{% endfor %}
+{% endif %}
+{% if flex_arrays %}
+    ! flexible arrays
+{% for entry in flex_arrays %}
+    if (allocated(filled)) deallocate(filled)
+    allocate(filled({{ entry.rank }}))
+    istat = this%filled_shape("{{ entry.name }}", filled, errmsg=errmsg)
+    if (istat == NML_ERR_PARTLY_SET) then
+      status = istat
+      if (present(errmsg)) then
+        if (len_trim(errmsg) == 0) errmsg = "array partly set: {{ entry.name }}"
+      end if
+      return
+    end if
+    if (istat /= NML_OK) then
+      status = istat
+      return
+    end if
+{% if entry.required %}
+    if (minval(filled) == 0) then
+      status = NML_ERR_REQUIRED
+      if (present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
+      return
+    end if
+{% endif %}
 {% endfor %}
 {% endif %}
 {% if enum_checks %}

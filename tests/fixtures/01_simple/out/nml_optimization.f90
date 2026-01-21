@@ -179,7 +179,14 @@ contains
     integer(i4), intent(in), optional :: seed
     real(dp), intent(in), optional :: dds_r
     logical, intent(in), optional :: mcmc_opti
-    real(dp), dimension(3, 2, max_iter), intent(in), optional :: mcmc_error_params
+    real(dp), dimension(:, :, :), intent(in), optional :: mcmc_error_params
+    integer :: &
+      lb_1, &
+      lb_2, &
+      lb_3, &
+      ub_1, &
+      ub_2, &
+      ub_3
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -192,7 +199,30 @@ contains
     if (present(seed)) this%seed = seed
     if (present(dds_r)) this%dds_r = dds_r
     if (present(mcmc_opti)) this%mcmc_opti = mcmc_opti
-    if (present(mcmc_error_params)) this%mcmc_error_params = mcmc_error_params
+    if (present(mcmc_error_params)) then
+      if (size(mcmc_error_params, 1) > size(this%mcmc_error_params, 1)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'mcmc_error_params'"
+        return
+      end if
+      lb_1 = lbound(this%mcmc_error_params, 1)
+      ub_1 = lb_1 + size(mcmc_error_params, 1) - 1
+      if (size(mcmc_error_params, 2) > size(this%mcmc_error_params, 2)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'mcmc_error_params'"
+        return
+      end if
+      lb_2 = lbound(this%mcmc_error_params, 2)
+      ub_2 = lb_2 + size(mcmc_error_params, 2) - 1
+      if (size(mcmc_error_params, 3) > size(this%mcmc_error_params, 3)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 3 exceeds bounds for 'mcmc_error_params'"
+        return
+      end if
+      lb_3 = lbound(this%mcmc_error_params, 3)
+      ub_3 = lb_3 + size(mcmc_error_params, 3) - 1
+      this%mcmc_error_params(lb_1:ub_1, lb_2:ub_2, lb_3:ub_3) = mcmc_error_params
+    end if
 
     ! mark as configured
     this%is_configured = .true.

@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 from .codegen_fortran import (
     FieldTypeInfo,
+    _array_default_value,
     _collect_dimension_constants,
     _enum_values,
     _field_type_info,
@@ -147,7 +148,10 @@ def _render_template(
                 _collect_dimension_constants(type_info.dimensions, constants)
                 _validate_kind_allowlist(type_info, kind_map, kind_allowlist)
 
-                has_default = "default" in prop
+                if type_info.category == "array":
+                    has_default = _array_default_value(prop) is not None
+                else:
+                    has_default = "default" in prop
                 has_override = name in override_values
                 if value_mode in {"minimal-empty", "minimal-filled"} and has_default:
                     if value_mode == "minimal-filled" and has_override:
@@ -217,9 +221,12 @@ def _value_entries(
     if example_value is not None:
         return _entries_from_value(name, example_value, type_info, prop, constants)
 
-    if "default" in prop:
-        default_value = prop["default"]
-        if type_info.category == "array":
+    if type_info.category == "array":
+        array_default = _array_default_value(prop)
+        if array_default is not None:
+            default_value, default_from_items = array_default
+            if default_from_items and isinstance(default_value, list):
+                raise ValueError("array items default must be a scalar")
             if isinstance(default_value, list):
                 return _array_list_entries(name, default_value, type_info, prop, constants)
             scalar = _format_scalar_default(
@@ -229,6 +236,8 @@ def _value_entries(
             )
             entry_name = f"{name}{_array_slice(len(type_info.dimensions))}"
             return [(entry_name, scalar)]
+    elif "default" in prop:
+        default_value = prop["default"]
         scalar = _format_scalar_default(default_value, None, type_info.category)
         return [(name, scalar)]
 

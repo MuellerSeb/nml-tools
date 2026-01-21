@@ -7,7 +7,7 @@ program main
 
   type(nml_optimization_t) :: cfg
   character(len=256) :: file
-  integer :: status
+  integer :: status, shp(3)
   character(len=256) :: errmsg
 
   ! shorten string lengths for easier handling
@@ -21,9 +21,10 @@ program main
   real(real64) :: dds_r
   logical :: mcmc_opti
   real(real64), allocatable :: mcmc_error_params(:,:,:)
+  logical :: include_parameters(3)
 
   namelist /optimization/ name, method, try_methods, complex_sizes, niterations, tolerance, &
-    seed, dds_r, mcmc_opti, mcmc_error_params
+    seed, dds_r, mcmc_opti, mcmc_error_params, include_parameters
 
   call get_command_argument(1, file)
   if (len_trim(file) == 0) file = "out/optimization.nml"
@@ -47,10 +48,12 @@ program main
     size(cfg%mcmc_error_params, 2), &
     size(cfg%mcmc_error_params, 3)))
 
-  status = cfg%is_set("mcmc_error_params", idx=[1,2,3], errmsg=errmsg)
+  status = cfg%filled_shape("mcmc_error_params", filled=shp, errmsg=errmsg)
   if (status /= NML_OK) then
-    write(error_unit, '(a)') "field check failed: " // trim(errmsg)
+    write(error_unit, '(a)') "failed to get filled shape: " // trim(errmsg)
     stop status
+  else
+    write(*,*) "filled shape of mcmc_error_params: ", shp
   end if
 
   name = cfg%name
@@ -63,6 +66,6 @@ program main
   dds_r = cfg%dds_r
   mcmc_opti = cfg%mcmc_opti
   mcmc_error_params = cfg%mcmc_error_params
-
+  include_parameters = cfg%include_parameters
   write(*, nml=optimization)
 end program main

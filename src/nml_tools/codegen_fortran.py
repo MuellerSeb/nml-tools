@@ -179,12 +179,17 @@ def _build_context(
     local_init_assignments: list[str] = []
     set_required_assignments: list[str] = []
     presence_cases: list[dict[str, Any]] = []
+    required_scalar_names: set[str] = set()
+    required_array_by_name: dict[str, dict[str, Any]] = {}
+    flex_bound_vars: set[str] = set()
+    flex_arrays: list[dict[str, Any]] = []
     default_parameters: list[str] = []
     enum_parameters: list[str] = []
     enum_functions: list[dict[str, Any]] = []
     enum_checks: list[dict[str, Any]] = []
     kind_ids: list[str] = []
     requires_ieee = False
+    uses_partly_set = False
     helper_imports = [
         "nml_file_t",
         "nml_line_buffer",
@@ -219,6 +224,24 @@ def _build_context(
             if type_info.kind:
                 kind_ids.append(type_info.kind)
 
+            array_default_info: tuple[Any, bool] | None = None
+            if type_info.category == "array":
+                array_default_info = _array_default_value(prop)
+
+            flex_dim = _parse_flex_dim(prop, type_info)
+            if flex_dim > 0:
+                if type_info.element_category == "boolean":
+                    raise ValueError("flex arrays cannot use boolean elements")
+                if array_default_info is not None or any(
+                    key in prop
+                    for key in (
+                        "x-fortran-default-order",
+                        "x-fortran-default-repeat",
+                        "x-fortran-default-pad",
+                    )
+                ):
+                    raise ValueError("flex arrays cannot define defaults")
+
             declaration = _render_declaration(type_info.type_spec, type_info.dimensions, name)
             title_raw = prop.get("title")
             if title_raw is None:
@@ -233,14 +256,42 @@ def _build_context(
             local_decl = _render_declaration(type_info.type_spec, type_info.dimensions, name)
 
             is_required = name in required_set
-            has_default = "default" in prop
+            if type_info.category == "array":
+                has_default = array_default_info is not None
+            else:
+                has_default = "default" in prop
+
+            default_from_items = False
+            default_values: list[Any] | None = None
+            parsed_dims: list[int] | None = None
+            array_default_spec: ArrayDefaultSpec | None = None
+
+            if type_info.category == "array" and has_default:
+                if array_default_info is None:
+                    raise ValueError(f"missing array default for '{name}'")
+                default_raw, default_from_items = array_default_info
+                if default_from_items:
+                    if isinstance(default_raw, list):
+                        raise ValueError("array items default must be a scalar")
+                    default_values = [default_raw]
+                else:
+                    if not isinstance(default_raw, list):
+                        raise ValueError("array default must be a list")
+                    default_values = default_raw
+                    parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
+                    array_default_spec = _prepare_array_default(default_values, parsed_dims, prop)
+
             needs_sentinel = (not is_required) and (not has_default)
             requires_sentinel = is_required or needs_sentinel
 
+            arg_dimensions = type_info.dimensions
+            if type_info.category == "array" and (flex_dim > 0 or has_default):
+                arg_dimensions = [":" for _ in type_info.dimensions]
             argument_decl = _render_argument_declaration(
                 name=name,
                 type_info=type_info,
                 is_required=is_required,
+                dimensions=arg_dimensions,
             )
             local_init_assignments.append(f"{name} = this%{name}")
 
@@ -248,10 +299,16 @@ def _build_context(
             sentinel_condition: str | None = None
             set_sentinel_condition: str | None = None
             if requires_sentinel:
-                if is_required and type_info.category in {"boolean", "array"}:
+                if is_required and type_info.category == "boolean":
                     raise ValueError(f"required {type_info.category} '{name}' is not supported")
+                if is_required and type_info.category == "array":
+                    if type_info.element_category == "boolean":
+                        raise ValueError("required boolean arrays are not supported")
                 if needs_sentinel and type_info.category == "boolean":
                     raise ValueError(f"optional boolean '{name}' must define a default")
+                if needs_sentinel and type_info.category == "array":
+                    if type_info.element_category == "boolean":
+                        raise ValueError("optional boolean arrays must define a default")
                 value_expr, condition_expr, uses_ieee = _sentinel_expressions(
                     type_info,
                     var_ref=f"this%{name}",
@@ -276,6 +333,89 @@ def _build_context(
                         sent_com = _sentinel_comment(type_info, required=False)
                         set_optional_defaults.append(f"this%{name} = {set_value_expr}{sent_com}")
 
+            if is_required and type_info.category != "array":
+                required_scalar_names.add(name)
+
+            if is_required and type_info.category == "array" and flex_dim == 0:
+                element_category = type_info.element_category
+                if element_category is None:
+                    raise ValueError("array field missing element category")
+                all_missing, any_missing, uses_ieee = _array_missing_conditions(
+                    element_category,
+                    var_ref=f"this%{name}",
+                    len_ref=f"this%{name}",
+                )
+                required_array_by_name[name] = {
+                    "name": name,
+                    "all_missing_condition": all_missing,
+                    "any_missing_condition": any_missing,
+                }
+                uses_partly_set = True
+                if uses_ieee:
+                    requires_ieee = True
+
+            flex_bounds: list[dict[str, Any]] | None = None
+            partial_bounds: list[dict[str, Any]] | None = None
+            if flex_dim > 0:
+                rank = len(type_info.dimensions)
+                element_category = type_info.element_category
+                if element_category is None:
+                    raise ValueError("array field missing element category")
+                flex_dims = list(range(rank - flex_dim + 1, rank + 1))
+                slice_missing_conditions: list[str] = []
+                slice_uses_ieee = False
+                bounds: list[dict[str, Any]] = []
+                lb_vars: dict[int, str] = {}
+                ub_vars: dict[int, str] = {}
+                for dim in flex_dims:
+                    lb_var, ub_var = _flex_bound_vars(dim)
+                    lb_vars[dim] = lb_var
+                    ub_vars[dim] = ub_var
+                    bounds.append({"dim": dim, "lb_var": lb_var, "ub_var": ub_var})
+                    flex_bound_vars.add(lb_var)
+                    flex_bound_vars.add(ub_var)
+                    slice_ref = _slice_ref(name, rank, dim, "idx")
+                    slice_missing_expr, uses_ieee = _element_missing_expression(
+                        element_category,
+                        var_ref=slice_ref,
+                        len_ref=f"this%{name}",
+                    )
+                    slice_missing_conditions.append(
+                        f"all({slice_missing_expr})" if rank > 1 else slice_missing_expr
+                    )
+                    slice_uses_ieee = slice_uses_ieee or uses_ieee
+                prefix_ref = _slice_ref_bounds(name, rank, flex_dims, lb_vars, ub_vars)
+                prefix_missing_expr, uses_ieee_prefix = _element_missing_expression(
+                    element_category,
+                    var_ref=prefix_ref,
+                    len_ref=f"this%{name}",
+                )
+                prefix_any_missing_condition = f"any({prefix_missing_expr})"
+                flex_bounds = bounds
+                flex_arrays.append(
+                    {
+                        "name": name,
+                        "rank": rank,
+                        "flex_dims": flex_dims,
+                        "required": is_required,
+                        "bounds": bounds,
+                        "slice_missing_conditions": slice_missing_conditions,
+                        "prefix_any_missing_condition": prefix_any_missing_condition,
+                    }
+                )
+                uses_partly_set = True
+                if slice_uses_ieee or uses_ieee_prefix:
+                    requires_ieee = True
+            elif type_info.category == "array" and has_default:
+                rank = len(type_info.dimensions)
+                bounds = []
+                for dim in range(1, rank + 1):
+                    lb_var, ub_var = _flex_bound_vars(dim)
+                    bounds.append({"dim": dim, "lb_var": lb_var, "ub_var": ub_var})
+                    flex_bound_vars.add(lb_var)
+                    flex_bound_vars.add(ub_var)
+                partial_bounds = bounds
+
             default_assignment: str | None = None
             set_default_assignment: str | None = None
             if has_default and is_required:
@@ -283,59 +423,70 @@ def _build_context(
             if has_default:
                 default_const_name = f"{name}_default"
                 if type_info.category == "array":
-                    default_raw = prop["default"]
-                    default_is_scalar = not isinstance(default_raw, list)
-                    default_values = default_raw if isinstance(default_raw, list) else [default_raw]
-                    parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
-                    array_default = _prepare_array_default(default_values, parsed_dims, prop)
-                    repeat_raw = prop.get("x-fortran-default-repeat", False)
-                    if not isinstance(repeat_raw, bool):
-                        raise ValueError("array default repeat must be a boolean")
-                    repeat = bool(repeat_raw)
+                    if default_values is None:
+                        raise ValueError(f"missing array default for '{name}'")
+                    default_is_scalar = default_from_items
 
-                    pad_raw = prop.get("x-fortran-default-pad")
+                    repeat = False
+                    pad_raw = None
                     pad_const_name: str | None = None
                     pad_is_scalar = False
-                    if pad_raw is not None:
-                        pad_const_name = f"{name}_pad"
-                        pad_is_scalar = not isinstance(pad_raw, list)
-                        pad_values = pad_raw if isinstance(pad_raw, list) else [pad_raw]
-                        pad_values = _ensure_flat_scalar_list(pad_values, "array default pad")
-                        pad_elements = [
-                            _format_scalar_default(
-                                element, type_info.kind, type_info.element_category
-                            )
-                            for element in pad_values
-                        ]
-                        if pad_is_scalar:
-                            pad_literal = _format_scalar_default(
-                                pad_raw, type_info.kind, type_info.element_category
-                            )
-                            default_parameters.append(
-                                f"{type_info.type_spec}, parameter, public :: "
-                                f"{pad_const_name} = {pad_literal}"
-                            )
-                        else:
-                            default_parameters.append(
-                                f"{type_info.type_spec}, parameter, public :: "
-                                f"{pad_const_name}({len(pad_elements)}) = "
-                                f"[{', '.join(pad_elements)}]"
+
+                    if not default_from_items:
+                        repeat_raw = prop.get("x-fortran-default-repeat", False)
+                        if not isinstance(repeat_raw, bool):
+                            raise ValueError("array default repeat must be a boolean")
+                        repeat = bool(repeat_raw)
+                        pad_raw = prop.get("x-fortran-default-pad")
+                        if pad_raw is not None:
+                            pad_const_name = f"{name}_pad"
+                            pad_is_scalar = not isinstance(pad_raw, list)
+                            pad_values = pad_raw if isinstance(pad_raw, list) else [pad_raw]
+                            pad_values = _ensure_flat_scalar_list(pad_values, "array default pad")
+                            pad_elements = [
+                                _format_scalar_default(
+                                    element, type_info.kind, type_info.element_category
+                                )
+                                for element in pad_values
+                            ]
+                            if pad_is_scalar:
+                                pad_literal = _format_scalar_default(
+                                    pad_raw, type_info.kind, type_info.element_category
+                                )
+                                default_parameters.append(
+                                    f"{type_info.type_spec}, parameter, public :: "
+                                    f"{pad_const_name} = {pad_literal}"
+                                )
+                            else:
+                                default_parameters.append(
+                                    f"{type_info.type_spec}, parameter, public :: "
+                                    f"{pad_const_name}({len(pad_elements)}) = "
+                                    f"[{', '.join(pad_elements)}]"
+                                )
+
+                        if parsed_dims is None:
+                            parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
+                        if array_default_spec is None:
+                            array_default_spec = _prepare_array_default(
+                                default_values, parsed_dims, prop
                             )
 
                     if default_is_scalar:
                         default_literal = _format_scalar_default(
-                            default_raw, type_info.kind, type_info.element_category
+                            default_values[0], type_info.kind, type_info.element_category
                         )
                         default_parameters.append(
                             f"{type_info.type_spec}, parameter, public :: "
                             f"{default_const_name} = {default_literal}"
                         )
                     else:
+                        if array_default_spec is None:
+                            raise ValueError(f"missing array default specification for '{name}'")
                         default_elements = [
                             _format_scalar_default(
                                 element, type_info.kind, type_info.element_category
                             )
-                            for element in array_default.source_values
+                            for element in array_default_spec.source_values
                         ]
                         default_parameters.append(
                             f"{type_info.type_spec}, parameter, public :: "
@@ -343,36 +494,28 @@ def _build_context(
                             f"[{', '.join(default_elements)}]"
                         )
 
-                    if repeat and default_is_scalar:
+                    if default_from_items:
+                        default_assignment = f"this%{name} = {default_const_name}"
+                    elif (
+                        len(type_info.dimensions) == 1
+                        and array_default_spec is not None
+                        and array_default_spec.order_values is None
+                        and array_default_spec.pad_values is None
+                    ):
                         default_assignment = f"this%{name} = {default_const_name}"
                     else:
-                        if (
-                            not default_is_scalar
-                            and len(type_info.dimensions) == 1
-                            and array_default.order_values is None
-                            and array_default.pad_values is None
-                        ):
-                            default_assignment = f"this%{name} = {default_const_name}"
-                        else:
-                            source_expr = (
-                                default_const_name
-                                if not default_is_scalar
-                                else f"[{default_const_name}]"
-                            )
-                            shape_expr = ", ".join(type_info.dimensions)
-                            arguments = [source_expr, f"shape=[{shape_expr}]"]
-                            if array_default.order_values is not None:
+                        source_expr = default_const_name
+                        shape_expr = ", ".join(type_info.dimensions)
+                        arguments = [source_expr, f"shape=[{shape_expr}]"]
+                        if array_default_spec is not None:
+                            if array_default_spec.order_values is not None:
                                 order_literal = ", ".join(
-                                    str(index) for index in array_default.order_values
+                                    str(index) for index in array_default_spec.order_values
                                 )
                                 arguments.append(f"order=[{order_literal}]")
-                            if array_default.pad_values is not None:
+                            if array_default_spec.pad_values is not None:
                                 if repeat:
-                                    pad_expr = (
-                                        default_const_name
-                                        if not default_is_scalar
-                                        else f"[{default_const_name}]"
-                                    )
+                                    pad_expr = default_const_name
                                 else:
                                     if pad_const_name is None:
                                         raise ValueError(
@@ -384,7 +527,7 @@ def _build_context(
                                         else f"[{pad_const_name}]"
                                     )
                                 arguments.append(f"pad={pad_expr}")
-                            default_assignment = _format_reshape_assignment(name, arguments)
+                        default_assignment = _format_reshape_assignment(name, arguments)
                     set_default_assignment = default_assignment
                 else:
                     default_literal = _format_default(prop["default"], type_info, prop, constants)
@@ -459,15 +602,55 @@ def _build_context(
                         }
                     )
 
+            is_array = type_info.category == "array"
             if is_required:
-                set_required_assignments.append(f"this%{name} = {name}")
+                if is_array and flex_dim > 0:
+                    set_required_assignments.append(
+                        _render_flex_set_block(
+                            name,
+                            len(type_info.dimensions),
+                            flex_dim,
+                            flex_bounds or [],
+                        )
+                    )
+                elif is_array and has_default:
+                    set_required_assignments.append(
+                        _render_partial_set_block(
+                            name,
+                            len(type_info.dimensions),
+                            partial_bounds or [],
+                        )
+                    )
+                else:
+                    set_required_assignments.append(f"this%{name} = {name}")
 
             if not is_required:
-                set_present_assignment = f"if (present({name})) this%{name} = {name}"
+                if is_array and flex_dim > 0:
+                    block = _render_flex_set_block(
+                        name,
+                        len(type_info.dimensions),
+                        flex_dim,
+                        flex_bounds or [],
+                    )
+                    indented_block = "\n".join(f"  {line}" for line in block.splitlines())
+                    set_present_assignment = (
+                        f"if (present({name})) then\n{indented_block}\nend if"
+                    )
+                elif is_array and has_default:
+                    block = _render_partial_set_block(
+                        name,
+                        len(type_info.dimensions),
+                        partial_bounds or [],
+                    )
+                    indented_block = "\n".join(f"  {line}" for line in block.splitlines())
+                    set_present_assignment = (
+                        f"if (present({name})) then\n{indented_block}\nend if"
+                    )
+                else:
+                    set_present_assignment = f"if (present({name})) this%{name} = {name}"
             else:
                 set_present_assignment = None
 
-            is_array = type_info.category == "array"
             array_rank = len(type_info.dimensions) if is_array else 0
             element_condition: str | None = None
 
@@ -539,6 +722,20 @@ def _build_context(
         if f"property '{current_property}'" in msg:
             raise
         raise ValueError(f"property '{current_property}': {msg}") from exc
+    if uses_partly_set and "NML_ERR_PARTLY_SET" not in helper_imports:
+        helper_imports.append("NML_ERR_PARTLY_SET")
+    required_flex_names = {entry["name"] for entry in flex_arrays if entry["required"]}
+    required_scalar_validations: list[str] = []
+    for name in required_fields:
+        if name in required_scalar_names:
+            required_scalar_validations.append(name)
+        elif name not in required_array_by_name and name not in required_flex_names:
+            required_scalar_validations.append(name)
+    required_array_validations = [
+        required_array_by_name[name]
+        for name in required_fields
+        if name in required_array_by_name
+    ]
     namelist_vars = [field.name for field in fields]
     required_fields_specs = [field for field in fields if field.required]
     optional_fields_specs = [field for field in fields if not field.required]
@@ -563,7 +760,9 @@ def _build_context(
         "default_parameters": default_parameters,
         "enum_parameters": enum_parameters,
         "local_init_assignments": local_init_assignments,
-        "required_validations": required_fields,
+        "required_scalar_validations": required_scalar_validations,
+        "required_array_validations": required_array_validations,
+        "flex_arrays": flex_arrays,
         "assignments": [f"this%{field.name} = {field.name}" for field in fields],
         "argument_list": [field.name for field in required_fields_specs + optional_fields_specs],
         "required_argument_declarations": [
@@ -591,6 +790,7 @@ def _build_context(
         "helper_module": helper_module,
         "helper_imports": helper_imports,
         "presence_cases": presence_cases,
+        "flex_bound_vars": _sort_bound_vars(flex_bound_vars),
     }
 
     return context
@@ -860,6 +1060,29 @@ def _validate_length_token(length_expr: str) -> None:
     raise ValueError("string length must be an integer literal or identifier")
 
 
+def _parse_flex_dim(prop: dict[str, Any], type_info: FieldTypeInfo) -> int:
+    flex_raw = prop.get("x-fortran-flex-tail-dims")
+    if flex_raw is None:
+        flex_value = 0
+    else:
+        if isinstance(flex_raw, bool) or not isinstance(flex_raw, int):
+            raise ValueError("x-fortran-flex-tail-dims must be an integer")
+        flex_value = flex_raw
+    if flex_value < 0:
+        raise ValueError("x-fortran-flex-tail-dims must be >= 0")
+    if flex_value == 0:
+        return 0
+    if type_info.category != "array":
+        raise ValueError("x-fortran-flex-tail-dims is only supported for arrays")
+    if flex_value > len(type_info.dimensions):
+        raise ValueError("x-fortran-flex-tail-dims must not exceed array rank")
+    if any(dim == ":" for dim in type_info.dimensions):
+        raise ValueError(
+            "x-fortran-flex-tail-dims does not support deferred-size dimensions"
+        )
+    return flex_value
+
+
 def _collect_dimension_constants(
     dimensions: list[str],
     constants: dict[str, int | float] | None,
@@ -893,11 +1116,13 @@ def _render_argument_declaration(
     name: str,
     type_info: FieldTypeInfo,
     is_required: bool,
+    dimensions: list[str] | None = None,
 ) -> str:
     intent = "intent(in)"
     parts = [type_info.arg_type_spec]
-    if type_info.dimensions:
-        dims = ", ".join(type_info.dimensions)
+    arg_dimensions = dimensions if dimensions is not None else type_info.dimensions
+    if arg_dimensions:
+        dims = ", ".join(arg_dimensions)
         parts.append(f"dimension({dims})")
     if not is_required:
         parts.append(intent)
@@ -967,6 +1192,128 @@ def _sentinel_expressions(
     raise ValueError(f"unsupported sentinel category '{category}'")
 
 
+def _element_missing_expression(
+    category: str,
+    *,
+    var_ref: str,
+    len_ref: str | None = None,
+) -> tuple[str, bool]:
+    if category == "string":
+        length_ref = len_ref or var_ref
+        return f"{var_ref} == repeat(achar(0), len({length_ref}))", False
+    if category == "integer":
+        return f"{var_ref} == -huge({var_ref})", False
+    if category == "real":
+        return f"ieee_is_nan({var_ref})", True
+    raise ValueError(f"unsupported missing category '{category}'")
+
+
+def _array_missing_conditions(
+    element_category: str,
+    *,
+    var_ref: str,
+    len_ref: str | None = None,
+) -> tuple[str, str, bool]:
+    missing_expr, uses_ieee = _element_missing_expression(
+        element_category, var_ref=var_ref, len_ref=len_ref
+    )
+    return f"all({missing_expr})", f"any({missing_expr})", uses_ieee
+
+
+def _slice_ref(name: str, rank: int, dim: int, index_var: str) -> str:
+    dims = [":" for _ in range(rank)]
+    dims[dim - 1] = index_var
+    return f"this%{name}({', '.join(dims)})"
+
+
+def _flex_bound_vars(dim: int) -> tuple[str, str]:
+    return f"lb_{dim}", f"ub_{dim}"
+
+
+def _slice_ref_bounds(
+    name: str,
+    rank: int,
+    flex_dims: list[int],
+    lb_vars: dict[int, str],
+    ub_vars: dict[int, str],
+) -> str:
+    dims: list[str] = []
+    for dim in range(1, rank + 1):
+        if dim in flex_dims:
+            dims.append(f"{lb_vars[dim]}:{ub_vars[dim]}")
+        else:
+            dims.append(":")
+    return f"this%{name}({', '.join(dims)})"
+
+
+def _render_flex_set_block(
+    name: str,
+    rank: int,
+    flex_dim_count: int,
+    bounds: list[dict[str, Any]],
+) -> str:
+    flex_dims = list(range(rank - flex_dim_count + 1, rank + 1))
+    lb_vars = {entry["dim"]: entry["lb_var"] for entry in bounds}
+    ub_vars = {entry["dim"]: entry["ub_var"] for entry in bounds}
+    lines: list[str] = []
+    for dim in range(1, rank - flex_dim_count + 1):
+        lines.append(f"if (size({name}, {dim}) /= size(this%{name}, {dim})) then")
+        lines.append("  status = NML_ERR_INVALID_INDEX")
+        lines.append(
+            f"  if (present(errmsg)) errmsg = \"dimension {dim} mismatch for '{name}'\""
+        )
+        lines.append("  return")
+        lines.append("end if")
+    for entry in bounds:
+        dim = entry["dim"]
+        lb_var = entry["lb_var"]
+        ub_var = entry["ub_var"]
+        lines.append(f"if (size({name}, {dim}) > size(this%{name}, {dim})) then")
+        lines.append("  status = NML_ERR_INVALID_INDEX")
+        lines.append(
+            f"  if (present(errmsg)) errmsg = \"dimension {dim} exceeds bounds for '{name}'\""
+        )
+        lines.append("  return")
+        lines.append("end if")
+        lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
+        lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
+    lines.append(f"{_slice_ref_bounds(name, rank, flex_dims, lb_vars, ub_vars)} = {name}")
+    return "\n".join(lines)
+
+
+def _render_partial_set_block(name: str, rank: int, bounds: list[dict[str, Any]]) -> str:
+    lb_vars = {entry["dim"]: entry["lb_var"] for entry in bounds}
+    ub_vars = {entry["dim"]: entry["ub_var"] for entry in bounds}
+    dims_all = [entry["dim"] for entry in bounds]
+    lines: list[str] = []
+    for entry in bounds:
+        dim = entry["dim"]
+        lb_var = entry["lb_var"]
+        ub_var = entry["ub_var"]
+        lines.append(f"if (size({name}, {dim}) > size(this%{name}, {dim})) then")
+        lines.append("  status = NML_ERR_INVALID_INDEX")
+        lines.append(
+            f"  if (present(errmsg)) errmsg = \"dimension {dim} exceeds bounds for '{name}'\""
+        )
+        lines.append("  return")
+        lines.append("end if")
+        lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
+        lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
+    lines.append(f"{_slice_ref_bounds(name, rank, dims_all, lb_vars, ub_vars)} = {name}")
+    return "\n".join(lines)
+
+
+def _sort_bound_vars(values: set[str]) -> list[str]:
+    def sort_key(name: str) -> tuple[str, int]:
+        prefix, _, suffix = name.partition("_")
+        try:
+            return prefix, int(suffix)
+        except ValueError:
+            return prefix, 0
+
+    return sorted(values, key=sort_key)
+
+
 def _format_reshape_assignment(name: str, arguments: list[str]) -> str:
     lines = [f"this%{name} = reshape( &"]
     for index, arg in enumerate(arguments):
@@ -983,7 +1330,7 @@ def _format_default(
 ) -> str:
     if type_info.category == "array":
         if not isinstance(value, list):
-            value = [value]
+            raise ValueError("array default must be a list")
         parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
         array_default = _prepare_array_default(value, parsed_dims, prop)
         elements = [
@@ -1159,6 +1506,34 @@ def _enum_values(
     return enum_values
 
 
+def _array_default_value(prop: dict[str, Any]) -> tuple[Any, bool] | None:
+    if prop.get("type") != "array":
+        raise ValueError("array default lookup requires array properties")
+
+    default_defined = "default" in prop
+    items_default = _array_items_default(prop)
+    items_defined = "default" in items_default
+    items_value = items_default.get("default") if items_defined else None
+
+    if default_defined and items_defined:
+        raise ValueError("array default must be defined on property or items, not both")
+
+    if items_defined:
+        for key in ("x-fortran-default-order", "x-fortran-default-repeat", "x-fortran-default-pad"):
+            if key in prop:
+                raise ValueError("array items default must not use x-fortran-default-* options")
+        if isinstance(items_value, list):
+            raise ValueError("array items default must be a scalar")
+        return items_value, True
+
+    if default_defined:
+        default_value = prop.get("default")
+        if not isinstance(default_value, list):
+            raise ValueError("array default must be a list")
+        return default_value, False
+    return None
+
+
 def _array_items_enum(prop: dict[str, Any]) -> list[Any] | None:
     current = prop
     while current.get("type") == "array":
@@ -1169,6 +1544,18 @@ def _array_items_enum(prop: dict[str, Any]) -> list[Any] | None:
             raise ValueError("array property must define 'items'")
         current = items
     return current.get("enum")
+
+
+def _array_items_default(prop: dict[str, Any]) -> dict[str, Any]:
+    current = prop
+    while current.get("type") == "array":
+        items = current.get("items")
+        if not isinstance(items, dict):
+            raise ValueError("array property must define 'items'")
+        if items.get("type") == "array":
+            raise ValueError("nested array properties are not supported; use x-fortran-shape")
+        current = items
+    return current
 
 
 def _validate_enum_scalar(value: Any, category: str, label: str) -> None:
@@ -1196,10 +1583,13 @@ def _validate_enum_defaults(
     category: str,
     constants: dict[str, int | float] | None,
 ) -> None:
-    if "default" not in prop:
-        return
-    default_value = prop["default"]
     if type_info.category == "array":
+        array_default = _array_default_value(prop)
+        if array_default is None:
+            return
+        default_value, default_from_items = array_default
+        if default_from_items and isinstance(default_value, list):
+            raise ValueError("array items default must be a scalar")
         if isinstance(default_value, list):
             values = _ensure_flat_scalar_list(default_value, "array default")
             _parse_default_dimensions(type_info.dimensions, constants)
@@ -1214,6 +1604,9 @@ def _validate_enum_defaults(
             for value in pad_values:
                 _ensure_enum_member(value, enum_values, category, "pad")
         return
+    if "default" not in prop:
+        return
+    default_value = prop["default"]
     if isinstance(default_value, list):
         raise ValueError("scalar default must not be a list")
     _ensure_enum_member(default_value, enum_values, category, "default")

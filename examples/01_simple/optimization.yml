@@ -72,10 +72,19 @@ properties:
       type: number
       x-fortran-kind: dp
     x-fortran-shape: [3, 2, max_iter]
-    x-fortran-default-repeat: true
-    x-fortran-default-order: C
-    default: [0.01, 0.6, 0.2, 0.3]
+    x-fortran-flex-tail-dims: 2
+    examples: [[0.01, 0.6, 0.2]]
+  include_parameters:
+    title: Include parameters
+    description: List of parameter indices to include in the optimization.
+    type: array
+    items:
+      type: boolean
+      default: true
+    x-fortran-shape: [3]
+    examples: [[true, false, true]]
 required:
   - method
   - niterations
   - tolerance
+  - mcmc_error_params
