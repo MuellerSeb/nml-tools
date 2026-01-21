@@ -1458,9 +1458,9 @@ def _format_scalar_default(value: Any, kind: str | None, category: str | None) -
         literal = repr(number)
         if literal.lower() == "nan":
             raise ValueError("NaN defaults are not supported")
-        if "e" in literal:
-            literal = literal.replace("e", "e")
-        if "." not in literal and "e" not in literal and "E" not in literal:
+        if "E" in literal:
+            literal = literal.replace("E", "e")
+        if "." not in literal and "e" not in literal:
             literal = f"{literal}.0"
         suffix = f"_{kind}" if kind else ""
         return f"{literal}{suffix}"
