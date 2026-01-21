@@ -74,6 +74,15 @@ properties:
     x-fortran-shape: [3, 2, max_iter]
     x-fortran-flex-tail-dims: 2
     examples: [[0.01, 0.6, 0.2]]
+  include_parameters:
+    title: Include parameters
+    description: List of parameter indices to include in the optimization.
+    type: array
+    items:
+      type: boolean
+      default: true
+    x-fortran-shape: [3]
+    examples: [[true, false, true]]
 required:
   - method
   - niterations

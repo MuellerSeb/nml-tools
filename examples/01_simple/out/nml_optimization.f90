@@ -36,6 +36,7 @@ module nml_optimization
   integer(i4), parameter, public :: seed_default = -9_i4
   real(dp), parameter, public :: dds_r_default = 0.2_dp
   logical, parameter, public :: mcmc_opti_default = .true.
+  logical, parameter, public :: include_parameters_default = .true.
 
   ! enum values
   character(len=buf), parameter, public :: method_enum_values(3) = [character(len=buf) :: 'DDS', 'MCMC', 'SCE']
@@ -57,6 +58,7 @@ module nml_optimization
     real(dp) :: dds_r !< DDS perturbation rate
     logical :: mcmc_opti !< MCMC optimization
     real(dp), dimension(3, 2, max_iter) :: mcmc_error_params !< MCMC error parameters per domain
+    logical, dimension(3) :: include_parameters !< Include parameters
   contains
     procedure :: init => nml_optimization_init
     procedure :: from_file => nml_optimization_from_file
@@ -137,6 +139,7 @@ contains
     this%seed = seed_default
     this%dds_r = dds_r_default
     this%mcmc_opti = mcmc_opti_default ! bool values always need a default
+    this%include_parameters = include_parameters_default
   end function nml_optimization_init
 
   !> \brief Read optimization namelist from file
@@ -155,6 +158,7 @@ contains
     real(dp) :: dds_r
     logical :: mcmc_opti
     real(dp), dimension(3, 2, max_iter) :: mcmc_error_params
+    logical, dimension(3) :: include_parameters
     ! locals
     type(nml_file_t) :: nml
     integer :: iostat
@@ -171,7 +175,8 @@ contains
       seed, &
       dds_r, &
       mcmc_opti, &
-      mcmc_error_params
+      mcmc_error_params, &
+      include_parameters
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -185,6 +190,7 @@ contains
     dds_r = this%dds_r
     mcmc_opti = this%mcmc_opti
     mcmc_error_params = this%mcmc_error_params
+    include_parameters = this%include_parameters
 
     status = nml%open(file, errmsg=errmsg)
     if (status /= NML_OK) return
@@ -220,6 +226,7 @@ contains
     this%dds_r = dds_r
     this%mcmc_opti = mcmc_opti
     this%mcmc_error_params = mcmc_error_params
+    this%include_parameters = include_parameters
 
     ! mark as configured
     this%is_configured = .true.
@@ -238,6 +245,7 @@ contains
     seed, &
     dds_r, &
     mcmc_opti, &
+    include_parameters, &
     errmsg) result(status)
 
     class(nml_optimization_t), intent(inout) :: this
@@ -252,9 +260,12 @@ contains
     integer(i4), intent(in), optional :: seed
     real(dp), intent(in), optional :: dds_r
     logical, intent(in), optional :: mcmc_opti
+    logical, dimension(:), intent(in), optional :: include_parameters
     integer :: &
+      lb_1, &
       lb_2, &
       lb_3, &
+      ub_1, &
       ub_2, &
       ub_3
 
@@ -292,6 +303,16 @@ contains
     if (present(seed)) this%seed = seed
     if (present(dds_r)) this%dds_r = dds_r
     if (present(mcmc_opti)) this%mcmc_opti = mcmc_opti
+    if (present(include_parameters)) then
+      if (size(include_parameters, 1) > size(this%include_parameters, 1)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'include_parameters'"
+        return
+      end if
+      lb_1 = lbound(this%include_parameters, 1)
+      ub_1 = lb_1 + size(include_parameters, 1) - 1
+      this%include_parameters(lb_1:ub_1) = include_parameters
+    end if
 
     ! mark as configured
     this%is_configured = .true.
@@ -381,6 +402,13 @@ contains
       else
         if (all(ieee_is_nan(this%mcmc_error_params))) status = NML_ERR_NOT_SET
       end if
+    case ("include_parameters")
+      if (present(idx)) then
+        status = idx_check(idx, lbound(this%include_parameters), ubound(this%include_parameters), &
+          "include_parameters", errmsg)
+        if (status /= NML_OK) return
+      else
+      end if
     case default
       status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)
@@ -399,8 +427,10 @@ contains
     integer :: idx
     integer :: dim
     integer :: &
+      lb_1, &
       lb_2, &
       lb_3, &
+      ub_1, &
       ub_2, &
       ub_3
 

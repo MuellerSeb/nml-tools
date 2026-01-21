@@ -21,9 +21,10 @@ program main
   real(real64) :: dds_r
   logical :: mcmc_opti
   real(real64), allocatable :: mcmc_error_params(:,:,:)
+  logical :: include_parameters(3)
 
   namelist /optimization/ name, method, try_methods, complex_sizes, niterations, tolerance, &
-    seed, dds_r, mcmc_opti, mcmc_error_params
+    seed, dds_r, mcmc_opti, mcmc_error_params, include_parameters
 
   call get_command_argument(1, file)
   if (len_trim(file) == 0) file = "out/optimization.nml"
@@ -65,6 +66,6 @@ program main
   dds_r = cfg%dds_r
   mcmc_opti = cfg%mcmc_opti
   mcmc_error_params = cfg%mcmc_error_params
-
+  include_parameters = cfg%include_parameters
   write(*, nml=optimization)
 end program main

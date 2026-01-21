@@ -21,4 +21,6 @@
   ! MCMC error parameters per domain
   mcmc_error_params(:, 1, 1) = 0.01, 0.6, 0.2
   mcmc_error_params(:, 2, 1) = 0.6, 0.6, 0.6
+  ! Include parameters
+  include_parameters(:) = .true., .false., .true.
 /

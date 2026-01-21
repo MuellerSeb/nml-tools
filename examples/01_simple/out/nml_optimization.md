@@ -18,6 +18,7 @@ All relevant configurations for the optimization parameters.
 | `dds_r` | real | no | DDS perturbation rate |
 | `mcmc_opti` | logical | no | MCMC optimization |
 | `mcmc_error_params` | real array | yes | MCMC error parameters per domain |
+| `include_parameters` | logical array | no | Include parameters |
 
 ## Field details
 
@@ -113,6 +114,16 @@ Summary:
 - Required: yes
 - Examples: `[0.01, 0.6, 0.2]`
 
+### `include_parameters` - Include parameters
+
+List of parameter indices to include in the optimization.
+
+Summary:
+- Type: `logical, dimension(3)`
+- Required: no
+- Default: `.true.`
+- Examples: `[.true., .false., .true.]`
+
 ## Example
 
 ```fortran
@@ -127,6 +138,7 @@ Summary:
   dds_r = 0.2
   mcmc_opti = .true.
   mcmc_error_params(:, 1, 1) = 0.01, 0.6, 0.2
+  include_parameters(:) = .true., .false., .true.
 /
 ```
 

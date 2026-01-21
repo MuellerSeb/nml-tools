@@ -130,7 +130,8 @@ x-fortran-default-order: C
 - Location: array properties with `default`.
 - Type: boolean.
 - Meaning: repeat the provided default values to fill the full shape.
-- When the default is a scalar, it is broadcast to the whole array.
+- Array defaults must be lists; to broadcast a scalar, set `default` on
+  `items` instead.
 - Cannot be used together with `x-fortran-default-pad`.
 
 Example:
