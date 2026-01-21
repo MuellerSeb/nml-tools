@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 import sys
 from pathlib import Path
@@ -42,6 +43,15 @@ def _load_config(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise click.ClickException("config must be a table")
     return data
+
+
+def _load_config_checked(path: Path) -> dict[str, Any]:
+    try:
+        return _load_config(path)
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - tomllib may raise ValueError
+        raise click.ClickException(f"failed to read config: {exc}") from exc
 
 
 def _resolve_optional_path(
@@ -237,6 +247,8 @@ def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
                 raise click.ClickException(
                     f"constant '{name}' value '{value_text}' must be numeric"
                 ) from exc
+            if math.isinf(value) or math.isnan(value):
+                raise click.ClickException(f"constant '{name}' must be finite")
         constants[name] = value
     return constants
 
@@ -346,7 +358,7 @@ def cli(verbose: int, quiet: int) -> None:
 def generate(config_path: Path) -> None:
     """Generate outputs from a configuration file."""
     logger.info("Loading config from %s", config_path)
-    config = _load_config(config_path)
+    config = _load_config_checked(config_path)
     base_dir = config_path.parent
     logger.debug("Base directory: %s", base_dir)
     helper_path, helper_module, helper_buffer, helper_header = _load_helper_settings(
@@ -439,7 +451,7 @@ def generate(config_path: Path) -> None:
 def gen_fortran(config_path: Path) -> None:
     """Generate Fortran module(s)."""
     logger.info("Loading config from %s", config_path)
-    config = _load_config(config_path)
+    config = _load_config_checked(config_path)
     base_dir = config_path.parent
     logger.debug("Base directory: %s", base_dir)
     helper_path, helper_module, helper_buffer, helper_header = _load_helper_settings(
@@ -541,7 +553,7 @@ def validate(
     if schema_paths:
         if config_path is not None:
             logger.info("Loading config from %s", config_path)
-            config = _load_config(config_path)
+            config = _load_config_checked(config_path)
             cfg_constants, _ = _load_constants(config)
             constants = {**cfg_constants, **constants}
         for schema_file in schema_paths:
@@ -555,10 +567,7 @@ def validate(
         if config_path is None:
             config_path = Path("nml-config.toml")
         logger.info("Loading config from %s", config_path)
-        try:
-            config = _load_config(config_path)
-        except FileNotFoundError as exc:
-            raise click.ClickException(str(exc)) from exc
+        config = _load_config_checked(config_path)
         base_dir = config_path.parent
         cfg_constants, _ = _load_constants(config)
         constants = {**cfg_constants, **constants}
@@ -638,10 +647,7 @@ def validate(
 def gen_markdown(config_path: Path) -> None:
     """Generate Markdown docs."""
     logger.info("Loading config from %s", config_path)
-    try:
-        config = _load_config(config_path)
-    except FileNotFoundError as exc:
-        raise click.ClickException(str(exc)) from exc
+    config = _load_config_checked(config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
     entries = _iter_namelists(config, base_dir)
@@ -676,7 +682,7 @@ def gen_markdown(config_path: Path) -> None:
 def gen_template(config_path: Path) -> None:
     """Generate template namelist(s)."""
     logger.info("Loading config from %s", config_path)
-    config = _load_config(config_path)
+    config = _load_config_checked(config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
     _, kind_map, kind_allowlist = _load_kind_settings(config)
