@@ -9,7 +9,7 @@
   ! Complex sizes for SCE
   complex_sizes(:) = 5, 10, 15
   ! Number of iterations
-  niterations = 4
+  niterations = 14
   ! Convergence tolerance
   tolerance = 0.1
   ! Random seed
@@ -18,7 +18,7 @@
   dds_r = 0.2
   ! MCMC optimization
   mcmc_opti = .true.
-  ! MCMC error parameters per domain
+  ! MCMC error parameters per iteration
   mcmc_error_params(:, 1, 1) = 0.01, 0.6, 0.2
   mcmc_error_params(:, 2, 1) = 0.6, 0.6, 0.6
   ! Include parameters

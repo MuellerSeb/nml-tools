@@ -17,7 +17,7 @@ All relevant configurations for the optimization parameters.
 | `seed` | integer | no | Random seed |
 | `dds_r` | real | no | DDS perturbation rate |
 | `mcmc_opti` | logical | no | MCMC optimization |
-| `mcmc_error_params` | real array | yes | MCMC error parameters per domain |
+| `mcmc_error_params` | real array | yes | MCMC error parameters per iteration |
 | `include_parameters` | logical array | no | Include parameters |
 
 ## Field details
@@ -65,8 +65,9 @@ Summary:
 Number of iterations for the optimization algorithm
 
 Summary:
-- Type: `integer`
+- Type: `integer(i4)`
 - Required: yes
+- Minimum: `>= 10`
 - Examples: `100`
 
 ### `tolerance` - Convergence tolerance
@@ -74,8 +75,10 @@ Summary:
 Tolerance for convergence of the optimization algorithm.
 
 Summary:
-- Type: `real`
+- Type: `real(dp)`
 - Required: yes
+- Minimum: `> 0.0`
+- Examples: `0.001`
 
 ### `seed` - Random seed
 
@@ -94,6 +97,7 @@ Summary:
 - Type: `real(dp)`
 - Required: no
 - Default: `0.2`
+- Minimum: `> 0.0`
 
 ### `mcmc_opti` - MCMC optimization
 
@@ -104,14 +108,15 @@ Summary:
 - Required: no
 - Default: `.true.`
 
-### `mcmc_error_params` - MCMC error parameters per domain
+### `mcmc_error_params` - MCMC error parameters per iteration
 
-Parameters for the MCMC error model: err = a + b+Q
+Parameters for the MCMC error model
 
 Summary:
 - Type: `real(dp), dimension(3, 2, max_iter)`
 - Flexible tail dims: 2
 - Required: yes
+- Minimum: `>= 0.0`
 - Examples: `[0.01, 0.6, 0.2]`
 
 ### `include_parameters` - Include parameters
@@ -133,7 +138,7 @@ Summary:
   try_methods(:) = 'MCMC', 'DDS', 'SCE'
   complex_sizes(:) = 5, 10, 15
   niterations = 100
-  tolerance = 0.0
+  tolerance = 0.001
   seed = -9
   dds_r = 0.2
   mcmc_opti = .true.

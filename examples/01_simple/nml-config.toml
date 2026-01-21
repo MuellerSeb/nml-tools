@@ -39,7 +39,7 @@ doc_mode = "documented"      # or "plain"
 value_mode = "filled"        # empty | filled | minimal-empty | minimal-filled
 
 [templates.values.optimization]
-niterations = 4
+niterations = 14
 tolerance = 0.1
 mcmc_error_params = [0.01, 0.6, 0.2, 0.6, 0.6, 0.6]
 include_parameters = [true, false, true]

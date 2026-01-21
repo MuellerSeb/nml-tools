@@ -17,6 +17,7 @@ module nml_optimization
     NML_ERR_CLOSE, &
     NML_ERR_REQUIRED, &
     NML_ERR_ENUM, &
+    NML_ERR_BOUNDS, &
     NML_ERR_NOT_SET, &
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
@@ -39,11 +40,19 @@ module nml_optimization
   logical, parameter, public :: include_parameters_default = .true.
 
   ! enum values
-  character(len=buf), parameter, public :: method_enum_values(3) = [character(len=buf) :: 'DDS', 'MCMC', 'SCE']
-  character(len=buf), parameter, public :: try_methods_enum_values(3) = [character(len=buf) :: 'DDS', 'MCMC', 'SCE']
+  character(len=buf), parameter, public :: &
+    method_enum_values(3) = [character(len=buf) :: 'DDS', 'MCMC', 'SCE']
+  character(len=buf), parameter, public :: &
+    try_methods_enum_values(3) = [character(len=buf) :: 'DDS', 'MCMC', 'SCE']
   integer(i4), parameter, public :: complex_sizes_enum_values(5) = [5_i4, 10_i4, 15_i4, 20_i4, 30_i4]
 
-  !> \class optimization_t
+  ! bounds values
+  integer(i4), parameter, public :: niterations_min = 10_i4
+  real(dp), parameter, public :: tolerance_min_excl = 0.0_dp
+  real(dp), parameter, public :: dds_r_min_excl = 0.0_dp
+  real(dp), parameter, public :: mcmc_error_params_min = 0.0_dp
+
+  !> \class nml_optimization_t
   !> \brief Optimization configurations
   !> \details All relevant configurations for the optimization parameters.
   type, public :: nml_optimization_t
@@ -52,12 +61,12 @@ module nml_optimization
     character(len=buf) :: method !< Optimization method
     character(len=buf), dimension(3) :: try_methods !< Try alternative methods
     integer(i4), dimension(3) :: complex_sizes !< Complex sizes for SCE
-    integer :: niterations !< Number of iterations
-    real :: tolerance !< Convergence tolerance
+    integer(i4) :: niterations !< Number of iterations
+    real(dp) :: tolerance !< Convergence tolerance
     integer(i4) :: seed !< Random seed
     real(dp) :: dds_r !< DDS perturbation rate
     logical :: mcmc_opti !< MCMC optimization
-    real(dp), dimension(3, 2, max_iter) :: mcmc_error_params !< MCMC error parameters per domain
+    real(dp), dimension(3, 2, max_iter) :: mcmc_error_params !< MCMC error parameters per iteration
     logical, dimension(3) :: include_parameters !< Include parameters
   contains
     procedure :: init => nml_optimization_init
@@ -118,6 +127,78 @@ contains
     in_enum = any(val == complex_sizes_enum_values)
   end function complex_sizes_in_enum
 
+  !> \brief Check whether a value is within bounds
+  elemental logical function niterations_in_bounds(val, allow_missing) result(in_bounds)
+    integer(i4), intent(in) :: val
+    logical, intent(in), optional :: allow_missing
+
+    if (present(allow_missing)) then
+      if (allow_missing) then
+        if (val == -huge(val)) then
+          in_bounds = .true.
+          return
+        end if
+      end if
+    end if
+
+    in_bounds = .true.
+    if (val < niterations_min) in_bounds = .false.
+  end function niterations_in_bounds
+
+  !> \brief Check whether a value is within bounds
+  elemental logical function tolerance_in_bounds(val, allow_missing) result(in_bounds)
+    real(dp), intent(in) :: val
+    logical, intent(in), optional :: allow_missing
+
+    if (present(allow_missing)) then
+      if (allow_missing) then
+        if (ieee_is_nan(val)) then
+          in_bounds = .true.
+          return
+        end if
+      end if
+    end if
+
+    in_bounds = .true.
+    if (val <= tolerance_min_excl) in_bounds = .false.
+  end function tolerance_in_bounds
+
+  !> \brief Check whether a value is within bounds
+  elemental logical function dds_r_in_bounds(val, allow_missing) result(in_bounds)
+    real(dp), intent(in) :: val
+    logical, intent(in), optional :: allow_missing
+
+    if (present(allow_missing)) then
+      if (allow_missing) then
+        if (ieee_is_nan(val)) then
+          in_bounds = .true.
+          return
+        end if
+      end if
+    end if
+
+    in_bounds = .true.
+    if (val <= dds_r_min_excl) in_bounds = .false.
+  end function dds_r_in_bounds
+
+  !> \brief Check whether a value is within bounds
+  elemental logical function mcmc_error_params_in_bounds(val, allow_missing) result(in_bounds)
+    real(dp), intent(in) :: val
+    logical, intent(in), optional :: allow_missing
+
+    if (present(allow_missing)) then
+      if (allow_missing) then
+        if (ieee_is_nan(val)) then
+          in_bounds = .true.
+          return
+        end if
+      end if
+    end if
+
+    in_bounds = .true.
+    if (val < mcmc_error_params_min) in_bounds = .false.
+  end function mcmc_error_params_in_bounds
+
   !> \brief Initialize defaults and sentinels for optimization
   integer function nml_optimization_init(this, errmsg) result(status)
     class(nml_optimization_t), intent(inout) :: this
@@ -152,8 +233,8 @@ contains
     character(len=buf) :: method
     character(len=buf), dimension(3) :: try_methods
     integer(i4), dimension(3) :: complex_sizes
-    integer :: niterations
-    real :: tolerance
+    integer(i4) :: niterations
+    real(dp) :: tolerance
     integer(i4) :: seed
     real(dp) :: dds_r
     logical :: mcmc_opti
@@ -251,8 +332,8 @@ contains
     class(nml_optimization_t), intent(inout) :: this
     character(len=*), intent(out), optional :: errmsg
     character(len=*), intent(in) :: method
-    integer, intent(in) :: niterations
-    real, intent(in) :: tolerance
+    integer(i4), intent(in) :: niterations
+    real(dp), intent(in) :: tolerance
     real(dp), dimension(:, :, :), intent(in) :: mcmc_error_params
     character(len=*), intent(in), optional :: name
     character(len=*), dimension(3), intent(in), optional :: try_methods
@@ -575,6 +656,45 @@ contains
     if (.not. all(complex_sizes_in_enum(this%complex_sizes, allow_missing=.true.))) then
       status = NML_ERR_ENUM
       if (present(errmsg)) errmsg = "enum constraint failed: complex_sizes"
+      return
+    end if
+    ! bounds constraints
+    istat = this%is_set("niterations", errmsg=errmsg)
+    if (istat == NML_OK) then
+      if (.not. niterations_in_bounds(this%niterations)) then
+        status = NML_ERR_BOUNDS
+        if (present(errmsg)) errmsg = "bounds constraint failed: niterations"
+        return
+      end if
+    else if (istat /= NML_ERR_NOT_SET) then
+      status = istat
+      return
+    end if
+    istat = this%is_set("tolerance", errmsg=errmsg)
+    if (istat == NML_OK) then
+      if (.not. tolerance_in_bounds(this%tolerance)) then
+        status = NML_ERR_BOUNDS
+        if (present(errmsg)) errmsg = "bounds constraint failed: tolerance"
+        return
+      end if
+    else if (istat /= NML_ERR_NOT_SET) then
+      status = istat
+      return
+    end if
+    istat = this%is_set("dds_r", errmsg=errmsg)
+    if (istat == NML_OK) then
+      if (.not. dds_r_in_bounds(this%dds_r)) then
+        status = NML_ERR_BOUNDS
+        if (present(errmsg)) errmsg = "bounds constraint failed: dds_r"
+        return
+      end if
+    else if (istat /= NML_ERR_NOT_SET) then
+      status = istat
+      return
+    end if
+    if (.not. all(mcmc_error_params_in_bounds(this%mcmc_error_params, allow_missing=.true.))) then
+      status = NML_ERR_BOUNDS
+      if (present(errmsg)) errmsg = "bounds constraint failed: mcmc_error_params"
       return
     end if
   end function nml_optimization_is_valid

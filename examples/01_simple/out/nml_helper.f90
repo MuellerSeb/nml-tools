@@ -31,6 +31,8 @@ module nml_helper
   integer, parameter, public :: NML_ERR_NOT_SET = 12
   !> \brief Status code: array partially set
   integer, parameter, public :: NML_ERR_PARTLY_SET = 13
+  !> \brief Status code: bounds validation failed
+  integer, parameter, public :: NML_ERR_BOUNDS = 14
   !> \brief Status code: invalid field name
   integer, parameter, public :: NML_ERR_INVALID_NAME = 20
   !> \brief Status code: invalid index
