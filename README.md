@@ -177,6 +177,36 @@ values_pad_c:
   x-fortran-default-pad: 0
 ```
 
+### Numeric bounds
+
+You can add minimum/maximum constraints for integer or real values. For arrays,
+the bounds apply to each item and must be defined on `items`.
+
+- Keywords: `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`
+- Applies to: `integer` and `number` (`real` in Fortran)
+- For arrays: bounds belong on `items`, not the array property
+
+Example (scalars):
+
+```yaml
+tolerance:
+  type: number
+  x-fortran-kind: dp
+  minimum: 0.0
+  exclusiveMaximum: 1.0
+```
+
+Example (array items):
+
+```yaml
+counts:
+  type: array
+  x-fortran-shape: 3
+  items:
+    type: integer
+    minimum: 1
+```
+
 ## Configuration (nml-config.toml)
 
 The CLI reads a TOML config file. Paths are resolved relative to the config
@@ -267,6 +297,7 @@ Status codes (defined in the helper module):
 | `NML_ERR_ENUM` (11) | enum constraint failed |
 | `NML_ERR_NOT_SET` (12) | field not set (sentinel) |
 | `NML_ERR_PARTLY_SET` (13) | array partially set |
+| `NML_ERR_BOUNDS` (14) | bounds constraint failed |
 | `NML_ERR_INVALID_NAME` (20) | unknown field name |
 | `NML_ERR_INVALID_INDEX` (21) | invalid index for array access |
 
@@ -371,8 +402,9 @@ Main missing features compared to JSON Schema:
   `propertyNames`, `dependencies`.
 - No advanced array constraints: tuple typing, `contains`, `minItems`,
   `maxItems`, `uniqueItems`.
-- No numeric or string validation keywords like `minimum`, `maximum`,
-  `multipleOf`, `minLength`, `maxLength`, `pattern`, `format`.
+- No numeric or string validation keywords like `multipleOf`, `minLength`,
+  `maxLength`, `pattern`, `format` (bounds are supported via `minimum`,
+  `maximum`, `exclusiveMinimum`, and `exclusiveMaximum`).
 - No nested object schemas; properties are scalars or arrays of scalars only.
 
 Use the `x-fortran-*` extensions to express kind, length, and shape information

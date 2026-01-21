@@ -34,6 +34,13 @@ module {{ module_name }}
 {% endfor %}
 
 {% endif %}
+{% if bounds_parameters %}
+  ! bounds values
+{% for stmt in bounds_parameters %}
+  {{ stmt }}
+{% endfor %}
+
+{% endif %}
   !> \class {{ doc_class }}
   !> \brief {{ brief_text }}
   !> \details {{ details_text | replace('\n', '\n  !! ') }}
@@ -76,6 +83,33 @@ contains
     in_enum = any(val == {{ enum.enum_values_name }})
 {% endif %}
   end function {{ enum.func_name }}
+
+{% endfor %}
+{% endif %}
+{% if bounds_functions %}
+{% for bounds in bounds_functions %}
+  !> \brief Check whether a value is within bounds
+  elemental logical function {{ bounds.func_name }}(val, allow_missing) result(in_bounds)
+    {{ bounds.arg_type_spec }}, intent(in) :: val
+    logical, intent(in), optional :: allow_missing
+
+    if (present(allow_missing)) then
+      if (allow_missing) then
+        if ({{ bounds.missing_condition }}) then
+          in_bounds = .true.
+          return
+        end if
+      end if
+    end if
+
+    in_bounds = .true.
+{% if bounds.has_min %}
+    if (val {% if bounds.min_exclusive %}<={% else %}<{% endif %} {{ bounds.min_name }}) in_bounds = .false.
+{% endif %}
+{% if bounds.has_max %}
+    if (val {% if bounds.max_exclusive %}>={% else %}>{% endif %} {{ bounds.max_name }}) in_bounds = .false.
+{% endif %}
+  end function {{ bounds.func_name }}
 
 {% endfor %}
 {% endif %}
@@ -389,6 +423,30 @@ contains
       if (.not. {{ check.func_name }}({{ check.element_ref }})) then
         status = NML_ERR_ENUM
         if (present(errmsg)) errmsg = "enum constraint failed: {{ check.name }}"
+        return
+      end if
+    else if (istat /= NML_ERR_NOT_SET) then
+      status = istat
+      return
+    end if
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if bounds_checks %}
+    ! bounds constraints
+{% for check in bounds_checks %}
+{% if check.is_array %}
+    if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
+      status = NML_ERR_BOUNDS
+      if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.name }}"
+      return
+    end if
+{% else %}
+    istat = this%is_set("{{ check.name }}", errmsg=errmsg)
+    if (istat == NML_OK) then
+      if (.not. {{ check.func_name }}({{ check.element_ref }})) then
+        status = NML_ERR_BOUNDS
+        if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.name }}"
         return
       end if
     else if (istat /= NML_ERR_NOT_SET) then

@@ -168,7 +168,7 @@ def _build_context(
     required_set = set(required_fields)
     module_name = f"nml_{namelist_name}"
     type_name = f"{module_name}_t"
-    doc_class = f"{namelist_name}_t"
+    doc_class = f"{module_name}_t"
     brief_text = schema.get("title", namelist_name)
     details_text = schema.get("description", brief_text)
 
@@ -187,6 +187,9 @@ def _build_context(
     enum_parameters: list[str] = []
     enum_functions: list[dict[str, Any]] = []
     enum_checks: list[dict[str, Any]] = []
+    bounds_parameters: list[str] = []
+    bounds_functions: list[dict[str, Any]] = []
+    bounds_checks: list[dict[str, Any]] = []
     kind_ids: list[str] = []
     requires_ieee = False
     uses_partly_set = False
@@ -202,6 +205,7 @@ def _build_context(
         "NML_ERR_CLOSE",
         "NML_ERR_REQUIRED",
         "NML_ERR_ENUM",
+        "NML_ERR_BOUNDS",
         "NML_ERR_NOT_SET",
         "NML_ERR_INVALID_NAME",
         "NML_ERR_INVALID_INDEX",
@@ -558,13 +562,21 @@ def _build_context(
                     for value in enum_values
                 ]
                 if enum_category == "string":
-                    enum_array_literal = f"[{type_info.type_spec} :: {', '.join(enum_literals)}]"
+                    enum_array_literal = (
+                        f"[{type_info.type_spec} :: {', '.join(enum_literals)}]"
+                    )
                 else:
                     enum_array_literal = f"[{', '.join(enum_literals)}]"
-                enum_parameters.append(
-                    f"{type_info.type_spec}, parameter, public :: "
-                    f"{enum_const_name}({len(enum_literals)}) = {enum_array_literal}"
-                )
+                if enum_category == "string":
+                    enum_parameters.append(
+                        f"{type_info.type_spec}, parameter, public :: &\n"
+                        f"    {enum_const_name}({len(enum_literals)}) = {enum_array_literal}"
+                    )
+                else:
+                    enum_parameters.append(
+                        f"{type_info.type_spec}, parameter, public :: "
+                        f"{enum_const_name}({len(enum_literals)}) = {enum_array_literal}"
+                    )
                 enum_type_info = (
                     _element_type_info(type_info) if type_info.category == "array" else type_info
                 )
@@ -597,6 +609,76 @@ def _build_context(
                         {
                             "name": name,
                             "func_name": f"{name}_in_enum",
+                            "is_array": False,
+                            "element_ref": f"this%{name}",
+                        }
+                    )
+
+            bounds_spec = _bounds_spec(prop, type_info)
+            if bounds_spec is not None:
+                bounds_category = bounds_spec["category"]
+                bounds_type_info = (
+                    _element_type_info(type_info) if type_info.category == "array" else type_info
+                )
+                min_value = bounds_spec["min_value"]
+                max_value = bounds_spec["max_value"]
+                min_exclusive = bounds_spec["min_exclusive"]
+                max_exclusive = bounds_spec["max_exclusive"]
+                min_name = None
+                max_name = None
+                if min_value is not None:
+                    min_name = f"{name}_min_excl" if min_exclusive else f"{name}_min"
+                    min_literal = _format_scalar_default(
+                        min_value, bounds_type_info.kind, bounds_category
+                    )
+                    bounds_parameters.append(
+                        f"{bounds_type_info.type_spec}, parameter, public :: "
+                        f"{min_name} = {min_literal}"
+                    )
+                if max_value is not None:
+                    max_name = f"{name}_max_excl" if max_exclusive else f"{name}_max"
+                    max_literal = _format_scalar_default(
+                        max_value, bounds_type_info.kind, bounds_category
+                    )
+                    bounds_parameters.append(
+                        f"{bounds_type_info.type_spec}, parameter, public :: "
+                        f"{max_name} = {max_literal}"
+                    )
+                _, missing_condition, uses_ieee = _sentinel_expressions(
+                    bounds_type_info,
+                    var_ref="val",
+                    len_ref="val",
+                )
+                if uses_ieee:
+                    requires_ieee = True
+                bounds_functions.append(
+                    {
+                        "name": name,
+                        "func_name": f"{name}_in_bounds",
+                        "arg_type_spec": bounds_type_info.arg_type_spec,
+                        "has_min": min_value is not None,
+                        "has_max": max_value is not None,
+                        "min_name": min_name,
+                        "max_name": max_name,
+                        "min_exclusive": min_exclusive,
+                        "max_exclusive": max_exclusive,
+                        "missing_condition": missing_condition,
+                    }
+                )
+                if type_info.category == "array":
+                    bounds_checks.append(
+                        {
+                            "name": name,
+                            "func_name": f"{name}_in_bounds",
+                            "is_array": True,
+                            "array_ref": f"this%{name}",
+                        }
+                    )
+                else:
+                    bounds_checks.append(
+                        {
+                            "name": name,
+                            "func_name": f"{name}_in_bounds",
                             "is_array": False,
                             "element_ref": f"this%{name}",
                         }
@@ -759,6 +841,7 @@ def _build_context(
         "default_assignments": default_assignments,
         "default_parameters": default_parameters,
         "enum_parameters": enum_parameters,
+        "bounds_parameters": bounds_parameters,
         "local_init_assignments": local_init_assignments,
         "required_scalar_validations": required_scalar_validations,
         "required_array_validations": required_array_validations,
@@ -780,6 +863,8 @@ def _build_context(
         ],
         "enum_functions": enum_functions,
         "enum_checks": enum_checks,
+        "bounds_functions": bounds_functions,
+        "bounds_checks": bounds_checks,
         "kind_module": resolved_kind_module,
         "kind_imports": _resolve_kind_imports(
             kind_ids,
@@ -1373,9 +1458,9 @@ def _format_scalar_default(value: Any, kind: str | None, category: str | None) -
         literal = repr(number)
         if literal.lower() == "nan":
             raise ValueError("NaN defaults are not supported")
-        if "e" in literal:
-            literal = literal.replace("e", "e")
-        if "." not in literal and "e" not in literal and "E" not in literal:
+        if "E" in literal:
+            literal = literal.replace("E", "e")
+        if "." not in literal and "e" not in literal:
             literal = f"{literal}.0"
         suffix = f"_{kind}" if kind else ""
         return f"{literal}{suffix}"
@@ -1506,6 +1591,94 @@ def _enum_values(
     return enum_values
 
 
+def _bounds_spec(
+    prop: dict[str, Any],
+    type_info: FieldTypeInfo,
+) -> dict[str, Any] | None:
+    if type_info.category == "array":
+        bounds_prop = _array_items_bounds(prop)
+        category = type_info.element_category
+    else:
+        bounds_prop = prop
+        category = type_info.category
+
+    min_value, min_exclusive = _extract_bound_value(
+        bounds_prop, "minimum", "exclusiveMinimum"
+    )
+    max_value, max_exclusive = _extract_bound_value(
+        bounds_prop, "maximum", "exclusiveMaximum"
+    )
+
+    if min_value is None and max_value is None:
+        return None
+
+    if category not in {"integer", "real"}:
+        raise ValueError("bounds only supported for integer or real values")
+
+    if min_value is not None:
+        _validate_bound_scalar(min_value, category, "minimum")
+    if max_value is not None:
+        _validate_bound_scalar(max_value, category, "maximum")
+
+    if min_value is not None and max_value is not None:
+        min_comp = float(min_value) if category == "real" else int(min_value)
+        max_comp = float(max_value) if category == "real" else int(max_value)
+        if min_exclusive or max_exclusive:
+            if min_comp >= max_comp:
+                raise ValueError("minimum must be less than maximum for exclusive bounds")
+        else:
+            if min_comp > max_comp:
+                raise ValueError("minimum must be <= maximum")
+
+    return {
+        "min_value": min_value,
+        "min_exclusive": min_exclusive,
+        "max_value": max_value,
+        "max_exclusive": max_exclusive,
+        "category": category,
+    }
+
+
+def _extract_bound_value(
+    prop: dict[str, Any],
+    inclusive_key: str,
+    exclusive_key: str,
+) -> tuple[Any | None, bool]:
+    has_inclusive = inclusive_key in prop
+    has_exclusive = exclusive_key in prop
+    if has_inclusive and has_exclusive:
+        raise ValueError(
+            f"property must not define both '{inclusive_key}' and '{exclusive_key}'"
+        )
+    if has_exclusive:
+        value = prop.get(exclusive_key)
+        if value is None:
+            raise ValueError(f"{exclusive_key} must be a number")
+        return value, True
+    if has_inclusive:
+        value = prop.get(inclusive_key)
+        if value is None:
+            raise ValueError(f"{inclusive_key} must be a number")
+        return value, False
+    return None, False
+
+
+def _validate_bound_scalar(value: Any, category: str, label: str) -> None:
+    if category == "integer":
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{label} must be an integer")
+        return
+    if category == "real":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{label} must be a number")
+        if math.isinf(float(value)):
+            raise ValueError(f"{label} must not be infinite")
+        if math.isnan(float(value)):
+            raise ValueError(f"{label} must not be NaN")
+        return
+    raise ValueError("bounds only supported for integer or real values")
+
+
 def _array_default_value(prop: dict[str, Any]) -> tuple[Any, bool] | None:
     if prop.get("type") != "array":
         raise ValueError("array default lookup requires array properties")
@@ -1549,6 +1722,21 @@ def _array_items_enum(prop: dict[str, Any]) -> list[Any] | None:
 def _array_items_default(prop: dict[str, Any]) -> dict[str, Any]:
     current = prop
     while current.get("type") == "array":
+        items = current.get("items")
+        if not isinstance(items, dict):
+            raise ValueError("array property must define 'items'")
+        if items.get("type") == "array":
+            raise ValueError("nested array properties are not supported; use x-fortran-shape")
+        current = items
+    return current
+
+
+def _array_items_bounds(prop: dict[str, Any]) -> dict[str, Any]:
+    current = prop
+    while current.get("type") == "array":
+        for key in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"):
+            if key in current:
+                raise ValueError("array bounds must be defined on items")
         items = current.get("items")
         if not isinstance(items, dict):
             raise ValueError("array property must define 'items'")

@@ -40,37 +40,42 @@ properties:
     title: Number of iterations
     description: Number of iterations for the optimization algorithm
     type: integer
+    minimum: 10
     examples: [100]
-    # x-fortran-kind: i4
+    x-fortran-kind: i4
   tolerance:
     title: Convergence tolerance
     description: Tolerance for convergence of the optimization algorithm.
     type: number
-    # x-fortran-kind: dp
+    exclusiveMinimum: 0.0
+    examples: [0.001]
+    x-fortran-kind: dp
   seed:
     title: Random seed
     description: Random seed for reproducibility. Use -9 for random seed.
     type: integer
-    x-fortran-kind: i4
     default: -9
+    x-fortran-kind: i4
   dds_r:
     title: DDS perturbation rate
     description: Parameter for the DDS algorithm controlling the perturbation rate.
     type: number
-    x-fortran-kind: dp
+    exclusiveMinimum: 0.0
     default: 0.2
+    x-fortran-kind: dp
   mcmc_opti:
     title: MCMC optimization
     description: Whether to perform MCMC optimization.
     type: boolean
     default: true
   mcmc_error_params:
-    title: MCMC error parameters per domain
-    description: "Parameters for the MCMC error model: err = a + b+Q"
+    title: MCMC error parameters per iteration
+    description: "Parameters for the MCMC error model"
     type: array
     items:
       type: number
       x-fortran-kind: dp
+      minimum: 0.0
     x-fortran-shape: [3, 2, max_iter]
     x-fortran-flex-tail-dims: 2
     examples: [[0.01, 0.6, 0.2]]

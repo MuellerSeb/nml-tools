@@ -18,6 +18,7 @@ module nml_optimization
     NML_ERR_CLOSE, &
     NML_ERR_REQUIRED, &
     NML_ERR_ENUM, &
+    NML_ERR_BOUNDS, &
     NML_ERR_NOT_SET, &
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
@@ -38,7 +39,7 @@ module nml_optimization
   logical, parameter, public :: mcmc_opti_default = .true.
   real(dp), parameter, public :: mcmc_error_params_default(4) = [0.01_dp, 0.6_dp, 0.2_dp, 0.3_dp]
 
-  !> \class optimization_t
+  !> \class nml_optimization_t
   !> \brief MHM optimization namelist
   !> \details All relevant configurations for the optimization parameters of MHM.
   !! This namelist corresponds to the `optimization` section in the MHM configuration.
