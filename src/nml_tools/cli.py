@@ -12,10 +12,10 @@ import click
 import f90nml  # type: ignore[import-untyped]
 from click.exceptions import Exit
 
+from ._version import __version__
 from .codegen_fortran import ConstantSpec, generate_fortran, generate_helper
 from .codegen_markdown import generate_docs
 from .codegen_template import generate_template
-from ._version import __version__
 from .schema import load_schema
 from .validate import validate_namelist
 
