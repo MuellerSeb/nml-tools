@@ -268,6 +268,10 @@ Defines the kind module and allowed kinds.
 Optional extra module documentation appended after the generated `\brief` and
 `\details`. Multiline strings are supported and Doxygen formatting is allowed.
 
+- `module` (string, optional): extra module documentation block.
+- `md_doxygen_id_from_name` (bool, optional): add `{#<namelist>}` to Markdown header (default `false`).
+- `md_add_toc_statement` (bool, optional): insert `[TOC]` after the Markdown header (default `false`).
+
 ### namelists (array)
 
 Schema entries to generate per-namelist outputs.

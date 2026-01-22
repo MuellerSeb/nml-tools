@@ -26,6 +26,8 @@ map = { sp = "real32", dp = "real64", i4 = "int32", i8 = "int64" }
 module = '''
 !> \version 0.1
 '''
+md_doxygen_id_from_name = true  # add {#<namelist>} to Markdown header
+md_add_toc_statement = true     # insert [TOC] after the header
 
 [[namelists]]
 schema = "optimization.yml"           # schema defining the namelist file

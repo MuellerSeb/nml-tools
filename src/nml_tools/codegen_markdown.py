@@ -27,6 +27,8 @@ def generate_docs(
     output: str | Path,
     *,
     constants: dict[str, int | float] | None = None,
+    md_doxygen_id_from_name: bool = False,
+    md_add_toc_statement: bool = False,
 ) -> None:
     """Generate Markdown docs for *schema* at *output*."""
     namelist_name = schema.get("x-fortran-namelist")
@@ -54,7 +56,13 @@ def generate_docs(
         raise ValueError("schema 'required' must be a list")
     required_set = _validate_required(required_raw)
 
-    lines = [f"# {title}", ""]
+    title_line = f"# {title}"
+    if md_doxygen_id_from_name:
+        title_line = f"{title_line} {{#{namelist_name}}}"
+    lines = [title_line, ""]
+    if md_add_toc_statement:
+        lines.append("[TOC]")
+        lines.append("")
     if description:
         lines.append(description)
         lines.append("")
