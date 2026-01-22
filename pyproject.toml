@@ -8,6 +8,7 @@ dynamic = ["version"]
 description = "Toolbox for Fortran Namelists"
 readme = "README.md"
 license = "MIT"
+authors = [{ name = "Sebastian Mueller" }]
 requires-python = ">=3.8"
 dependencies = [
     "click",
