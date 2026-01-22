@@ -9,13 +9,24 @@ Generate Fortran namelist modules, Markdown docs, and template namelists from a 
 ## Features
 
 - Schema input in YAML or JSON.
-- Core keywords: `type`, `properties`, `required`, `default`, `enum`,
-  `examples`, `title`, `description`.
+- Core keywords from JSON schema: `type`, `properties`, `required`, `default`, `examples`, `title`, `description`.
 - Fortran extensions: `x-fortran-namelist`, `x-fortran-kind`,
   `x-fortran-len`, `x-fortran-shape`, `x-fortran-flex-tail-dims`,
   `x-fortran-default-*`.
 - Outputs: Fortran module, helper module, Markdown docs, template namelist.
 - Config-driven CLI for batching multiple schemas.
+
+### Missing Fortran features
+
+- No support for derived types:
+  - Only scalars and arrays of scalars are supported.
+  - Could be emulated with nested objects, but one would need to decide where the respective fortran types are defined or used from.
+- No support for complex types:
+  - JSON doesn't have a native complex type.
+  - Could be emulated with:
+    - Lists of length 2 with metadata, like f90nml does for JSON conversion.
+    - Objects with `real` and `imag` properties.
+    - Strings with a specific format like pydantic does.
 
 ## Fortran extensions (x-fortran-*)
 
