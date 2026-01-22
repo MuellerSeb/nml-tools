@@ -68,3 +68,26 @@ def test_generate_docs_shows_bounds(tmp_path: Path) -> None:
     assert "Minimum: `>= 0.0`" in rendered
     assert "Maximum: `< 1.0`" in rendered
     assert "Minimum: `>= 1`" in rendered
+
+
+def test_generate_docs_adds_doxygen_id_and_toc(tmp_path: Path) -> None:
+    schema = {
+        "title": "TOC docs",
+        "x-fortran-namelist": "config_optimize",
+        "type": "object",
+        "properties": {"value": {"type": "integer"}},
+    }
+
+    output = tmp_path / "toc.md"
+    generate_docs = _import_generate_docs()
+    generate_docs(
+        schema,
+        output,
+        md_doxygen_id_from_name=True,
+        md_add_toc_statement=True,
+    )
+
+    lines = output.read_text().splitlines()
+    assert lines[0] == "# TOC docs {#config_optimize}"
+    assert lines[1] == ""
+    assert lines[2] == "[TOC]"

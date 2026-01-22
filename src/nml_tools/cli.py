@@ -209,17 +209,38 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
     return constants, specs
 
 
-def _load_documentation(config: dict[str, Any]) -> str | None:
+def _load_bool_field(section: dict[str, Any], key: str, *, label: str) -> bool:
+    value = section.get(key, False)
+    if isinstance(value, bool):
+        return value
+    raise click.ClickException(f"config '{label}' must be a boolean")
+
+
+def _load_documentation_settings(
+    config: dict[str, Any],
+) -> tuple[str | None, bool, bool]:
     doc_raw = config.get("documentation")
     if doc_raw is None:
-        return None
+        return None, False, False
     if not isinstance(doc_raw, dict):
         raise click.ClickException("config 'documentation' must be a table")
-    module_raw = doc_raw.get("module")
-    if not isinstance(module_raw, str):
-        raise click.ClickException("config 'documentation.module' must be a string")
-    module_doc = module_raw.strip()
-    return module_doc or None
+    module_doc = None
+    if "module" in doc_raw:
+        module_raw = doc_raw.get("module")
+        if not isinstance(module_raw, str):
+            raise click.ClickException("config 'documentation.module' must be a string")
+        module_doc = module_raw.strip() or None
+    md_doxygen_id_from_name = _load_bool_field(
+        doc_raw,
+        "md_doxygen_id_from_name",
+        label="documentation.md_doxygen_id_from_name",
+    )
+    md_add_toc_statement = _load_bool_field(
+        doc_raw,
+        "md_add_toc_statement",
+        label="documentation.md_add_toc_statement",
+    )
+    return module_doc, md_doxygen_id_from_name, md_add_toc_statement
 
 
 def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
@@ -365,7 +386,9 @@ def generate(config_path: Path) -> None:
         config,
         base_dir,
     )
-    module_doc = _load_documentation(config)
+    module_doc, md_doxygen_id_from_name, md_add_toc_statement = _load_documentation_settings(
+        config
+    )
     constants, constant_specs = _load_constants(config)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     if helper_path is not None:
@@ -412,7 +435,13 @@ def generate(config_path: Path) -> None:
         if doc_path is not None:
             try:
                 logger.info("Generating Markdown docs at %s", doc_path)
-                generate_docs(schema, doc_path, constants=constants)
+                generate_docs(
+                    schema,
+                    doc_path,
+                    constants=constants,
+                    md_doxygen_id_from_name=md_doxygen_id_from_name,
+                    md_add_toc_statement=md_add_toc_statement,
+                )
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc
 
@@ -458,7 +487,7 @@ def gen_fortran(config_path: Path) -> None:
         config,
         base_dir,
     )
-    module_doc = _load_documentation(config)
+    module_doc, _, _ = _load_documentation_settings(config)
     constants, constant_specs = _load_constants(config)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     if helper_path is not None:
@@ -650,6 +679,9 @@ def gen_markdown(config_path: Path) -> None:
     config = _load_config_checked(config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
+    _, md_doxygen_id_from_name, md_add_toc_statement = _load_documentation_settings(
+        config
+    )
     entries = _iter_namelists(config, base_dir)
     logger.info("Found %d schema entries", len(entries))
     for entry in entries:
@@ -666,7 +698,13 @@ def gen_markdown(config_path: Path) -> None:
             continue
         try:
             logger.info("Generating Markdown docs at %s", doc_path)
-            generate_docs(schema, doc_path, constants=constants)
+            generate_docs(
+                schema,
+                doc_path,
+                constants=constants,
+                md_doxygen_id_from_name=md_doxygen_id_from_name,
+                md_add_toc_statement=md_add_toc_statement,
+            )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 
