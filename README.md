@@ -1,7 +1,7 @@
 # nml-tools
 
 <p align="center">
-  <img src="docs/logo.png" alt="nml-tools logo" width="240">
+  <img src="https://raw.githubusercontent.com/MuellerSeb/nml-tools/6213cc56244cca589563d0baabf93f2b46610b27/docs/logo.png" alt="nml-tools logo" width="240">
 </p>
 
 Generate Fortran namelist modules, Markdown docs, and template namelists from a small JSON Schema-like specification with Fortran-focused extensions.
