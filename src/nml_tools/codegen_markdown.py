@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
 import re
 import string
+from pathlib import Path
+from typing import Any
 
 from .codegen_fortran import (
     FieldTypeInfo,
