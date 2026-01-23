@@ -1471,8 +1471,8 @@ def _format_scalar_default(value: Any, kind: str | None, category: str | None) -
     if category == "string":
         if not isinstance(value, str):
             raise ValueError("string default must be a str")
-        escaped = value.replace("'", "''")
-        return f"'{escaped}'"
+        escaped = value.replace('"', '""')
+        return f'"{escaped}"'
     raise ValueError(f"unsupported default category '{category}'")
 
 

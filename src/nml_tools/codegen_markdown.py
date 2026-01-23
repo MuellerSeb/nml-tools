@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import re
+import string
 
 from .codegen_fortran import (
     FieldTypeInfo,
@@ -87,7 +89,7 @@ def generate_docs(
             info_label = _format_info(prop)
             required_label = "yes" if name in required_set else "no"
             row = [
-                f"`{name}`",
+                f"[{name}](#{_github_section_id(name)})",
                 type_label,
                 required_label,
                 info_label,
@@ -121,10 +123,16 @@ def generate_docs(
             title = _get_title(prop)
             description_text = _get_description(prop)
 
+            # if title:
+            #     lines.append(f"### `{name}` - {title}")
+            # else:
+            #     lines.append(f"### `{name}`")
+            lines.append(f"### {name}")
+            lines.append("")
             if title:
-                lines.append(f"### `{name}` - {title}")
+                lines.append(f"{title} `{name}`")
             else:
-                lines.append(f"### `{name}`")
+                lines.append(f"`{name}`")
             lines.append("")
             if description_text:
                 lines.append(description_text)
@@ -455,3 +463,14 @@ def _format_array_default_display(
     if notes:
         return base, f"({', '.join(notes)})"
     return base, None
+
+
+def _github_section_id(title: str) -> str:
+    # lowercase
+    s = title.strip().lower()
+    # remove punctuation characters
+    punctuation = string.punctuation.replace("_", "")
+    s = re.sub(f"[{re.escape(punctuation)}]", "", s)
+    # replace any whitespace run with '-'
+    s = re.sub(r"\s+", "-", s)
+    return s
