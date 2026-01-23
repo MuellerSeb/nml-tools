@@ -115,7 +115,7 @@ def test_template_uses_enum_fallback_value() -> None:
     render_template = _import_render_template()
     rendered = render_template([schema], doc_mode="plain", value_mode="filled")
 
-    assert "method = 'DDS'" in rendered
+    assert 'method = "DDS"' in rendered
 
 
 def test_generate_docs_includes_enum_values_and_example(tmp_path: Path) -> None:
@@ -131,6 +131,6 @@ def test_generate_docs_includes_enum_values_and_example(tmp_path: Path) -> None:
     generate_docs(schema, output)
 
     rendered = output.read_text()
-    assert "`'DDS'`" in rendered
-    assert "`'MCMC'`" in rendered
-    assert "method = 'DDS'" in rendered
+    assert '`"DDS"`' in rendered
+    assert '`"MCMC"`' in rendered
+    assert 'method = "DDS"' in rendered

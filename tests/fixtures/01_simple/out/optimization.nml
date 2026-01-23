@@ -1,7 +1,7 @@
 ! MHM optimization namelist
 &optimization
   ! Optimization name
-  name = 'test_optimization'
+  name = "test_optimization"
   ! Number of iterations
   niterations = 4
   ! Convergence tolerance

@@ -41,9 +41,9 @@ module nml_optimization
 
   ! enum values
   character(len=buf), parameter, public :: &
-    method_enum_values(3) = [character(len=buf) :: 'DDS', 'MCMC', 'SCE']
+    method_enum_values(3) = [character(len=buf) :: "DDS", "MCMC", "SCE"]
   character(len=buf), parameter, public :: &
-    try_methods_enum_values(3) = [character(len=buf) :: 'DDS', 'MCMC', 'SCE']
+    try_methods_enum_values(3) = [character(len=buf) :: "DDS", "MCMC", "SCE"]
   integer(i4), parameter, public :: complex_sizes_enum_values(5) = [5_i4, 10_i4, 15_i4, 20_i4, 30_i4]
 
   ! bounds values

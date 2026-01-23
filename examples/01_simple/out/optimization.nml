@@ -1,11 +1,11 @@
 ! Optimization configurations
 &optimization
   ! Optimization name
-  name = 'test_optimization'
+  name = "test_optimization"
   ! Optimization method
-  method = 'DDS'
+  method = "DDS"
   ! Try alternative methods
-  try_methods(:) = 'MCMC', 'DDS', 'SCE'
+  try_methods(:) = "MCMC", "DDS", "SCE"
   ! Complex sizes for SCE
   complex_sizes(:) = 5, 10, 15
   ! Number of iterations

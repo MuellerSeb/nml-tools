@@ -1,4 +1,6 @@
-# MHM optimization namelist
+# MHM optimization namelist {#optimization}
+
+[TOC]
 
 All relevant configurations for the optimization parameters of MHM.
 This namelist corresponds to the `optimization` section in the MHM configuration.
@@ -9,26 +11,30 @@ This namelist corresponds to the `optimization` section in the MHM configuration
 
 | Name | Type | Required | Info |
 | --- | --- | --- | --- |
-| `name` | string | no | Optimization name |
-| `niterations` | integer | yes | Number of iterations |
-| `tolerance` | real | yes | Convergence tolerance |
-| `seed` | integer | no | Random seed |
-| `dds_r` | real | no | DDS perturbation rate |
-| `mcmc_opti` | logical | no | MCMC optimization |
-| `mcmc_error_params` | real array | no | MCMC error parameters per domain |
+| [name](#name) | string | no | Optimization name |
+| [niterations](#niterations) | integer | yes | Number of iterations |
+| [tolerance](#tolerance) | real | yes | Convergence tolerance |
+| [seed](#seed) | integer | no | Random seed |
+| [dds_r](#dds_r) | real | no | DDS perturbation rate |
+| [mcmc_opti](#mcmc_opti) | logical | no | MCMC optimization |
+| [mcmc_error_params](#mcmc_error_params) | real array | no | MCMC error parameters per domain |
 
 ## Field details
 
-### `name` - Optimization name
+### name
+
+Optimization name `name`
 
 Name for the optimization run.
 
 Summary:
 - Type: `character(len=buf)`
 - Required: no
-- Examples: `'test_optimization'`
+- Examples: `"test_optimization"`
 
-### `niterations` - Number of iterations
+### niterations
+
+Number of iterations `niterations`
 
 Number of iterations for the optimization algorithm
 
@@ -37,7 +43,9 @@ Summary:
 - Required: yes
 - Examples: `100`
 
-### `tolerance` - Convergence tolerance
+### tolerance
+
+Convergence tolerance `tolerance`
 
 Tolerance for convergence of the optimization algorithm.
 
@@ -45,7 +53,9 @@ Summary:
 - Type: `real`
 - Required: yes
 
-### `seed` - Random seed
+### seed
+
+Random seed `seed`
 
 Random seed for reproducibility. Use -9 for random seed.
 
@@ -54,7 +64,9 @@ Summary:
 - Required: no
 - Default: `-9`
 
-### `dds_r` - DDS perturbation rate
+### dds_r
+
+DDS perturbation rate `dds_r`
 
 Parameter for the DDS algorithm controlling the perturbation rate.
 
@@ -63,7 +75,9 @@ Summary:
 - Required: no
 - Default: `0.2`
 
-### `mcmc_opti` - MCMC optimization
+### mcmc_opti
+
+MCMC optimization `mcmc_opti`
 
 Whether to perform MCMC optimization.
 
@@ -72,7 +86,9 @@ Summary:
 - Required: no
 - Default: `.true.`
 
-### `mcmc_error_params` - MCMC error parameters per domain
+### mcmc_error_params
+
+MCMC error parameters per domain `mcmc_error_params`
 
 Parameters for the MCMC error model: err = a + b+Q
 
@@ -85,7 +101,7 @@ Summary:
 
 ```fortran
 &optimization
-  name = 'test_optimization'
+  name = "test_optimization"
   niterations = 100
   tolerance = 0.0
   seed = -9
