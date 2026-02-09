@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from nml_tools.validate import validate_namelist
 
 
