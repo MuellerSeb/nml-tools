@@ -23,6 +23,7 @@ module nml_optimization
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
     idx_check, &
+    to_lower, &
     buf, &
     max_iter
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
@@ -239,7 +240,7 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    select case (trim(name))
+    select case (to_lower(trim(name)))
     case ("name")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX

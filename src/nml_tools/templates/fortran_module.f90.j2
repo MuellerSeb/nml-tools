@@ -243,13 +243,13 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    select case (trim(name))
+    select case (to_lower(trim(name)))
 {% for case in presence_cases %}
     case ("{{ case.name }}")
 {% if case.is_array %}
       if (present(idx)) then
         status = idx_check(idx, lbound(this%{{ case.name }}), ubound(this%{{ case.name }}), &
-          "{{ case.name }}", errmsg)
+          "{{ case.display_name }}", errmsg)
         if (status /= NML_OK) return
 {% if not case.always_true %}
         if ({{ case.element_condition }}) status = NML_ERR_NOT_SET
@@ -262,7 +262,7 @@ contains
 {% else %}
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "index not supported for '{{ case.name }}'"
+        if (present(errmsg)) errmsg = "index not supported for '{{ case.display_name }}'"
         return
       end if
 {% if not case.always_true %}
@@ -295,12 +295,12 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    select case (trim(name))
+    select case (to_lower(trim(name)))
 {% for flex in flex_arrays %}
     case ("{{ flex.name }}")
       if (size(filled) /= {{ flex.rank }}) then
         status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "shape rank mismatch for '{{ flex.name }}'"
+        if (present(errmsg)) errmsg = "shape rank mismatch for '{{ flex.display_name }}'"
         return
       end if
       do dim = 1, {{ flex.rank }}
@@ -323,7 +323,7 @@ contains
 {% endfor %}
         if ({{ flex.prefix_any_missing_condition }}) then
           status = NML_ERR_PARTLY_SET
-          if (present(errmsg)) errmsg = "array partly set: {{ flex.name }}"
+          if (present(errmsg)) errmsg = "array partly set: {{ flex.display_name }}"
           return
         end if
       end if
@@ -387,11 +387,11 @@ contains
 {% for entry in flex_arrays %}
     if (allocated(filled)) deallocate(filled)
     allocate(filled({{ entry.rank }}))
-    istat = this%filled_shape("{{ entry.name }}", filled, errmsg=errmsg)
+    istat = this%filled_shape("{{ entry.display_name }}", filled, errmsg=errmsg)
     if (istat == NML_ERR_PARTLY_SET) then
       status = istat
       if (present(errmsg)) then
-        if (len_trim(errmsg) == 0) errmsg = "array partly set: {{ entry.name }}"
+        if (len_trim(errmsg) == 0) errmsg = "array partly set: {{ entry.display_name }}"
       end if
       return
     end if
@@ -402,7 +402,7 @@ contains
 {% if entry.required %}
     if (minval(filled) == 0) then
       status = NML_ERR_REQUIRED
-      if (present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
+      if (present(errmsg)) errmsg = "required field not set: {{ entry.display_name }}"
       return
     end if
 {% endif %}
@@ -414,15 +414,15 @@ contains
 {% if check.is_array %}
     if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
       status = NML_ERR_ENUM
-      if (present(errmsg)) errmsg = "enum constraint failed: {{ check.name }}"
+      if (present(errmsg)) errmsg = "enum constraint failed: {{ check.display_name }}"
       return
     end if
 {% else %}
-    istat = this%is_set("{{ check.name }}", errmsg=errmsg)
+    istat = this%is_set("{{ check.display_name }}", errmsg=errmsg)
     if (istat == NML_OK) then
       if (.not. {{ check.func_name }}({{ check.element_ref }})) then
         status = NML_ERR_ENUM
-        if (present(errmsg)) errmsg = "enum constraint failed: {{ check.name }}"
+        if (present(errmsg)) errmsg = "enum constraint failed: {{ check.display_name }}"
         return
       end if
     else if (istat /= NML_ERR_NOT_SET) then
@@ -438,15 +438,15 @@ contains
 {% if check.is_array %}
     if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
       status = NML_ERR_BOUNDS
-      if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.name }}"
+      if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.display_name }}"
       return
     end if
 {% else %}
-    istat = this%is_set("{{ check.name }}", errmsg=errmsg)
+    istat = this%is_set("{{ check.display_name }}", errmsg=errmsg)
     if (istat == NML_OK) then
       if (.not. {{ check.func_name }}({{ check.element_ref }})) then
         status = NML_ERR_BOUNDS
-        if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.name }}"
+        if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.display_name }}"
         return
       end if
     else if (istat /= NML_ERR_NOT_SET) then

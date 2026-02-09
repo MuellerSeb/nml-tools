@@ -346,6 +346,53 @@ def test_generate_fortran_rejects_flex_dim_exceeds_rank(tmp_path: Path) -> None:
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
+def test_generate_fortran_rejects_case_insensitive_duplicates(tmp_path: Path) -> None:
+    schema = {
+        "title": "Duplicate case",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "Foo": {"type": "integer"},
+            "foo": {"type": "integer"},
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match=r"case-insensitive"):
+        generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
+def test_generate_fortran_accepts_required_case_insensitive(tmp_path: Path) -> None:
+    schema = {
+        "title": "Required case",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "Foo": {"type": "integer"},
+        },
+        "required": ["foo"],
+    }
+
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
+def test_generate_fortran_rejects_required_unknown_property(tmp_path: Path) -> None:
+    schema = {
+        "title": "Required missing",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "Foo": {"type": "integer"},
+        },
+        "required": ["Bar"],
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match=r"required property 'Bar' is not defined"):
+        generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
 def test_generate_fortran_emits_filled_shape_for_flex_arrays(tmp_path: Path) -> None:
     schema = {
         "title": "Flex arrays",
