@@ -12,7 +12,7 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
       - name: Upgrade pip/setuptools/wheel/hatchling
-        run: python -m pip install -U pip setuptools wheel hatchling
+        run: python -m pip install -U pip setuptools wheel hatchling coveralls
       - name: Install dev deps
         run: python -m pip install -vv ".[dev]"
       - name: Ruff
@@ -20,6 +20,8 @@ jobs:
       - name: Mypy
         run: mypy src
       - name: Pytest with coverage
-        run: python -m coverage run -m pytest -q
-      # - name: Coverage report
-      #   run: python -m coverage report --show-missing
+        run: python -m pytest --cov nml_tools --cov-report term-missing -v tests/
+      - name: Upload coverage to Coveralls
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python -m coveralls

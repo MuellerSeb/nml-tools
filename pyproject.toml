@@ -21,8 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "coverage[toml]",
+    "pytest-cov",
     "ruff",
     "mypy",
     "types-PyYAML"
