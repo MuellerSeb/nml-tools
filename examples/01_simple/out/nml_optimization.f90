@@ -22,6 +22,7 @@ module nml_optimization
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
     idx_check, &
+    to_lower, &
     buf, &
     max_iter, &
     NML_ERR_PARTLY_SET
@@ -409,7 +410,7 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    select case (trim(name))
+    select case (to_lower(trim(name)))
     case ("name")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
@@ -517,7 +518,7 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    select case (trim(name))
+    select case (to_lower(trim(name)))
     case ("mcmc_error_params")
       if (size(filled) /= 3) then
         status = NML_ERR_INVALID_INDEX

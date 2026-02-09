@@ -164,7 +164,32 @@ def _build_context(
     if not isinstance(properties, dict) or not properties:
         raise ValueError("schema must define object 'properties'")
 
-    required_fields = _ordered_unique(schema.get("required", []))
+    property_items: list[tuple[str, str, dict[str, Any]]] = []
+    property_name_map: dict[str, str] = {}
+    for prop_name, prop in properties.items():
+        if not isinstance(prop_name, str) or not prop_name.strip():
+            raise ValueError("property names must be non-empty strings")
+        key = prop_name.lower()
+        if key in property_name_map:
+            raise ValueError(
+                "property names must be unique (case-insensitive): "
+                f"'{property_name_map[key]}' and '{prop_name}'"
+            )
+        property_name_map[key] = prop_name
+        if not isinstance(prop, dict):
+            raise ValueError(f"property '{prop_name}' must be an object")
+        property_items.append((prop_name, key, prop))
+
+    required_fields_raw = _ordered_unique(schema.get("required", []))
+    required_fields: list[str] = []
+    for req_name in required_fields_raw:
+        if not isinstance(req_name, str):
+            raise ValueError("schema 'required' entries must be strings")
+        req_key = req_name.lower()
+        if req_key not in property_name_map:
+            raise ValueError(f"required property '{req_name}' is not defined")
+        if req_key not in required_fields:
+            required_fields.append(req_key)
     required_set = set(required_fields)
     module_name = f"nml_{namelist_name}"
     type_name = f"{module_name}_t"
@@ -210,14 +235,14 @@ def _build_context(
         "NML_ERR_INVALID_NAME",
         "NML_ERR_INVALID_INDEX",
         "idx_check",
+        "to_lower",
     ]
 
     current_property: str | None = None
     try:
-        for index, (name, prop) in enumerate(properties.items()):
-            current_property = name
-            if not isinstance(prop, dict):
-                raise ValueError(f"property '{name}' must be an object")
+        for index, (display_name, attr_name, prop) in enumerate(property_items):
+            current_property = display_name
+            name = attr_name
             type_info = _field_type_info(prop, constants)
             for const_name in _collect_dimension_constants(type_info.dimensions, constants):
                 if const_name not in helper_imports:
@@ -249,7 +274,7 @@ def _build_context(
             declaration = _render_declaration(type_info.type_spec, type_info.dimensions, name)
             title_raw = prop.get("title")
             if title_raw is None:
-                title = name
+                title = display_name
             elif not isinstance(title_raw, str):
                 raise ValueError(f"property '{name}' title must be a string")
             else:
@@ -350,7 +375,8 @@ def _build_context(
                     len_ref=f"this%{name}",
                 )
                 required_array_by_name[name] = {
-                    "name": name,
+                    "name": display_name,
+                    "attr_name": name,
                     "all_missing_condition": all_missing,
                     "any_missing_condition": any_missing,
                 }
@@ -399,6 +425,7 @@ def _build_context(
                 flex_arrays.append(
                     {
                         "name": name,
+                        "display_name": display_name,
                         "rank": rank,
                         "flex_dims": flex_dims,
                         "required": is_required,
@@ -599,6 +626,7 @@ def _build_context(
                     enum_checks.append(
                         {
                             "name": name,
+                            "display_name": display_name,
                             "func_name": f"{name}_in_enum",
                             "is_array": True,
                             "array_ref": f"this%{name}",
@@ -608,6 +636,7 @@ def _build_context(
                     enum_checks.append(
                         {
                             "name": name,
+                            "display_name": display_name,
                             "func_name": f"{name}_in_enum",
                             "is_array": False,
                             "element_ref": f"this%{name}",
@@ -669,6 +698,7 @@ def _build_context(
                     bounds_checks.append(
                         {
                             "name": name,
+                            "display_name": display_name,
                             "func_name": f"{name}_in_bounds",
                             "is_array": True,
                             "array_ref": f"this%{name}",
@@ -678,6 +708,7 @@ def _build_context(
                     bounds_checks.append(
                         {
                             "name": name,
+                            "display_name": display_name,
                             "func_name": f"{name}_in_bounds",
                             "is_array": False,
                             "element_ref": f"this%{name}",
@@ -752,6 +783,7 @@ def _build_context(
                 presence_cases.append(
                     {
                         "name": name,
+                        "display_name": display_name,
                         "always_true": True,
                         "sentinel_condition": None,
                         "is_array": is_array,
@@ -765,6 +797,7 @@ def _build_context(
                 presence_cases.append(
                     {
                         "name": name,
+                        "display_name": display_name,
                         "always_true": False,
                         "sentinel_condition": set_sentinel_condition,
                         "is_array": is_array,
@@ -810,9 +843,9 @@ def _build_context(
     required_scalar_validations: list[str] = []
     for name in required_fields:
         if name in required_scalar_names:
-            required_scalar_validations.append(name)
+            required_scalar_validations.append(property_name_map[name])
         elif name not in required_array_by_name and name not in required_flex_names:
-            required_scalar_validations.append(name)
+            required_scalar_validations.append(property_name_map[name])
     required_array_validations = [
         required_array_by_name[name]
         for name in required_fields
