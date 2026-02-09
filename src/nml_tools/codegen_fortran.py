@@ -276,7 +276,7 @@ def _build_context(
             if title_raw is None:
                 title = display_name
             elif not isinstance(title_raw, str):
-                raise ValueError(f"property '{name}' title must be a string")
+                raise ValueError(f"property '{display_name}' title must be a string")
             else:
                 title = title_raw.strip() or name
             description = prop.get("description")
@@ -297,7 +297,7 @@ def _build_context(
 
             if type_info.category == "array" and has_default:
                 if array_default_info is None:
-                    raise ValueError(f"missing array default for '{name}'")
+                    raise ValueError(f"missing array default for '{display_name}'")
                 default_raw, default_from_items = array_default_info
                 if default_from_items:
                     if isinstance(default_raw, list):
@@ -329,12 +329,14 @@ def _build_context(
             set_sentinel_condition: str | None = None
             if requires_sentinel:
                 if is_required and type_info.category == "boolean":
-                    raise ValueError(f"required {type_info.category} '{name}' is not supported")
+                    raise ValueError(
+                        f"required {type_info.category} '{display_name}' is not supported"
+                    )
                 if is_required and type_info.category == "array":
                     if type_info.element_category == "boolean":
                         raise ValueError("required boolean arrays are not supported")
                 if needs_sentinel and type_info.category == "boolean":
-                    raise ValueError(f"optional boolean '{name}' must define a default")
+                    raise ValueError(f"optional boolean '{display_name}' must define a default")
                 if needs_sentinel and type_info.category == "array":
                     if type_info.element_category == "boolean":
                         raise ValueError("optional boolean arrays must define a default")
@@ -450,12 +452,12 @@ def _build_context(
             default_assignment: str | None = None
             set_default_assignment: str | None = None
             if has_default and is_required:
-                raise ValueError(f"required property '{name}' cannot define a default")
+                raise ValueError(f"required property '{display_name}' cannot define a default")
             if has_default:
                 default_const_name = f"{name}_default"
                 if type_info.category == "array":
                     if default_values is None:
-                        raise ValueError(f"missing array default for '{name}'")
+                        raise ValueError(f"missing array default for '{display_name}'")
                     default_is_scalar = default_from_items
 
                     repeat = False
@@ -512,7 +514,9 @@ def _build_context(
                         )
                     else:
                         if array_default_spec is None:
-                            raise ValueError(f"missing array default specification for '{name}'")
+                            raise ValueError(
+                                f"missing array default specification for '{display_name}'"
+                            )
                         default_elements = [
                             _format_scalar_default(
                                 element, type_info.kind, type_info.element_category
@@ -548,10 +552,10 @@ def _build_context(
                                 if repeat:
                                     pad_expr = default_const_name
                                 else:
-                                    if pad_const_name is None:
-                                        raise ValueError(
-                                            f"missing pad values for array default '{name}'"
-                                        )
+                            if pad_const_name is None:
+                                raise ValueError(
+                                    f"missing pad values for array default '{display_name}'"
+                                )
                                     pad_expr = (
                                         pad_const_name
                                         if not pad_is_scalar
@@ -576,7 +580,7 @@ def _build_context(
                     set_default_assignment = f"this%{name} = {default_const_name}"
 
                 if default_assignment is None or set_default_assignment is None:
-                    raise ValueError(f"missing default assignment for '{name}'")
+                    raise ValueError(f"missing default assignment for '{display_name}'")
                 default_assignments.append(default_assignment)
                 set_optional_defaults.append(set_default_assignment)
 
@@ -793,7 +797,7 @@ def _build_context(
                 )
             else:
                 if set_sentinel_condition is None:
-                    raise ValueError(f"missing sentinel condition for '{name}'")
+                    raise ValueError(f"missing sentinel condition for '{display_name}'")
                 presence_cases.append(
                     {
                         "name": name,
