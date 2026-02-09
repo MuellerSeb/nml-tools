@@ -552,10 +552,10 @@ def _build_context(
                                 if repeat:
                                     pad_expr = default_const_name
                                 else:
-                            if pad_const_name is None:
-                                raise ValueError(
-                                    f"missing pad values for array default '{display_name}'"
-                                )
+                                    if pad_const_name is None:
+                                        raise ValueError(
+                                            f"missing pad values for array default '{display_name}'"
+                                        )
                                     pad_expr = (
                                         pad_const_name
                                         if not pad_is_scalar
