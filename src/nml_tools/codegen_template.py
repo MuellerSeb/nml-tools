@@ -194,7 +194,7 @@ def _render_template(
 
 
 def _array_slice(rank: int) -> str:
-    return "(" + ", ".join(":" for _ in range(rank)) + ")"
+    return "(" + ",".join(":" for _ in range(rank)) + ")"
 
 
 def _value_entries(
@@ -336,7 +336,7 @@ def _slice_entry_name(
             indices.append(":")
         else:
             indices.append(str(next(fixed_iter)))
-    return f"{name}({', '.join(indices)})"
+    return f"{name}({','.join(indices)})"
 
 
 def _format_value_list(values: list[Any], type_info: FieldTypeInfo) -> str:

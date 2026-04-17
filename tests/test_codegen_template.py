@@ -63,9 +63,10 @@ def test_render_template_array_default_slices() -> None:
         value_mode="filled",
     )
 
-    assert "grid(:, 1) = 1, 2" in rendered
-    assert "grid(:, 2) = 3, 4" in rendered
-    assert "grid(:, 3) = 5, 6" in rendered
+    assert "grid(:,1) = 1, 2" in rendered
+    assert "grid(:,2) = 3, 4" in rendered
+    assert "grid(:,3) = 5, 6" in rendered
+    assert "(:, " not in rendered
 
 
 def test_render_template_items_default() -> None:
