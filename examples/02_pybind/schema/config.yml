@@ -1,0 +1,42 @@
+title: Python binding config
+description: |
+  Minimal namelist used by the pybind example.
+
+  The generated f2py wrapper configures a persistent Fortran target instance
+  through an opaque integer handle.
+x-fortran-namelist: config
+type: object
+required: [iterations, tolerance]
+properties:
+  name:
+    title: Config name
+    description: Human-readable name for this configuration.
+    type: string
+    x-fortran-len: str_len
+    default: pybind-example
+  iterations:
+    title: Iterations
+    description: Number of iterations used by the demo configuration.
+    type: integer
+    x-fortran-kind: i4
+    minimum: 1
+  tolerance:
+    title: Tolerance
+    description: Positive convergence tolerance.
+    type: number
+    x-fortran-kind: dp
+    exclusiveMinimum: 0.0
+  enabled:
+    title: Enabled
+    description: Toggle the demo configuration.
+    type: boolean
+    default: false
+  weights:
+    title: Weights
+    description: Three weights used to demonstrate array normalization from Python.
+    type: array
+    x-fortran-shape: [3]
+    items:
+      type: number
+      x-fortran-kind: dp
+      default: 1.0

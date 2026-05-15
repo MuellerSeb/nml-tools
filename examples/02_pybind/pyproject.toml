@@ -1,0 +1,24 @@
+[build-system]
+requires = [
+    "scikit-build-core>=0.11,<0.12",
+    "numpy>=1.24,<3",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "nml-pybind-example"
+version = "0.1.0"
+description = "nml-tools f2py handle-wrapper example"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["numpy>=1.24,<3"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.scikit-build]
+wheel.packages = ["src/nml_pybind_example"]
+
+[tool.scikit-build.cmake]
+minimum-version = "3.26"
+build-type = "Release"
