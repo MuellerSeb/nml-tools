@@ -1,0 +1,172 @@
+"""Python wrappers for f2py generated namelist modules."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+
+{% for module_name in imports %}
+from . import {{ module_name }}
+{% endfor %}
+
+NML_OK = 0
+NML_ERR_NOT_SET = 12
+
+
+class NmlError(RuntimeError):
+    """Error returned by a generated namelist wrapper."""
+
+    def __init__(self, status: int, errmsg: Any = "") -> None:
+        self.status = int(status)
+        self.errmsg = _clean_errmsg(errmsg)
+        super().__init__(f"nml-tools status {self.status}: {self.errmsg}")
+
+
+def _clean_errmsg(errmsg: Any) -> str:
+    if errmsg is None:
+        return ""
+    if isinstance(errmsg, bytes):
+        return errmsg.decode(errors="replace").replace("\x00", "").strip()
+    if hasattr(errmsg, "tobytes"):
+        try:
+            raw = errmsg.tobytes()
+        except Exception:
+            raw = None
+        if isinstance(raw, bytes):
+            return raw.decode(errors="replace").replace("\x00", "").strip()
+    return str(errmsg).replace("\x00", "").strip()
+
+
+def _split_result(result: Any) -> tuple[int, str]:
+    if isinstance(result, tuple):
+        if len(result) < 2:
+            raise RuntimeError("f2py wrapper did not return status and errmsg")
+        status = result[-2]
+        errmsg = result[-1]
+    else:
+        status = result
+        errmsg = ""
+    return int(status), _clean_errmsg(errmsg)
+
+
+def _check_status(result: Any) -> None:
+    status, errmsg = _split_result(result)
+    if status != NML_OK:
+        raise NmlError(status, errmsg)
+
+
+def _normalize_array(value: Any, rank: int, name: str, dtype: Any = None) -> np.ndarray:
+    array = np.asarray(value, dtype=dtype)
+    if array.ndim == 0:
+        target_shape = (1,) * rank
+    elif array.ndim <= rank:
+        target_shape = array.shape + (1,) * (rank - array.ndim)
+    else:
+        raise ValueError(f"array '{name}' has rank {array.ndim}, expected at most {rank}")
+    return np.asfortranarray(array.reshape(target_shape, order="F"))
+
+
+def _dummy_array(rank: int, dtype: Any = None) -> np.ndarray:
+    target_shape = (1,) * rank
+    return np.asfortranarray(np.zeros(target_shape, dtype=dtype))
+
+
+{% for cls in classes %}
+class {{ cls.class_name }}:
+    """Python handle for the {{ cls.namelist_name }} namelist."""
+
+    _f2py = {{ cls.extension_module }}.{{ cls.f2py_module_name }}
+
+    def __init__(self, handle: int) -> None:
+        self.handle = int(handle)
+
+    def from_file(self, file: str) -> None:
+        result = self._f2py.{{ cls.namelist_name }}_from_file_wrapper(
+            self.handle,
+            str(file),
+        )
+        _check_status(result)
+
+    def set(
+        self,
+{% for arg in cls.required_args %}
+        {{ arg.name }}: Any,
+{% endfor %}
+{% for arg in cls.optional_args %}
+        {{ arg.name }}: Any = None,
+{% endfor %}
+    ) -> None:
+{% if cls.required_args %}
+{% for arg in cls.required_args %}
+        if {{ arg.name }} is None:
+            raise ValueError("required argument '{{ arg.name }}' must not be None")
+{% endfor %}
+{% endif %}
+        kwargs: dict[str, Any] = {}
+{% for arg in cls.all_args %}
+{% if arg.rank > 0 %}
+        if {{ arg.name }} is not None:
+            kwargs["{{ arg.name }}"] = _normalize_array(
+                {{ arg.name }},
+                {{ arg.rank }},
+                "{{ arg.name }}",
+                dtype={% if arg.numpy_dtype is none %}None{% else %}"{{ arg.numpy_dtype }}"{% endif %},
+            )
+        else:
+            kwargs["{{ arg.name }}"] = _dummy_array(
+                {{ arg.rank }},
+                dtype={% if arg.numpy_dtype is none %}None{% else %}"{{ arg.numpy_dtype }}"{% endif %},
+            )
+{% if arg.has_flag is not none %}
+        kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
+{% endif %}
+{% else %}
+        if {{ arg.name }} is not None:
+            kwargs["{{ arg.name }}"] = {{ arg.name }}
+        else:
+            kwargs["{{ arg.name }}"] = {{ arg.dummy_value }}
+{% if arg.has_flag is not none %}
+        kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
+{% endif %}
+{% endif %}
+{% endfor %}
+        result = self._f2py.{{ cls.namelist_name }}_set_wrapper(
+            self.handle,
+            **kwargs,
+        )
+        _check_status(result)
+
+    def is_set(self, name: str, idx: Any = None) -> bool:
+        kwargs: dict[str, Any] = {}
+        if idx is not None:
+            idx_array = np.asarray(idx, dtype=int)
+            if idx_array.ndim == 0:
+                idx_array = idx_array.reshape((1,))
+            elif idx_array.ndim != 1:
+                raise ValueError("idx must be a scalar or rank-1 array")
+            kwargs["idx"] = np.asfortranarray(idx_array)
+            kwargs["has_idx"] = True
+        else:
+            kwargs["idx"] = np.asfortranarray(np.zeros((1,), dtype=int))
+            kwargs["has_idx"] = False
+        result = self._f2py.{{ cls.namelist_name }}_is_set_wrapper(
+            self.handle,
+            name,
+            **kwargs,
+        )
+        status, errmsg = _split_result(result)
+        if status == NML_OK:
+            return True
+        if status == NML_ERR_NOT_SET:
+            return False
+        raise NmlError(status, errmsg)
+
+    def is_valid(self) -> None:
+        result = self._f2py.{{ cls.namelist_name }}_is_valid_wrapper(
+            self.handle,
+        )
+        _check_status(result)
+
+
+{% endfor %}

@@ -92,6 +92,7 @@ def generate_fortran(
     kind_allowlist: Iterable[str] | None = None,
     constants: dict[str, int | float] | None = None,
     module_doc: str | None = None,
+    f2py_handle_helpers: bool = False,
 ) -> None:
     """Generate a Fortran module from *schema* at *output*."""
     output_path = Path(output)
@@ -103,6 +104,7 @@ def generate_fortran(
         kind_allowlist=kind_allowlist,
         constants=constants,
         module_doc=module_doc,
+        f2py_handle_helpers=f2py_handle_helpers,
     )
     context["file_name"] = output_path.name
     rendered = _TEMPLATE_ENV.get_template("fortran_module.f90.j2").render(context)
@@ -148,6 +150,7 @@ def _build_context(
     kind_allowlist: Iterable[str] | None,
     constants: dict[str, int | float] | None,
     module_doc: str | None,
+    f2py_handle_helpers: bool = False,
 ) -> dict[str, Any]:
     if not helper_module:
         raise ValueError("helper module name must be a non-empty string")
@@ -237,6 +240,8 @@ def _build_context(
         "idx_check",
         "to_lower",
     ]
+    if f2py_handle_helpers:
+        helper_imports.append("NML_ERR_INVALID_HANDLE")
 
     current_property: str | None = None
     try:
@@ -913,6 +918,7 @@ def _build_context(
         "helper_imports": helper_imports,
         "presence_cases": presence_cases,
         "flex_bound_vars": _sort_bound_vars(flex_bound_vars),
+        "f2py_handle_helpers": f2py_handle_helpers,
     }
 
     return context

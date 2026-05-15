@@ -10,10 +10,19 @@ from pathlib import Path
 from typing import Any
 
 import click
-import f90nml  # type: ignore[import-untyped]
+import f90nml  # type: ignore
 from click.exceptions import Exit
 
 from ._version import __version__
+from .codegen_f2py import (
+    F2pyCTypeMap,
+    build_f2py_namelist_spec,
+    collect_f2py_kind_usage,
+    generate_f2cmap,
+    generate_f2py_wrappers,
+    generate_python_wrappers,
+    merge_f2py_kind_usage,
+)
 from .codegen_fortran import ConstantSpec, generate_fortran, generate_helper
 from .codegen_markdown import generate_docs
 from .codegen_template import generate_template
@@ -150,6 +159,58 @@ def _load_kind_settings(config: dict[str, Any]) -> tuple[str, dict[str, str], se
     return module, kind_map, allowlist
 
 
+def _load_f2py_settings(
+    config: dict[str, Any],
+    base_dir: Path,
+) -> tuple[Path | None, F2pyCTypeMap]:
+    f2py_raw = config.get("f2py")
+    if f2py_raw is None:
+        return None, F2pyCTypeMap(real={}, integer={})
+    if not isinstance(f2py_raw, dict):
+        raise click.ClickException("config 'f2py' must be a table")
+    if "python_package" in f2py_raw:
+        raise click.ClickException(
+            "config 'f2py.python_package' is no longer supported; "
+            "place the f2py extension next to the generated Python wrapper"
+        )
+
+    f2cmap_path = _resolve_optional_path(
+        f2py_raw.get("f2cmap_path"),
+        base_dir=base_dir,
+        key="f2py.f2cmap_path",
+    )
+
+    c_types_raw = f2py_raw.get("c_types", {})
+    if c_types_raw is None:
+        c_types_raw = {}
+    if not isinstance(c_types_raw, dict):
+        raise click.ClickException("config 'f2py.c_types' must be a table")
+
+    real = _load_f2py_ctype_table(c_types_raw, "real")
+    integer = _load_f2py_ctype_table(c_types_raw, "integer")
+    return f2cmap_path, F2pyCTypeMap(real=real, integer=integer)
+
+
+def _load_f2py_ctype_table(c_types: dict[str, Any], key: str) -> dict[str, str]:
+    raw = c_types.get(key, {})
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise click.ClickException(f"config 'f2py.c_types.{key}' must be a table")
+    values: dict[str, str] = {}
+    for kind, c_type in raw.items():
+        if not isinstance(kind, str) or not kind.strip():
+            raise click.ClickException(
+                f"config 'f2py.c_types.{key}' keys must be non-empty strings"
+            )
+        if not isinstance(c_type, str) or not c_type.strip():
+            raise click.ClickException(
+                f"config 'f2py.c_types.{key}.{kind}' must be a non-empty string"
+            )
+        values[kind.strip()] = c_type.strip()
+    return values
+
+
 def _format_constant_literal(value: int | float) -> tuple[str, str]:
     if isinstance(value, bool):
         raise click.ClickException("config constants must not be boolean")
@@ -274,7 +335,7 @@ def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
     return constants
 
 
-def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, Path | None]]:
+def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, Any]]:
     raw_entries = config.get("namelists")
     if raw_entries is None and "nml-files" in config:
         raise click.ClickException("config uses deprecated 'nml-files'; rename to 'namelists'")
@@ -289,6 +350,18 @@ def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, Pa
         if not isinstance(schema_raw, str):
             raise click.ClickException("namelists entry must define string 'schema'")
         schema_path = base_dir / schema_raw
+        f2py_path = _resolve_optional_path(
+            entry.get("f2py_path"),
+            base_dir=base_dir,
+            key="f2py_path",
+        )
+        py_path = _resolve_optional_path(
+            entry.get("py_path"),
+            base_dir=base_dir,
+            key="py_path",
+        )
+        if py_path is not None and f2py_path is None:
+            raise click.ClickException("namelists entry with 'py_path' must define 'f2py_path'")
         entries.append(
             {
                 "schema": schema_path,
@@ -307,6 +380,8 @@ def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, Pa
                     base_dir=base_dir,
                     key="temp_path",
                 ),
+                "f2py_path": f2py_path,
+                "py_path": py_path,
             }
         )
     return entries
@@ -359,6 +434,87 @@ def _iter_templates(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
     return entries
 
 
+def _generate_f2py_outputs(
+    loaded_entries: list[dict[str, Any]],
+    *,
+    helper_module: str,
+    helper_buffer: int,
+    kind_module: str,
+    kind_map: dict[str, str],
+    kind_allowlist: set[str],
+    constants: dict[str, int | float],
+    f2cmap_path: Path | None,
+    f2py_c_types: F2pyCTypeMap,
+    include_python: bool,
+) -> None:
+    f2py_groups: dict[Path, list[dict[str, Any]]] = {}
+    py_groups: dict[Path, list[tuple[dict[str, Any], Path]]] = {}
+    for loaded in loaded_entries:
+        entry = loaded["entry"]
+        schema = loaded["schema"]
+        f2py_path = entry["f2py_path"]
+        if f2py_path is None:
+            continue
+        f2py_groups.setdefault(f2py_path, []).append(schema)
+        py_path = entry["py_path"]
+        if include_python and py_path is not None:
+            py_groups.setdefault(py_path, []).append((schema, f2py_path))
+
+    for f2py_path, schemas in f2py_groups.items():
+        try:
+            logger.info("Generating f2py wrappers at %s", f2py_path)
+            generate_f2py_wrappers(
+                schemas,
+                f2py_path,
+                helper_module=helper_module,
+                kind_module=kind_module,
+                kind_map=kind_map,
+                kind_allowlist=kind_allowlist,
+                constants=constants,
+                errmsg_len=helper_buffer,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    if f2cmap_path is not None:
+        try:
+            usage = merge_f2py_kind_usage(
+                collect_f2py_kind_usage(schemas, constants=constants)
+                for schemas in f2py_groups.values()
+            )
+            logger.info("Generating f2py kind map at %s", f2cmap_path)
+            generate_f2cmap(f2cmap_path, usage, f2py_c_types)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    if not include_python:
+        return
+    for py_path, entries in py_groups.items():
+        try:
+            logger.info("Generating Python f2py wrappers at %s", py_path)
+            specs = [
+                (
+                    build_f2py_namelist_spec(
+                        schema,
+                        helper_module=helper_module,
+                        kind_module=kind_module,
+                        kind_map=kind_map,
+                        kind_allowlist=kind_allowlist,
+                        constants=constants,
+                        errmsg_len=helper_buffer,
+                    ),
+                    f2py_path.stem,
+                )
+                for schema, f2py_path in entries
+            ]
+            generate_python_wrappers(
+                specs,
+                py_path,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+
 @click.group(context_settings=_CONTEXT_SETTINGS)
 @click.version_option(__version__, "-V", "--version", prog_name="nml-tools")
 @click.option("--verbose", "-v", count=True, help="Increase verbosity (repeatable).")
@@ -391,6 +547,7 @@ def generate(config_path: Path) -> None:
     )
     constants, constant_specs = _load_constants(config)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
+    f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
     if helper_path is not None:
         try:
             logger.info("Generating helper module at %s", helper_path)
@@ -406,6 +563,7 @@ def generate(config_path: Path) -> None:
             raise click.ClickException(str(exc)) from exc
     entries = _iter_namelists(config, base_dir)
     logger.info("Found %d schema entries", len(entries))
+    loaded_entries: list[dict[str, Any]] = []
     for namelist_entry in entries:
         schema_path = namelist_entry["schema"]
         if schema_path is None:
@@ -415,6 +573,7 @@ def generate(config_path: Path) -> None:
             schema = load_schema(schema_path)
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
+        loaded_entries.append({"entry": namelist_entry, "schema": schema})
         mod_path = namelist_entry["mod_path"]
         if mod_path is not None:
             try:
@@ -428,6 +587,7 @@ def generate(config_path: Path) -> None:
                     kind_allowlist=kind_allowlist,
                     constants=constants,
                     module_doc=module_doc,
+                    f2py_handle_helpers=namelist_entry["f2py_path"] is not None,
                 )
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc
@@ -444,6 +604,19 @@ def generate(config_path: Path) -> None:
                 )
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc
+
+    _generate_f2py_outputs(
+        loaded_entries,
+        helper_module=helper_module,
+        helper_buffer=helper_buffer,
+        kind_module=kind_module,
+        kind_map=kind_map,
+        kind_allowlist=kind_allowlist,
+        constants=constants,
+        f2cmap_path=f2cmap_path,
+        f2py_c_types=f2py_c_types,
+        include_python=True,
+    )
 
     template_entries = _iter_templates(config, base_dir)
     if template_entries:
@@ -490,6 +663,7 @@ def gen_fortran(config_path: Path) -> None:
     module_doc, _, _ = _load_documentation_settings(config)
     constants, constant_specs = _load_constants(config)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
+    f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
     if helper_path is not None:
         try:
             logger.info("Generating helper module at %s", helper_path)
@@ -506,6 +680,7 @@ def gen_fortran(config_path: Path) -> None:
 
     entries = _iter_namelists(config, base_dir)
     logger.info("Found %d schema entries", len(entries))
+    loaded_entries: list[dict[str, Any]] = []
     for entry in entries:
         schema_path = entry["schema"]
         if schema_path is None:
@@ -515,6 +690,7 @@ def gen_fortran(config_path: Path) -> None:
             schema = load_schema(schema_path)
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
+        loaded_entries.append({"entry": entry, "schema": schema})
         mod_path = entry["mod_path"]
         if mod_path is None:
             continue
@@ -529,9 +705,23 @@ def gen_fortran(config_path: Path) -> None:
                 kind_allowlist=kind_allowlist,
                 constants=constants,
                 module_doc=module_doc,
+                f2py_handle_helpers=entry["f2py_path"] is not None,
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
+
+    _generate_f2py_outputs(
+        loaded_entries,
+        helper_module=helper_module,
+        helper_buffer=helper_buffer,
+        kind_module=kind_module,
+        kind_map=kind_map,
+        kind_allowlist=kind_allowlist,
+        constants=constants,
+        f2cmap_path=f2cmap_path,
+        f2py_c_types=f2py_c_types,
+        include_python=False,
+    )
 
 
 @cli.command("validate", context_settings=_CONTEXT_SETTINGS)

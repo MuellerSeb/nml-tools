@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, cast
+from typing import Any, Iterable, Mapping
 
 _FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
@@ -306,7 +306,7 @@ def _extract_bound(
 def _ensure_number(value: Any, name: str, label: str) -> int | float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"property '{name}' {label} must be a number")
-    return cast(int | float, value)
+    return value
 
 
 def _validate_bound_scalar(

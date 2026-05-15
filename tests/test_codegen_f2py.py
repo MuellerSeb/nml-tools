@@ -1,0 +1,213 @@
+"""Tests for f2py wrapper generation."""
+
+from __future__ import annotations
+
+import importlib
+import importlib.util
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+
+def _import_codegen_f2py() -> Any:
+    root = Path(__file__).resolve().parents[1]
+    src = root / "src"
+    sys.path.insert(0, str(src))
+    try:
+        return importlib.import_module("nml_tools.codegen_f2py")
+    finally:
+        sys.path.pop(0)
+
+
+def _schema(name: str = "optimization") -> dict[str, Any]:
+    return {
+        "title": "Optimization",
+        "x-fortran-namelist": name,
+        "type": "object",
+        "required": ["method", "values"],
+        "properties": {
+            "method": {"type": "string", "x-fortran-len": 16},
+            "values": {
+                "type": "array",
+                "x-fortran-shape": [3, 2],
+                "items": {"type": "number", "x-fortran-kind": "dp"},
+            },
+            "seed": {"type": "integer", "x-fortran-kind": "i4"},
+            "weights": {
+                "type": "array",
+                "x-fortran-shape": [3],
+                "items": {"type": "integer", "x-fortran-kind": "i4", "default": 1},
+            },
+        },
+    }
+
+
+def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    output = tmp_path / "f2py_config_wrappers.f90"
+
+    codegen.generate_f2py_wrappers(
+        [_schema(), _schema("runtime")],
+        output,
+        kind_module="iso_fortran_env",
+        kind_map={"dp": "real64", "i4": "int32"},
+        kind_allowlist={"real64", "int32"},
+    )
+
+    generated = output.read_text()
+    assert "module f2py_optimization" in generated
+    assert "module f2py_runtime" in generated
+    assert "use iso_fortran_env, only:" in generated
+    assert "dp=>real64" in generated
+    assert "i4=>int32" in generated
+    assert "integer, intent(in) :: values_n1" in generated
+    assert "integer, intent(in) :: values_n2" in generated
+    assert "real(dp), dimension(values_n1, values_n2), intent(in) :: values" in generated
+    assert "integer(i4), intent(in) :: seed" in generated
+    assert "logical, intent(in) :: has_seed" in generated
+    assert "integer, intent(in) :: weights_n1" in generated
+    assert "integer(i4), dimension(weights_n1), intent(in) :: weights" in generated
+    assert "logical, intent(in) :: has_weights" in generated
+    assert "integer(i4), allocatable :: maybe_seed" in generated
+    assert "integer(i4), dimension(:), allocatable :: maybe_weights" in generated
+    assert "if (has_seed) then" in generated
+    assert "if (has_weights) then" in generated
+    assert "status = this%set(" in generated
+    assert "seed=maybe_seed" in generated
+    assert "weights=maybe_weights" in generated
+    assert "optional ::" not in generated
+    assert "dimension(:), intent(in)" not in generated
+    assert "function optimization_handle" not in generated
+    assert "nml_optimization_resolve_handle" in generated
+    assert "call nml_optimization_resolve_handle(handle, this, status, errmsg)" in generated
+    assert "c_associated" not in generated
+    assert "c_f_pointer" not in generated
+    assert "status = NML_OK" not in generated
+    assert "type(nml_optimization_t), pointer :: this" in generated
+    assert "subroutine optimization_set_wrapper" in generated
+    assert "subroutine optimization_from_file_wrapper" in generated
+    assert "subroutine optimization_is_set_wrapper" in generated
+    assert "subroutine optimization_is_valid_wrapper" in generated
+
+
+def test_generate_f2cmap_requires_explicit_kind_mappings(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    usage = codegen.collect_f2py_kind_usage([_schema()])
+    output = tmp_path / ".f2py_f2cmap"
+
+    codegen.generate_f2cmap(
+        output,
+        usage,
+        codegen.F2pyCTypeMap(real={"dp": "double"}, integer={"i4": "int"}),
+    )
+
+    assert output.read_text() == (
+        "dict(real=dict(dp='double'), integer=dict(c_intptr_t='long_long', i4='int'))\n"
+    )
+
+    with pytest.raises(ValueError, match="missing f2py real C type mappings: dp"):
+        codegen.generate_f2cmap(
+            tmp_path / "missing",
+            usage,
+            codegen.F2pyCTypeMap(real={}, integer={"i4": "int"}),
+        )
+
+
+def test_generate_python_wrapper_normalizes_arrays_and_handles_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    codegen = _import_codegen_f2py()
+    spec = codegen.build_f2py_namelist_spec(_schema())
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    output = package_dir / "config_wrappers.py"
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class FakeF2pyOptimization:
+        @staticmethod
+        def optimization_set_wrapper(handle: int, **kwargs: Any) -> tuple[int, str]:
+            calls.append(("set", kwargs))
+            return 0, ""
+
+        @staticmethod
+        def optimization_is_set_wrapper(
+            handle: int,
+            name: str,
+            **kwargs: Any,
+        ) -> tuple[int, str]:
+            calls.append(("is_set", {"name": name, **kwargs}))
+            return 12, "field not set"
+
+        @staticmethod
+        def optimization_is_valid_wrapper(handle: int) -> tuple[int, str]:
+            calls.append(("is_valid", {}))
+            return 11, "enum constraint failed"
+
+        @staticmethod
+        def optimization_from_file_wrapper(handle: int, file: str) -> tuple[int, str]:
+            calls.append(("from_file", {"file": file}))
+            return 0, ""
+
+    class FakeExtension:
+        f2py_optimization = FakeF2pyOptimization
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setitem(sys.modules, "pkg.f2py_config_wrappers", FakeExtension)
+
+    codegen.generate_python_wrappers([(spec, "f2py_config_wrappers")], output)
+
+    module_spec = importlib.util.spec_from_file_location("pkg.config_wrappers", output)
+    assert module_spec is not None
+    assert module_spec.loader is not None
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+
+    cfg = module.Optimization(123)
+    cfg.set(method="DDS", values=0.1, seed=None)
+
+    name, kwargs = calls[-1]
+    assert name == "set"
+    assert set(kwargs) == {
+        "method",
+        "values",
+        "seed",
+        "has_seed",
+        "weights",
+        "has_weights",
+    }
+    assert kwargs["values"].shape == (1, 1)
+    assert kwargs["values"].flags.f_contiguous
+    assert kwargs["seed"] == 0
+    assert kwargs["has_seed"] is False
+    assert kwargs["weights"].shape == (1,)
+    assert kwargs["weights"].flags.f_contiguous
+    assert kwargs["has_weights"] is False
+    assert cfg.is_set("seed") is False
+    assert calls[-1][1]["idx"].shape == (1,)
+    assert calls[-1][1]["has_idx"] is False
+    cfg.from_file("optimization.nml")
+    with pytest.raises(module.NmlError) as exc:
+        cfg.is_valid()
+    assert exc.value.status == 11
+
+    with pytest.raises(ValueError, match="required argument 'method'"):
+        cfg.set(method=None, values=[1.0])
+    with pytest.raises(ValueError, match="expected at most 2"):
+        cfg.set(method="DDS", values=[[[1.0]]])
+
+
+def test_generate_python_wrapper_uses_package_relative_import(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    spec = codegen.build_f2py_namelist_spec(_schema())
+    output = tmp_path / "config_wrappers.py"
+
+    codegen.generate_python_wrappers([(spec, "f2py_config")], output)
+
+    generated = output.read_text()
+    assert "from . import f2py_config" in generated
+    assert "importlib" not in generated
+    assert "_f2py = f2py_config.f2py_optimization" in generated

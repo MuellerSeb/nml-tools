@@ -17,6 +17,9 @@ module {{ module_name }}
   use {{ kind_module }}, only: &
     {{ kind_imports | join(', &\n    ') }}
 {% endif %}
+{% if f2py_handle_helpers %}
+  use iso_c_binding, only: c_associated, c_f_pointer, c_intptr_t, c_ptr
+{% endif %}
 
   implicit none
 
@@ -112,6 +115,38 @@ contains
   end function {{ bounds.func_name }}
 
 {% endfor %}
+{% endif %}
+{% if f2py_handle_helpers %}
+  !> \brief Resolve an opaque C pointer handle to a {{ type_name }} pointer
+  subroutine {{ type_prefix }}_resolve_handle(handle, this, status, errmsg)
+    integer(c_intptr_t), intent(in) :: handle
+    type({{ type_name }}), pointer :: this
+    integer, intent(out) :: status
+    character(len=*), intent(out), optional :: errmsg
+    type(c_ptr) :: ptr
+
+    if (present(errmsg)) errmsg = ""
+    nullify(this)
+    if (handle == 0_c_intptr_t) then
+      status = NML_ERR_INVALID_HANDLE
+      if (present(errmsg)) errmsg = "invalid handle"
+      return
+    end if
+    ptr = transfer(handle, ptr)
+    if (.not. c_associated(ptr)) then
+      status = NML_ERR_INVALID_HANDLE
+      if (present(errmsg)) errmsg = "invalid handle"
+      return
+    end if
+    call c_f_pointer(ptr, this)
+    if (.not. associated(this)) then
+      status = NML_ERR_INVALID_HANDLE
+      if (present(errmsg)) errmsg = "invalid handle"
+      return
+    end if
+    status = NML_OK
+  end subroutine {{ type_prefix }}_resolve_handle
+
 {% endif %}
   !> \brief Initialize defaults and sentinels for {{ namelist_name }}
   integer function {{ type_prefix }}_init(this, errmsg) result(status)

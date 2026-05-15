@@ -263,6 +263,47 @@ Defines the kind module and allowed kinds.
 - `integer` (list of strings): allowed integer kinds.
 - `map` (table, optional): schema kind name → module kind name.
 
+### [f2py]
+
+Optional settings for f2py wrapper generation.
+
+- `f2cmap_path` (string, optional): output path for a generated `.f2py_f2cmap`
+  file.
+- `c_types.real` (table): explicit f2py C type mapping for schema real kind
+  names used by f2py wrappers.
+- `c_types.integer` (table): explicit f2py C type mapping for schema integer
+  kind names used by f2py wrappers.
+  `c_intptr_t` is added automatically as `long_long` unless explicitly
+  overridden.
+
+Generated Python f2py shims assume a package-local extension layout. The f2py
+extension module named by `f2py_path` must be installed next to the generated
+Python wrapper file, and the wrapper imports it with `from . import <module>`.
+
+The f2py wrappers use the same schema kind aliases as the normal Fortran
+module. For example, a schema kind `dp` with `[kinds].map = { dp = "real64" }`
+is still emitted as `real(dp)` in the wrapper and imported as
+`dp=>real64`. The generated f2py map therefore also uses `dp`:
+
+```toml
+[f2py]
+f2cmap_path = ".f2py_f2cmap"
+
+[f2py.c_types.real]
+dp = "double"
+
+[f2py.c_types.integer]
+i4 = "int"
+```
+
+The f2py-visible wrapper procedures avoid Fortran `optional` dummy arguments
+and assumed-shape arrays. Optional Python values are represented by generated
+`has_<name>` flags and harmless dummy values. Inside the Fortran wrapper,
+allocated local variables are passed to the generated type-bound `set` method
+when a value is present; unallocated allocatables are passed otherwise, so the
+type-bound `set` still sees `present(arg) == .false.`. This keeps the f2py ABI
+simple while preserving the normal generated Fortran setter semantics.
+
 ### [documentation]
 
 Optional extra module documentation appended after the generated `\brief` and
@@ -279,8 +320,14 @@ Schema entries to generate per-namelist outputs.
 - `schema` (string): schema file path.
 - `mod_path` (string, optional): Fortran module output path.
 - `doc_path` (string, optional): Markdown output path.
+- `f2py_path` (string, optional): Fortran source path for f2py wrapper modules.
+- `py_path` (string, optional): Python shim path for wrapper classes. Requires
+  `f2py_path`.
 
 If a path is omitted, that output is not generated.
+
+Multiple namelists may use the same `f2py_path` or `py_path`; nml-tools
+collects the wrappers/classes into the shared file.
 
 ### templates (array)
 
@@ -327,6 +374,11 @@ nml-tools gen-fortran --config nml-config.toml
 nml-tools gen-markdown --config nml-config.toml
 nml-tools gen-template --config nml-config.toml
 ```
+
+If `f2py_path` is configured, `generate` and `gen-fortran` also emit the
+f2py-facing Fortran wrapper file. `generate` additionally emits `py_path`
+Python shims. If `[f2py].f2cmap_path` is configured, the generated map can be
+passed to f2py with `--f2cmap`.
 
 ### Validation
 
@@ -380,6 +432,7 @@ Status codes (defined in the helper module):
 | `NML_ERR_BOUNDS` (14) | bounds constraint failed |
 | `NML_ERR_INVALID_NAME` (20) | unknown field name |
 | `NML_ERR_INVALID_INDEX` (21) | invalid index for array access |
+| `NML_ERR_INVALID_HANDLE` (22) | invalid opaque f2py handle |
 
 Notes:
 
