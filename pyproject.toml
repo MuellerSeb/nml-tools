@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "numpy>=1.24,<3",
     "pytest-cov",
     "ruff",
     "mypy",
