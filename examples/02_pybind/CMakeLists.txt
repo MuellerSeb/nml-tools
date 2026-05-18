@@ -27,7 +27,6 @@ set(f2py_module_name_c "${CMAKE_CURRENT_BINARY_DIR}/${f2py_module_name}module.c"
 set(f2py_module_name_f "${CMAKE_CURRENT_BINARY_DIR}/${f2py_module_name}-f2pywrappers2.f90")
 set(f2py_fortranobject "${F2PY_INCLUDE_DIR}/fortranobject.c")
 
-set(generated_dir "${CMAKE_CURRENT_SOURCE_DIR}/generated")
 set(fortran_dir "${CMAKE_CURRENT_SOURCE_DIR}/fortran")
 set(fortran_generated_dir "${fortran_dir}/generated")
 set(f2py_dir "${CMAKE_CURRENT_SOURCE_DIR}/f2py")

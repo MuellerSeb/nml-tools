@@ -46,7 +46,7 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
       - name: Setup Fortran
-        uses: gha3mi/setup-fortran-conda@latest
+        uses: gha3mi/setup-fortran-conda@v0.15.3
         with:
           compiler: ${{ matrix.compiler }}
           extra-packages: pip
