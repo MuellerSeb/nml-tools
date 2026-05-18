@@ -164,7 +164,7 @@ Summary:
   seed = -9
   dds_r = 0.2
   mcmc_opti = .true.
-  mcmc_error_params(:, 1, 1) = 0.01, 0.6, 0.2
+  mcmc_error_params(:,1,1) = 0.01, 0.6, 0.2
   include_parameters(:) = .true., .false., .true.
 /
 ```
