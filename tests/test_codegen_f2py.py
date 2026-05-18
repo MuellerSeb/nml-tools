@@ -109,6 +109,43 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     assert "subroutine optimization_is_valid_wrapper" in generated
 
 
+def test_generate_f2py_wrappers_uses_deferred_length_for_string_array_bridges(
+    tmp_path: Path,
+) -> None:
+    codegen = _import_codegen_f2py()
+    output = tmp_path / "f2py_config_wrappers.f90"
+    schema = {
+        "title": "String arrays",
+        "x-fortran-namelist": "strings",
+        "type": "object",
+        "properties": {
+            "names": {
+                "title": "Names",
+                "type": "array",
+                "x-fortran-shape": [2, 3],
+                "items": {"type": "string", "x-fortran-len": 16},
+            },
+        },
+    }
+
+    codegen.generate_f2py_wrappers([schema], output)
+
+    generated = output.read_text()
+    assert (
+        "character(len=*), dimension(names_n1, names_n2), intent(in) :: names"
+        in generated
+    )
+    assert (
+        "character(len=:), dimension(:, :), allocatable :: maybe_names"
+        in generated
+    )
+    assert (
+        "allocate(character(len=len(names)) :: maybe_names(names_n1, names_n2))"
+        in generated
+    )
+    assert "character(len=*), dimension(:, :), allocatable :: maybe_names" not in generated
+
+
 def test_generate_f2cmap_requires_explicit_kind_mappings(tmp_path: Path) -> None:
     codegen = _import_codegen_f2py()
     usage = codegen.collect_f2py_kind_usage([_schema()])

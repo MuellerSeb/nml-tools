@@ -458,6 +458,8 @@ def _f2py_field_arguments(
 def _optional_bridge_declaration(name: str, type_info: FieldTypeInfo) -> str:
     if type_info.category == "array":
         dims = ", ".join(":" for _ in type_info.dimensions)
+        if type_info.element_category == "string":
+            return f"character(len=:), dimension({dims}), allocatable :: maybe_{name}"
         return f"{type_info.arg_type_spec}, dimension({dims}), allocatable :: maybe_{name}"
     if type_info.category == "string":
         return f"character(len=:), allocatable :: maybe_{name}"
@@ -469,9 +471,12 @@ def _optional_bridge_assignment(name: str, type_info: FieldTypeInfo) -> str:
     maybe_name = f"maybe_{name}"
     if type_info.category == "array":
         dims = ", ".join(_array_dimension_argument_names(name, len(type_info.dimensions)))
+        allocate_stmt = f"allocate({maybe_name}({dims}))"
+        if type_info.element_category == "string":
+            allocate_stmt = f"allocate(character(len=len({name})) :: {maybe_name}({dims}))"
         return (
             f"if ({has_flag}) then\n"
-            f"  allocate({maybe_name}({dims}))\n"
+            f"  {allocate_stmt}\n"
             f"  {maybe_name} = {name}\n"
             "end if"
         )
