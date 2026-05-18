@@ -49,6 +49,7 @@ jobs:
         uses: gha3mi/setup-fortran-conda@latest
         with:
           compiler: ${{ matrix.compiler }}
+          extra-packages: pip
       - name: Install Python build tools
         run: python -m pip install -U pip build pytest
       - name: Build 01_simple
