@@ -62,8 +62,31 @@ def _check_status(result: Any) -> None:
         raise NmlError(status, errmsg)
 
 
-def _normalize_array(value: Any, rank: int, name: str, dtype: Any = None) -> np.ndarray:
+def _normalize_array(
+    value: Any,
+    rank: int,
+    name: str,
+    dtype: Any = None,
+    expected_shape: tuple[int, ...] | None = None,
+) -> np.ndarray:
     array = np.asarray(value, dtype=dtype)
+    if expected_shape is not None:
+        if len(expected_shape) != rank:
+            raise ValueError(
+                f"array '{name}' has invalid wrapper metadata: "
+                f"shape rank {len(expected_shape)}, expected {rank}"
+            )
+        if array.ndim == 0:
+            return np.asfortranarray(
+                np.full(expected_shape, array.item(), dtype=dtype)
+            )
+        if array.ndim > rank:
+            raise ValueError(f"array '{name}' has rank {array.ndim}, expected {rank}")
+        if array.shape != expected_shape:
+            raise ValueError(
+                f"array '{name}' has shape {array.shape}, expected {expected_shape}"
+            )
+        return np.asfortranarray(array)
     if array.ndim == 0:
         target_shape = (1,) * rank
     elif array.ndim <= rank:
@@ -148,7 +171,7 @@ class Config:
         Raises
         ------
         ValueError
-            If a required argument is None or an array rank is invalid.
+            If a required argument is None or an array shape/rank is invalid.
         NmlError
             If the Fortran setter returns a non-OK status.
         """
@@ -181,6 +204,7 @@ class Config:
                 1,
                 "weights",
                 dtype="float",
+                expected_shape=None,
             )
         else:
             kwargs["weights"] = _dummy_array(

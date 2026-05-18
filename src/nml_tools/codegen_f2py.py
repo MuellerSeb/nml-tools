@@ -13,8 +13,11 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 from .codegen_fortran import (
     FieldSpec,
     FieldTypeInfo,
+    _array_default_value,
     _build_context,
     _field_type_info,
+    _parse_default_dimensions,
+    _parse_flex_dim,
 )
 
 _TEMPLATE_ENV = Environment(
@@ -39,6 +42,7 @@ class F2pyArgumentSpec:
     doc_type: str
     requirement: str
     has_flag: str | None = None
+    fixed_shape: list[int] | None = None
 
 
 @dataclass
@@ -260,6 +264,7 @@ def build_f2py_namelist_spec(
     type_infos = {
         name: type_info for name, type_info in _iter_field_type_infos(schema, constants)
     }
+    properties = _normalized_properties(schema)
     required_args: list[F2pyArgumentSpec] = []
     optional_args: list[F2pyArgumentSpec] = []
     argument_list: list[str] = []
@@ -270,6 +275,7 @@ def build_f2py_namelist_spec(
     array_dimensions: list[F2pyArrayDimensionSpec] = []
     for field in fields:
         type_info = type_infos[field.name]
+        prop = properties[field.name]
         rank = len(type_info.dimensions) if type_info.category == "array" else 0
         has_flag = None if field.required else f"has_{field.name}"
         spec = F2pyArgumentSpec(
@@ -282,6 +288,7 @@ def build_f2py_namelist_spec(
             doc_type=_python_doc_type(type_info),
             requirement="required" if field.required else "optional",
             has_flag=has_flag,
+            fixed_shape=_fixed_python_array_shape(prop, type_info, constants),
         )
         if field.required:
             required_args.append(spec)
@@ -338,10 +345,18 @@ def _iter_field_type_infos(
     schema: dict[str, Any],
     constants: dict[str, int | float] | None,
 ) -> list[tuple[str, FieldTypeInfo]]:
+    properties = _normalized_properties(schema)
+    return [
+        (name, _field_type_info(prop, constants))
+        for name, prop in properties.items()
+    ]
+
+
+def _normalized_properties(schema: dict[str, Any]) -> dict[str, dict[str, Any]]:
     properties = schema.get("properties")
     if not isinstance(properties, dict):
         raise ValueError("schema must define object 'properties'")
-    entries: list[tuple[str, FieldTypeInfo]] = []
+    normalized: dict[str, dict[str, Any]] = {}
     seen: set[str] = set()
     for raw_name, prop in properties.items():
         if not isinstance(raw_name, str):
@@ -352,8 +367,22 @@ def _iter_field_type_infos(
         if name in seen:
             raise ValueError(f"duplicate property '{raw_name}'")
         seen.add(name)
-        entries.append((name, _field_type_info(prop, constants)))
-    return entries
+        normalized[name] = prop
+    return normalized
+
+
+def _fixed_python_array_shape(
+    prop: dict[str, Any],
+    type_info: FieldTypeInfo,
+    constants: dict[str, int | float] | None,
+) -> list[int] | None:
+    if type_info.category != "array":
+        return None
+    if _array_default_value(prop) is not None:
+        return None
+    if _parse_flex_dim(prop, type_info) > 0:
+        return None
+    return _parse_default_dimensions(type_info.dimensions, constants)
 
 
 def _class_name(namelist_name: str) -> str:
