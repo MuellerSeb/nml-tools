@@ -326,6 +326,7 @@ def _build_context(
                 type_info=type_info,
                 is_required=is_required,
                 dimensions=arg_dimensions,
+                doc=title,
             )
             local_init_assignments.append(f"{name} = this%{name}")
 
@@ -1245,6 +1246,7 @@ def _render_argument_declaration(
     type_info: FieldTypeInfo,
     is_required: bool,
     dimensions: list[str] | None = None,
+    doc: str | None = None,
 ) -> str:
     intent = "intent(in)"
     parts = [type_info.arg_type_spec]
@@ -1259,6 +1261,8 @@ def _render_argument_declaration(
     else:
         parts.append(intent)
         decl = f"{', '.join(parts)} :: {name}"
+    if doc:
+        decl = f"{decl} !< {doc}"
     return decl
 
 

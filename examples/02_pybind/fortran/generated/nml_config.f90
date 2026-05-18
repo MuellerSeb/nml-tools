@@ -72,8 +72,8 @@ contains
 
   !> \brief Check whether a value is within bounds
   elemental logical function iterations_in_bounds(val, allow_missing) result(in_bounds)
-    integer(i4), intent(in) :: val
-    logical, intent(in), optional :: allow_missing
+    integer(i4), intent(in) :: val !< value to check
+    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
     if (present(allow_missing)) then
       if (allow_missing) then
@@ -90,8 +90,8 @@ contains
 
   !> \brief Check whether a value is within bounds
   elemental logical function tolerance_in_bounds(val, allow_missing) result(in_bounds)
-    real(dp), intent(in) :: val
-    logical, intent(in), optional :: allow_missing
+    real(dp), intent(in) :: val !< value to check
+    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
     if (present(allow_missing)) then
       if (allow_missing) then
@@ -108,10 +108,10 @@ contains
 
   !> \brief Resolve an opaque C pointer handle to a nml_config_t pointer
   subroutine nml_config_resolve_handle(handle, this, status, errmsg)
-    integer(c_intptr_t), intent(in) :: handle
-    type(nml_config_t), pointer :: this
-    integer, intent(out) :: status
-    character(len=*), intent(out), optional :: errmsg
+    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
+    type(nml_config_t), pointer :: this !< resolved namelist pointer
+    integer, intent(out) :: status !< nml-tools status code
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     type(c_ptr) :: ptr
 
     if (present(errmsg)) errmsg = ""
@@ -138,8 +138,8 @@ contains
 
   !> \brief Initialize defaults and sentinels for config
   integer function nml_config_init(this, errmsg) result(status)
-    class(nml_config_t), intent(inout) :: this
-    character(len=*), intent(out), optional :: errmsg
+    class(nml_config_t), intent(inout) :: this !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -156,9 +156,9 @@ contains
 
   !> \brief Read config namelist from file
   integer function nml_config_from_file(this, file, errmsg) result(status)
-    class(nml_config_t), intent(inout) :: this
+    class(nml_config_t), intent(inout) :: this !< namelist instance
     character(len=*), intent(in) :: file !< path to namelist file
-    character(len=*), intent(out), optional :: errmsg
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
     character(len=str_len) :: name
     integer(i4) :: iterations
@@ -230,13 +230,13 @@ contains
     weights, &
     errmsg) result(status)
 
-    class(nml_config_t), intent(inout) :: this
-    character(len=*), intent(out), optional :: errmsg
-    integer(i4), intent(in) :: iterations
-    real(dp), intent(in) :: tolerance
-    character(len=*), intent(in), optional :: name
-    logical, intent(in), optional :: enabled
-    real(dp), dimension(:), intent(in), optional :: weights
+    class(nml_config_t), intent(inout) :: this !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    integer(i4), intent(in) :: iterations !< Iterations
+    real(dp), intent(in) :: tolerance !< Tolerance
+    character(len=*), intent(in), optional :: name !< Config name
+    logical, intent(in), optional :: enabled !< Enabled
+    real(dp), dimension(:), intent(in), optional :: weights !< Weights
     integer :: &
       lb_1, &
       ub_1
@@ -268,10 +268,10 @@ contains
 
   !> \brief Check whether a namelist value was set
   integer function nml_config_is_set(this, name, idx, errmsg) result(status)
-    class(nml_config_t), intent(in) :: this
-    character(len=*), intent(in) :: name
-    integer, intent(in), optional :: idx(:)
-    character(len=*), intent(out), optional :: errmsg
+    class(nml_config_t), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field name
+    integer, intent(in), optional :: idx(:) !< optional field index values
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -320,8 +320,8 @@ contains
 
   !> \brief Validate required values and constraints
   integer function nml_config_is_valid(this, errmsg) result(status)
-    class(nml_config_t), intent(in) :: this
-    character(len=*), intent(out), optional :: errmsg
+    class(nml_config_t), intent(in) :: this !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: istat
 
     status = NML_OK

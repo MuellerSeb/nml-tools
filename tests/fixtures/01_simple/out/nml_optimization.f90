@@ -65,8 +65,8 @@ contains
 
   !> \brief Initialize defaults and sentinels for optimization
   integer function nml_optimization_init(this, errmsg) result(status)
-    class(nml_optimization_t), intent(inout) :: this
-    character(len=*), intent(out), optional :: errmsg
+    class(nml_optimization_t), intent(inout) :: this !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -89,9 +89,9 @@ contains
 
   !> \brief Read optimization namelist from file
   integer function nml_optimization_from_file(this, file, errmsg) result(status)
-    class(nml_optimization_t), intent(inout) :: this
+    class(nml_optimization_t), intent(inout) :: this !< namelist instance
     character(len=*), intent(in) :: file !< path to namelist file
-    character(len=*), intent(out), optional :: errmsg
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
     character(len=buf) :: name
     integer :: niterations
@@ -173,15 +173,15 @@ contains
     mcmc_error_params, &
     errmsg) result(status)
 
-    class(nml_optimization_t), intent(inout) :: this
-    character(len=*), intent(out), optional :: errmsg
-    integer, intent(in) :: niterations
-    real, intent(in) :: tolerance
-    character(len=*), intent(in), optional :: name
-    integer(i4), intent(in), optional :: seed
-    real(dp), intent(in), optional :: dds_r
-    logical, intent(in), optional :: mcmc_opti
-    real(dp), dimension(:, :, :), intent(in), optional :: mcmc_error_params
+    class(nml_optimization_t), intent(inout) :: this !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    integer, intent(in) :: niterations !< Number of iterations
+    real, intent(in) :: tolerance !< Convergence tolerance
+    character(len=*), intent(in), optional :: name !< Optimization name
+    integer(i4), intent(in), optional :: seed !< Random seed
+    real(dp), intent(in), optional :: dds_r !< DDS perturbation rate
+    logical, intent(in), optional :: mcmc_opti !< MCMC optimization
+    real(dp), dimension(:, :, :), intent(in), optional :: mcmc_error_params !< MCMC error parameters per domain
     integer :: &
       lb_1, &
       lb_2, &
@@ -233,10 +233,10 @@ contains
 
   !> \brief Check whether a namelist value was set
   integer function nml_optimization_is_set(this, name, idx, errmsg) result(status)
-    class(nml_optimization_t), intent(in) :: this
-    character(len=*), intent(in) :: name
-    integer, intent(in), optional :: idx(:)
-    character(len=*), intent(out), optional :: errmsg
+    class(nml_optimization_t), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field name
+    integer, intent(in), optional :: idx(:) !< optional field index values
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -298,8 +298,8 @@ contains
 
   !> \brief Validate required values and constraints
   integer function nml_optimization_is_valid(this, errmsg) result(status)
-    class(nml_optimization_t), intent(in) :: this
-    character(len=*), intent(out), optional :: errmsg
+    class(nml_optimization_t), intent(in) :: this !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: istat
 
     status = NML_OK
