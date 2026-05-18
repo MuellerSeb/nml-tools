@@ -368,16 +368,21 @@ def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
             base_dir=base_dir,
             key="py_path",
         )
+        mod_path = _resolve_optional_path(
+            entry.get("mod_path"),
+            base_dir=base_dir,
+            key="mod_path",
+        )
+        if f2py_path is not None and mod_path is None:
+            raise click.ClickException(
+                "namelists entry with 'f2py_path' must define 'mod_path'"
+            )
         if py_path is not None and f2py_path is None:
             raise click.ClickException("namelists entry with 'py_path' must define 'f2py_path'")
         entries.append(
             {
                 "schema": schema_path,
-                "mod_path": _resolve_optional_path(
-                    entry.get("mod_path"),
-                    base_dir=base_dir,
-                    key="mod_path",
-                ),
+                "mod_path": mod_path,
                 "doc_path": _resolve_optional_path(
                     entry.get("doc_path"),
                     base_dir=base_dir,

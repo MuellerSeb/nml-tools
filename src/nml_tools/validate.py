@@ -303,7 +303,7 @@ def _extract_bound(
     return None, False
 
 
-def _ensure_number(value: Any, name: str, label: str) -> int | float:
+def _ensure_number(value: object, name: str, label: str) -> int | float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"property '{name}' {label} must be a number")
     return value

@@ -140,3 +140,56 @@ def test_cli_rejects_invalid_python_doc_style(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "documentation.py-style" in result.stderr
+
+
+def test_cli_rejects_f2py_path_without_mod_path(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    (tmp_path / "schema.yml").write_text(
+        dedent(
+            """
+            title: Demo
+            x-fortran-namelist: demo
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "nml-config.toml").write_text(
+        dedent(
+            """
+            [kinds]
+            module = "iso_fortran_env"
+            real = ["real64"]
+            integer = ["int32"]
+
+            [[namelists]]
+            schema = "schema.yml"
+            f2py_path = "out/f2py_config.f90"
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nml_tools.cli",
+            "generate",
+            "--config",
+            str(tmp_path / "nml-config.toml"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "f2py_path" in result.stderr
+    assert "mod_path" in result.stderr
