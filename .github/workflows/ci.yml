@@ -36,9 +36,9 @@ jobs:
           - compiler: gfortran
             experimental: false
           - compiler: ifx
-            experimental: true
+            experimental: false
           - compiler: flang-new
-            experimental: true
+            experimental: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
