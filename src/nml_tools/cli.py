@@ -279,10 +279,10 @@ def _load_bool_field(section: dict[str, Any], key: str, *, label: str) -> bool:
 
 def _load_documentation_settings(
     config: dict[str, Any],
-) -> tuple[str | None, bool, bool]:
+) -> tuple[str | None, bool, bool, str]:
     doc_raw = config.get("documentation")
     if doc_raw is None:
-        return None, False, False
+        return None, False, False, "numpy"
     if not isinstance(doc_raw, dict):
         raise click.ClickException("config 'documentation' must be a table")
     module_doc = None
@@ -301,7 +301,15 @@ def _load_documentation_settings(
         "md_add_toc_statement",
         label="documentation.md_add_toc_statement",
     )
-    return module_doc, md_doxygen_id_from_name, md_add_toc_statement
+    py_style_raw = doc_raw.get("py-style", "numpy")
+    if not isinstance(py_style_raw, str):
+        raise click.ClickException("config 'documentation.py-style' must be a string")
+    py_style = py_style_raw.strip().lower()
+    if py_style not in {"numpy", "doxygen"}:
+        raise click.ClickException(
+            "config 'documentation.py-style' must be 'numpy' or 'doxygen'"
+        )
+    return module_doc, md_doxygen_id_from_name, md_add_toc_statement, py_style
 
 
 def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
@@ -445,6 +453,7 @@ def _generate_f2py_outputs(
     constants: dict[str, int | float],
     f2cmap_path: Path | None,
     f2py_c_types: F2pyCTypeMap,
+    py_style: str,
     include_python: bool,
 ) -> None:
     f2py_groups: dict[Path, list[dict[str, Any]]] = {}
@@ -510,6 +519,7 @@ def _generate_f2py_outputs(
             generate_python_wrappers(
                 specs,
                 py_path,
+                py_style=py_style,
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
@@ -542,9 +552,12 @@ def generate(config_path: Path) -> None:
         config,
         base_dir,
     )
-    module_doc, md_doxygen_id_from_name, md_add_toc_statement = _load_documentation_settings(
-        config
-    )
+    (
+        module_doc,
+        md_doxygen_id_from_name,
+        md_add_toc_statement,
+        py_style,
+    ) = _load_documentation_settings(config)
     constants, constant_specs = _load_constants(config)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
@@ -615,6 +628,7 @@ def generate(config_path: Path) -> None:
         constants=constants,
         f2cmap_path=f2cmap_path,
         f2py_c_types=f2py_c_types,
+        py_style=py_style,
         include_python=True,
     )
 
@@ -660,7 +674,7 @@ def gen_fortran(config_path: Path) -> None:
         config,
         base_dir,
     )
-    module_doc, _, _ = _load_documentation_settings(config)
+    module_doc, _, _, py_style = _load_documentation_settings(config)
     constants, constant_specs = _load_constants(config)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
@@ -720,6 +734,7 @@ def gen_fortran(config_path: Path) -> None:
         constants=constants,
         f2cmap_path=f2cmap_path,
         f2py_c_types=f2py_c_types,
+        py_style=py_style,
         include_python=False,
     )
 
@@ -869,7 +884,7 @@ def gen_markdown(config_path: Path) -> None:
     config = _load_config_checked(config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
-    _, md_doxygen_id_from_name, md_add_toc_statement = _load_documentation_settings(
+    _, md_doxygen_id_from_name, md_add_toc_statement, _ = _load_documentation_settings(
         config
     )
     entries = _iter_namelists(config, base_dir)

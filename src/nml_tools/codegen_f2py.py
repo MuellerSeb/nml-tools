@@ -25,15 +25,19 @@ _TEMPLATE_ENV = Environment(
     undefined=StrictUndefined,
 )
 
+
 @dataclass
 class F2pyArgumentSpec:
     """Python wrapper argument metadata."""
 
     name: str
+    title: str
     required: bool
     rank: int
     numpy_dtype: str | None
     dummy_value: str
+    doc_type: str
+    requirement: str
     has_flag: str | None = None
 
 
@@ -50,6 +54,9 @@ class F2pyNamelistSpec:
     """Metadata needed for f2py wrapper generation."""
 
     namelist_name: str
+    brief: str
+    details: str
+    details_lines: list[str]
     module_name: str
     type_name: str
     helper_module: str
@@ -76,6 +83,7 @@ class PythonWrapperSpec:
 
     class_name: str
     namelist_name: str
+    brief: str
     f2py_module_name: str
     extension_module: str
     required_args: list[F2pyArgumentSpec]
@@ -124,7 +132,9 @@ def generate_f2py_wrappers(
         for schema in schemas
     ]
     output_path = Path(output)
-    rendered = _TEMPLATE_ENV.get_template("f2py_wrappers.f90.j2").render({"specs": specs})
+    rendered = _TEMPLATE_ENV.get_template("f2py_wrappers.f90.j2").render(
+        {"file_name": output_path.name, "specs": specs}
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding="ascii")
 
@@ -132,8 +142,12 @@ def generate_f2py_wrappers(
 def generate_python_wrappers(
     specs: Iterable[tuple[F2pyNamelistSpec, str]],
     output: str | Path,
+    *,
+    py_style: str = "numpy",
 ) -> None:
     """Generate Python wrapper classes for f2py namelist *specs* at *output*."""
+    if py_style not in {"numpy", "doxygen"}:
+        raise ValueError("python documentation style must be 'numpy' or 'doxygen'")
     output_path = Path(output)
     spec_entries = list(specs)
     extension_modules: set[str] = set()
@@ -146,6 +160,7 @@ def generate_python_wrappers(
             PythonWrapperSpec(
                 class_name=_class_name(spec.namelist_name),
                 namelist_name=spec.namelist_name,
+                brief=spec.brief,
                 f2py_module_name=spec.f2py_module_name,
                 extension_module=extension_module,
                 required_args=spec.required_args,
@@ -154,7 +169,7 @@ def generate_python_wrappers(
             )
         )
     rendered = _TEMPLATE_ENV.get_template("python_wrappers.py.j2").render(
-        {"imports": sorted(extension_modules), "classes": classes}
+        {"imports": sorted(extension_modules), "classes": classes, "py_style": py_style}
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding="ascii")
@@ -259,10 +274,13 @@ def build_f2py_namelist_spec(
         has_flag = None if field.required else f"has_{field.name}"
         spec = F2pyArgumentSpec(
             name=field.name,
+            title=_one_line(field.title),
             required=field.required,
             rank=rank,
             numpy_dtype=_numpy_dtype(type_info),
             dummy_value=_python_dummy_value(type_info),
+            doc_type=_python_doc_type(type_info),
+            requirement="required" if field.required else "optional",
             has_flag=has_flag,
         )
         if field.required:
@@ -279,7 +297,9 @@ def build_f2py_namelist_spec(
             )
         if has_flag is not None:
             argument_list.append(has_flag)
-            argument_declarations.append(f"logical, intent(in) :: {has_flag}")
+            argument_declarations.append(
+                f"logical, intent(in) :: {has_flag} !< whether {field.name} was provided"
+            )
             bridge_declarations.append(_optional_bridge_declaration(field.name, type_info))
             bridge_assignments.append(_optional_bridge_assignment(field.name, type_info))
             set_call_arguments.append(f"{field.name}=maybe_{field.name}")
@@ -287,8 +307,12 @@ def build_f2py_namelist_spec(
             set_call_arguments.append(f"{field.name}={field.name}")
 
     namelist_name = cast("str", context["namelist_name"])
+    details = cast("str", context["details_text"])
     return F2pyNamelistSpec(
         namelist_name=namelist_name,
+        brief=_one_line(cast("str", context["brief_text"])),
+        details=details,
+        details_lines=details.splitlines() or [details],
         module_name=cast("str", context["module_name"]),
         type_name=cast("str", context["type_name"]),
         helper_module=helper_module,
@@ -378,6 +402,31 @@ def _python_dummy_value(type_info: FieldTypeInfo) -> str:
     return "None"
 
 
+def _python_doc_type(type_info: FieldTypeInfo) -> str:
+    category = (
+        type_info.element_category
+        if type_info.category == "array"
+        else type_info.category
+    )
+    if category == "real":
+        type_name = "float"
+    elif category == "integer":
+        type_name = "int"
+    elif category == "boolean":
+        type_name = "bool"
+    elif category == "string":
+        type_name = "str"
+    else:
+        type_name = "Any"
+    if type_info.category == "array":
+        return f"array_like of {type_name}"
+    return type_name
+
+
+def _one_line(value: str) -> str:
+    return " ".join(value.splitlines()).strip()
+
+
 def _array_dimension_argument_names(name: str, rank: int) -> list[str]:
     return [f"{name}_n{idx}" for idx in range(1, rank + 1)]
 
@@ -386,14 +435,22 @@ def _f2py_field_arguments(
     field: FieldSpec,
     type_info: FieldTypeInfo,
 ) -> tuple[list[str], list[str]]:
+    requirement = "required" if field.required else "optional"
     if type_info.category != "array":
-        return [field.name], [f"{type_info.arg_type_spec}, intent(in) :: {field.name}"]
+        return [field.name], [
+            f"{type_info.arg_type_spec}, intent(in) :: {field.name} "
+            f"!< {_one_line(field.title)} ({requirement})"
+        ]
 
     dim_names = _array_dimension_argument_names(field.name, len(type_info.dimensions))
     dims = ", ".join(dim_names)
-    declarations = [f"integer, intent(in) :: {dim_name}" for dim_name in dim_names]
+    declarations = [
+        f"integer, intent(in) :: {dim_name} !< extent for {field.name}"
+        for dim_name in dim_names
+    ]
     declarations.append(
-        f"{type_info.arg_type_spec}, dimension({dims}), intent(in) :: {field.name}"
+        f"{type_info.arg_type_spec}, dimension({dims}), intent(in) :: {field.name} "
+        f"!< {_one_line(field.title)} ({requirement})"
     )
     return [*dim_names, field.name], declarations
 

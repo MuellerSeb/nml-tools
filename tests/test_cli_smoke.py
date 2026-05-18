@@ -103,6 +103,40 @@ def test_cli_generate_emits_f2py_outputs(tmp_path: Path) -> None:
     assert "dp=>real64" in f2py
     assert "from . import f2py_config_wrappers" in py
     assert "class Demo" in py
+    assert "Parameters\n    ----------" in py
     assert f2cmap == (
         "dict(real=dict(dp='double'), integer=dict(c_intptr_t='long_long', i4='int'))\n"
     )
+
+
+def test_cli_rejects_invalid_python_doc_style(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    (tmp_path / "nml-config.toml").write_text(
+        dedent(
+            """
+            [documentation]
+            py-style = "google"
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nml_tools.cli",
+            "generate",
+            "--config",
+            str(tmp_path / "nml-config.toml"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "documentation.py-style" in result.stderr

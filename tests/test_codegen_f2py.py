@@ -59,17 +59,34 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     generated = output.read_text()
     assert "module f2py_optimization" in generated
     assert "module f2py_runtime" in generated
+    assert "!> \\file f2py_config_wrappers.f90" in generated
+    assert "!> \\copydoc f2py_optimization" in generated
+    assert "!> \\brief Optimization" in generated
+    assert "!> \\brief Set optimization values on the handled instance" in generated
+    assert (
+        "integer(c_intptr_t), intent(in) :: handle "
+        "!< opaque handle to a nml_optimization_t instance"
+    ) in generated
+    assert "integer, intent(in) :: values_n1 !< extent for values" in generated
+    assert (
+        "real(dp), dimension(values_n1, values_n2), intent(in) :: values "
+        "!< values (required)"
+    ) in generated
+    assert (
+        "character(len=1024), intent(out) :: errmsg "
+        "!< error message for non-OK status values"
+    ) in generated
     assert "use iso_fortran_env, only:" in generated
     assert "dp=>real64" in generated
     assert "i4=>int32" in generated
-    assert "integer, intent(in) :: values_n1" in generated
-    assert "integer, intent(in) :: values_n2" in generated
+    assert "integer, intent(in) :: values_n1 !< extent for values" in generated
+    assert "integer, intent(in) :: values_n2 !< extent for values" in generated
     assert "real(dp), dimension(values_n1, values_n2), intent(in) :: values" in generated
-    assert "integer(i4), intent(in) :: seed" in generated
-    assert "logical, intent(in) :: has_seed" in generated
-    assert "integer, intent(in) :: weights_n1" in generated
+    assert "integer(i4), intent(in) :: seed !< seed (optional)" in generated
+    assert "logical, intent(in) :: has_seed !< whether seed was provided" in generated
+    assert "integer, intent(in) :: weights_n1 !< extent for weights" in generated
     assert "integer(i4), dimension(weights_n1), intent(in) :: weights" in generated
-    assert "logical, intent(in) :: has_weights" in generated
+    assert "logical, intent(in) :: has_weights !< whether weights was provided" in generated
     assert "integer(i4), allocatable :: maybe_seed" in generated
     assert "integer(i4), dimension(:), allocatable :: maybe_weights" in generated
     assert "if (has_seed) then" in generated
@@ -211,3 +228,35 @@ def test_generate_python_wrapper_uses_package_relative_import(tmp_path: Path) ->
     assert "from . import f2py_config" in generated
     assert "importlib" not in generated
     assert "_f2py = f2py_config.f2py_optimization" in generated
+    assert "Parameters\n    ----------" in generated
+    assert "Returns\n        -------" in generated
+    assert "Raises\n        ------" in generated
+    assert "method : str" in generated
+    assert "values : array_like of float" in generated
+
+
+def test_generate_python_wrapper_supports_doxygen_docstrings(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    spec = codegen.build_f2py_namelist_spec(_schema())
+    output = tmp_path / "config_wrappers.py"
+
+    codegen.generate_python_wrappers([(spec, "f2py_config")], output, py_style="doxygen")
+
+    generated = output.read_text()
+    assert '"""!' in generated
+    assert "@param handle (int): Opaque handle to a Fortran namelist instance." in generated
+    assert "@param method (str): method." in generated
+    assert "@retval is_set (bool): True if the field is set, otherwise False." in generated
+    assert "@throws NmlError: If validation fails." in generated
+
+
+def test_generate_python_wrapper_rejects_unknown_docstring_style(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    spec = codegen.build_f2py_namelist_spec(_schema())
+
+    with pytest.raises(ValueError, match="python documentation style"):
+        codegen.generate_python_wrappers(
+            [(spec, "f2py_config")],
+            tmp_path / "config_wrappers.py",
+            py_style="google",
+        )

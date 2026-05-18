@@ -13,7 +13,15 @@ NML_ERR_NOT_SET = 12
 
 
 class NmlError(RuntimeError):
-    """Error returned by a generated namelist wrapper."""
+    """Error returned by a generated namelist wrapper.
+
+    Parameters
+    ----------
+    status : int
+        nml-tools status code.
+    errmsg : str, optional
+        Error message returned by the wrapper.
+    """
 
     def __init__(self, status: int, errmsg: Any = "") -> None:
         self.status = int(status)
@@ -71,7 +79,15 @@ def _dummy_array(rank: int, dtype: Any = None) -> np.ndarray:
 
 
 class Config:
-    """Python handle for the config namelist."""
+    """Python handle for the config namelist.
+
+    Python binding config
+
+    Parameters
+    ----------
+    handle : int
+        Opaque handle to a Fortran namelist instance.
+    """
 
     _f2py = f2py_config.f2py_config
 
@@ -79,6 +95,18 @@ class Config:
         self.handle = int(handle)
 
     def from_file(self, file: str) -> None:
+        """Read the config namelist from a file.
+
+        Parameters
+        ----------
+        file : str
+            Namelist file path.
+
+        Raises
+        ------
+        NmlError
+            If reading the file fails.
+        """
         result = self._f2py.config_from_file_wrapper(
             self.handle,
             str(file),
@@ -93,6 +121,28 @@ class Config:
         enabled: Any = None,
         weights: Any = None,
     ) -> None:
+        """Set config values.
+
+        Parameters
+        ----------
+        iterations : int
+            Iterations.
+        tolerance : float
+            Tolerance.
+        name : str, optional
+            Config name.
+        enabled : bool, optional
+            Enabled.
+        weights : array_like of float, optional
+            Weights.
+
+        Raises
+        ------
+        ValueError
+            If a required argument is None or an array rank is invalid.
+        NmlError
+            If the Fortran setter returns a non-OK status.
+        """
         if iterations is None:
             raise ValueError("required argument 'iterations' must not be None")
         if tolerance is None:
@@ -136,6 +186,27 @@ class Config:
         _check_status(result)
 
     def is_set(self, name: str, idx: Any = None) -> bool:
+        """Check whether a field is set.
+
+        Parameters
+        ----------
+        name : str
+            Field name.
+        idx : int or array_like, optional
+            Optional field index.
+
+        Returns
+        -------
+        bool
+            True if the field is set, otherwise False.
+
+        Raises
+        ------
+        ValueError
+            If idx is not scalar or rank-1.
+        NmlError
+            If the field name or index is invalid.
+        """
         kwargs: dict[str, Any] = {}
         if idx is not None:
             idx_array = np.asarray(idx, dtype=int)
@@ -161,6 +232,13 @@ class Config:
         raise NmlError(status, errmsg)
 
     def is_valid(self) -> None:
+        """Validate the handled config instance.
+
+        Raises
+        ------
+        NmlError
+            If validation fails.
+        """
         result = self._f2py.config_is_valid_wrapper(
             self.handle,
         )
