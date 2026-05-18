@@ -33,7 +33,7 @@ module nml_config
   use iso_fortran_env, only: &
     i4=>int32, &
     dp=>real64
-  use iso_c_binding, only: c_associated, c_f_pointer, c_intptr_t, c_ptr
+  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_ptr
 
   implicit none
 
@@ -118,21 +118,11 @@ contains
     nullify(this)
     if (handle == 0_c_intptr_t) then
       status = NML_ERR_INVALID_HANDLE
-      if (present(errmsg)) errmsg = "invalid handle"
+      if (present(errmsg)) errmsg = "zero handle"
       return
     end if
     ptr = transfer(handle, ptr)
-    if (.not. c_associated(ptr)) then
-      status = NML_ERR_INVALID_HANDLE
-      if (present(errmsg)) errmsg = "invalid handle"
-      return
-    end if
     call c_f_pointer(ptr, this)
-    if (.not. associated(this)) then
-      status = NML_ERR_INVALID_HANDLE
-      if (present(errmsg)) errmsg = "invalid handle"
-      return
-    end if
     status = NML_OK
   end subroutine nml_config_resolve_handle
 

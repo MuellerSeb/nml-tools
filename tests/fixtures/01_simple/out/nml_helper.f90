@@ -37,7 +37,7 @@ module nml_helper
   integer, parameter, public :: NML_ERR_INVALID_NAME = 20
   !> \brief Status code: invalid index
   integer, parameter, public :: NML_ERR_INVALID_INDEX = 21
-  !> \brief Status code: invalid opaque handle
+  !> \brief Status code: zero opaque handle
   integer, parameter, public :: NML_ERR_INVALID_HANDLE = 22
 
   !> \brief Shared constants for namelist dimensions
