@@ -16,9 +16,9 @@ Python wrappers that hold the old handle or call `cfg.invalidate()` on them.
 `invalidate()` only sets the stored Python handle to zero; it does not notify
 Fortran or deallocate the target.
 
-The handle creation relies on Fortran 2018 `c_loc` semantics, which permit
-taking `c_loc` of a nonpolymorphic non-interoperable target with no length type
-parameter. Projects that need stricter invalid-handle detection can wrap the
+The handle creation relies on the Fortran 2008 `c_loc` rule, which permits
+taking `c_loc` of a scalar nonpolymorphic target with no length type parameter.
+Projects that need stricter invalid-handle detection can wrap the
 generated interface with their own registry or token table.
 
 The split mirrors the intended use in larger projects:

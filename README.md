@@ -312,7 +312,7 @@ instances. nml-tools assumes that the owning Fortran library creates those
 handles from live `target` objects and keeps the objects alive while Python uses
 the handle. The raw-address helper generated for f2py support uses `c_loc`/
 `c_f_pointer` semantics; taking `c_loc` of the nonpolymorphic generated namelist
-target relies on the Fortran 2018 relaxation that allows non-interoperable
+target relies on the Fortran 2008 rule that allows scalar nonpolymorphic
 variables with no length type parameter. `NML_ERR_INVALID_HANDLE` only detects a
 zero handle. Passing a stale, foreign, or otherwise invalid non-zero handle is
 undefined behavior and may crash. Projects that need robust invalid-handle
