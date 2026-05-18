@@ -25,3 +25,40 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python -m coveralls
+
+  fortran-examples:
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gfortran
+            experimental: false
+          - compiler: ifx
+            experimental: false
+          - compiler: flang-new
+            experimental: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Setup Fortran
+        uses: gha3mi/setup-fortran-conda@v0.15.3
+        with:
+          compiler: ${{ matrix.compiler }}
+          extra-packages: pip
+      - name: Install Python build tools
+        run: python -m pip install -U pip build pytest
+      - name: Build 01_simple
+        run: cmake -S examples/01_simple -B build/01_simple -G Ninja
+      - name: Compile 01_simple
+        run: cmake --build build/01_simple --parallel
+      - name: Run 01_simple
+        run: ./build/01_simple/nml_optimization_example examples/01_simple/out/optimization.nml
+      - name: Build 02_pybind package
+        run: python -m pip install -e "examples/02_pybind[test]"
+      - name: Test 02_pybind package
+        run: python -m pytest -q examples/02_pybind/tests

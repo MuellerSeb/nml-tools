@@ -17,6 +17,9 @@ module {{ module_name }}
   use {{ kind_module }}, only: &
     {{ kind_imports | join(', &\n    ') }}
 {% endif %}
+{% if f2py_handle_helpers %}
+  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
+{% endif %}
 
   implicit none
 
@@ -66,8 +69,8 @@ contains
 {% for enum in enum_functions %}
   !> \brief Check whether a value is part of an enum
   elemental logical function {{ enum.func_name }}(val, allow_missing) result(in_enum)
-    {{ enum.arg_type_spec }}, intent(in) :: val
-    logical, intent(in), optional :: allow_missing
+    {{ enum.arg_type_spec }}, intent(in) :: val !< value to check
+    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
     if (present(allow_missing)) then
       if (allow_missing) then
@@ -90,8 +93,8 @@ contains
 {% for bounds in bounds_functions %}
   !> \brief Check whether a value is within bounds
   elemental logical function {{ bounds.func_name }}(val, allow_missing) result(in_bounds)
-    {{ bounds.arg_type_spec }}, intent(in) :: val
-    logical, intent(in), optional :: allow_missing
+    {{ bounds.arg_type_spec }}, intent(in) :: val !< value to check
+    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
     if (present(allow_missing)) then
       if (allow_missing) then
@@ -113,10 +116,32 @@ contains
 
 {% endfor %}
 {% endif %}
+{% if f2py_handle_helpers %}
+  !> \brief Resolve an opaque C pointer handle to a {{ type_name }} pointer
+  subroutine {{ type_prefix }}_resolve_handle(handle, this, status, errmsg)
+    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a {{ type_name }} instance
+    type({{ type_name }}), pointer :: this !< resolved namelist pointer
+    integer, intent(out) :: status !< nml-tools status code
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    type(c_ptr) :: ptr
+
+    if (present(errmsg)) errmsg = ""
+    nullify(this)
+    if (handle == 0_c_intptr_t) then
+      status = NML_ERR_INVALID_HANDLE
+      if (present(errmsg)) errmsg = "zero handle"
+      return
+    end if
+    ptr = transfer(handle, c_null_ptr)
+    call c_f_pointer(ptr, this)
+    status = NML_OK
+  end subroutine {{ type_prefix }}_resolve_handle
+
+{% endif %}
   !> \brief Initialize defaults and sentinels for {{ namelist_name }}
   integer function {{ type_prefix }}_init(this, errmsg) result(status)
-    class({{ type_name }}), intent(inout) :: this
-    character(len=*), intent(out), optional :: errmsg
+    class({{ type_name }}), intent(inout) :: this !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -138,9 +163,9 @@ contains
 
   !> \brief Read {{ namelist_name }} namelist from file
   integer function {{ type_prefix }}_from_file(this, file, errmsg) result(status)
-    class({{ type_name }}), intent(inout) :: this
+    class({{ type_name }}), intent(inout) :: this !< namelist instance
     character(len=*), intent(in) :: file !< path to namelist file
-    character(len=*), intent(out), optional :: errmsg
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
 {% for field in fields %}
 {{ field.local_declaration | indent(4, True) }}
@@ -202,8 +227,8 @@ contains
   integer function {{ type_prefix }}_set(this, errmsg) result(status)
 {% endif %}
 
-    class({{ type_name }}), intent(inout) :: this
-    character(len=*), intent(out), optional :: errmsg
+    class({{ type_name }}), intent(inout) :: this !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 {% for decl in required_argument_declarations %}
 {{ decl | indent(4, True) }}
 {% endfor %}
@@ -236,10 +261,10 @@ contains
 
   !> \brief Check whether a namelist value was set
   integer function {{ type_prefix }}_is_set(this, name, idx, errmsg) result(status)
-    class({{ type_name }}), intent(in) :: this
-    character(len=*), intent(in) :: name
-    integer, intent(in), optional :: idx(:)
-    character(len=*), intent(out), optional :: errmsg
+    class({{ type_name }}), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field name
+    integer, intent(in), optional :: idx(:) !< optional field index values
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -282,10 +307,10 @@ contains
 {% if flex_arrays %}
   !> \brief Determine the filled shape along flexible dimensions
   integer function {{ type_prefix }}_filled_shape(this, name, filled, errmsg) result(status)
-    class({{ type_name }}), intent(in) :: this
-    character(len=*), intent(in) :: name
-    integer, intent(out) :: filled(:)
-    character(len=*), intent(out), optional :: errmsg
+    class({{ type_name }}), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field name
+    integer, intent(out) :: filled(:) !< filled shape of the requested field
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: idx
     integer :: dim
 {% if flex_bound_vars %}
@@ -337,8 +362,8 @@ contains
 {% endif %}
   !> \brief Validate required values and constraints
   integer function {{ type_prefix }}_is_valid(this, errmsg) result(status)
-    class({{ type_name }}), intent(in) :: this
-    character(len=*), intent(out), optional :: errmsg
+    class({{ type_name }}), intent(in) :: this !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: istat
 {% if flex_arrays %}
     integer, allocatable :: filled(:)

@@ -1,18 +1,11 @@
-{% if helper_header %}
-{{ helper_header }}
-
-{% endif %}
-!> \file {{ file_name }}
-!> \copydoc {{ module_name }}
+!> \file nml_helper.f90
+!> \copydoc nml_helper
 
 !> \brief Helper module for namelist file operations
-{% if module_doc %}
-{{ module_doc }}
-{% endif %}
-module {{ module_name }}
+module nml_helper
 
   !> \brief Buffer length for reading lines
-  integer, public :: nml_line_buffer = {{ len_buf }}
+  integer, public :: nml_line_buffer = 512
   !> \brief Status code: success
   integer, parameter, public :: NML_OK = 0
   !> \brief Status code: file not found
@@ -44,13 +37,8 @@ module {{ module_name }}
   !> \brief Status code: zero opaque handle
   integer, parameter, public :: NML_ERR_INVALID_HANDLE = 22
 
-{% if constants %}
   !> \brief Shared constants for namelist dimensions
-{% for constant in constants %}
-  {{ constant.type_spec }}, parameter, public :: {{ constant.name }} = {{ constant.value }}{% if constant.doc %} !< {{ constant.doc }}{% endif %}
-
-{% endfor %}
-{% endif %}
+  integer, parameter, public :: str_len = 128 !< String buffer length for the pybind example.
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations
@@ -179,4 +167,4 @@ contains
     end if
   end function idx_check
 
-end module {{ module_name }}
+end module nml_helper

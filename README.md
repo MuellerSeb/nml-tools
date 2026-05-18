@@ -263,12 +263,74 @@ Defines the kind module and allowed kinds.
 - `integer` (list of strings): allowed integer kinds.
 - `map` (table, optional): schema kind name → module kind name.
 
+### [f2py]
+
+Optional settings for f2py wrapper generation.
+
+- `f2cmap_path` (string, optional): output path for a generated `.f2py_f2cmap`
+  file.
+- `c_types.real` (table): explicit f2py C type mapping for schema real kind
+  names used by f2py wrappers.
+- `c_types.integer` (table): explicit f2py C type mapping for schema integer
+  kind names used by f2py wrappers.
+  `c_intptr_t` is added automatically as `long_long` unless explicitly
+  overridden.
+
+Generated Python f2py shims assume a package-local extension layout. The f2py
+extension module named by `f2py_path` must be installed next to the generated
+Python wrapper file, and the wrapper imports it with `from . import <module>`.
+
+The f2py wrappers use the same schema kind aliases as the normal Fortran
+module. For example, a schema kind `dp` with `[kinds].map = { dp = "real64" }`
+is still emitted as `real(dp)` in the wrapper and imported as
+`dp=>real64`. The generated f2py map therefore also uses `dp`:
+
+```toml
+[f2py]
+f2cmap_path = ".f2py_f2cmap"
+
+[f2py.c_types.real]
+dp = "double"
+
+[f2py.c_types.integer]
+i4 = "int"
+```
+
+The f2py-visible wrapper procedures avoid Fortran `optional` dummy arguments
+and assumed-shape arrays. Optional Python values are represented by generated
+`has_<name>` flags and harmless dummy values. Inside the Fortran wrapper,
+allocated local variables are passed to the generated type-bound `set` method
+when a value is present; unallocated allocatables are passed otherwise, so the
+type-bound `set` still sees `present(arg) == .false.`. This keeps the f2py ABI
+simple while preserving the normal generated Fortran setter semantics. This
+relies on the Fortran 2008 rule that an unallocated allocatable actual argument
+associated with an optional nonallocatable dummy argument is treated as not
+present.
+
+The f2py wrappers use opaque integer handles for Fortran-owned namelist
+instances. nml-tools assumes that the owning Fortran library creates those
+handles from live `target` objects and keeps the objects alive while Python uses
+the handle. The raw-address helper generated for f2py support uses `c_loc`/
+`c_f_pointer` semantics; taking `c_loc` of the nonpolymorphic generated namelist
+target relies on the Fortran 2008 rule that allows scalar nonpolymorphic
+variables with no length type parameter. `NML_ERR_INVALID_HANDLE` only detects a
+zero handle. Passing a stale, foreign, or otherwise invalid non-zero handle is
+undefined behavior and may crash. Projects that need robust invalid-handle
+detection should add their own registry/token layer in the owning library.
+If the owning Fortran library deallocates, replaces, or otherwise invalidates a
+target, users should discard all Python wrappers for that handle or call the
+generated wrapper's `invalidate()` method. `invalidate()` only sets that Python
+wrapper's stored handle to zero; it does not notify Fortran or deallocate
+anything.
+
 ### [documentation]
 
 Optional extra module documentation appended after the generated `\brief` and
 `\details`. Multiline strings are supported and Doxygen formatting is allowed.
 
 - `module` (string, optional): extra module documentation block.
+- `py-style` (`numpy` or `doxygen`, optional): generated Python f2py wrapper
+  docstring style (default `numpy`).
 - `md_doxygen_id_from_name` (bool, optional): add `{#<namelist>}` to Markdown header (default `false`).
 - `md_add_toc_statement` (bool, optional): insert `[TOC]` after the Markdown header (default `false`).
 
@@ -279,8 +341,14 @@ Schema entries to generate per-namelist outputs.
 - `schema` (string): schema file path.
 - `mod_path` (string, optional): Fortran module output path.
 - `doc_path` (string, optional): Markdown output path.
+- `f2py_path` (string, optional): Fortran source path for f2py wrapper modules.
+- `py_path` (string, optional): Python shim path for wrapper classes. Requires
+  `f2py_path`.
 
 If a path is omitted, that output is not generated.
+
+Multiple namelists may use the same `f2py_path` or `py_path`; nml-tools
+collects the wrappers/classes into the shared file.
 
 ### templates (array)
 
@@ -327,6 +395,11 @@ nml-tools gen-fortran --config nml-config.toml
 nml-tools gen-markdown --config nml-config.toml
 nml-tools gen-template --config nml-config.toml
 ```
+
+If `f2py_path` is configured, `generate` and `gen-fortran` also emit the
+f2py-facing Fortran wrapper file. `generate` additionally emits `py_path`
+Python shims. If `[f2py].f2cmap_path` is configured, the generated map can be
+passed to f2py with `--f2cmap`.
 
 ### Validation
 
@@ -380,12 +453,15 @@ Status codes (defined in the helper module):
 | `NML_ERR_BOUNDS` (14) | bounds constraint failed |
 | `NML_ERR_INVALID_NAME` (20) | unknown field name |
 | `NML_ERR_INVALID_INDEX` (21) | invalid index for array access |
+| `NML_ERR_INVALID_HANDLE` (22) | zero opaque f2py handle |
 
 Notes:
 
 - `errmsg`, when present, is filled with a short message (including `iomsg` on read errors).
 - `is_set` returns `NML_ERR_NOT_SET` if a value is missing, and
   `NML_ERR_INVALID_NAME`/`NML_ERR_INVALID_INDEX` on misuse.
+- `NML_ERR_INVALID_HANDLE` only reports zero f2py handles. Non-zero invalid
+  handles are outside the generated wrapper contract.
 
 ## Documentation format
 

@@ -1,0 +1,353 @@
+{% if py_style == "doxygen" %}
+"""!
+Python wrappers for f2py generated namelist modules.
+"""
+{% else %}
+"""Python wrappers for f2py generated namelist modules."""
+{% endif %}
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+
+{% for module_name in imports %}
+from . import {{ module_name }}
+{% endfor %}
+
+NML_OK = 0
+NML_ERR_NOT_SET = 12
+
+
+class NmlError(RuntimeError):
+{% if py_style == "doxygen" %}
+    """!
+    Error returned by a generated namelist wrapper.
+
+    @param status (int): nml-tools status code.
+    @param errmsg (str, optional): Error message returned by the wrapper.
+    """
+{% else %}
+    """Error returned by a generated namelist wrapper.
+
+    Parameters
+    ----------
+    status : int
+        nml-tools status code.
+    errmsg : str, optional
+        Error message returned by the wrapper.
+    """
+{% endif %}
+
+    def __init__(self, status: int, errmsg: Any = "") -> None:
+        self.status = int(status)
+        self.errmsg = _clean_errmsg(errmsg)
+        super().__init__(f"nml-tools status {self.status}: {self.errmsg}")
+
+
+def _clean_errmsg(errmsg: Any) -> str:
+    if errmsg is None:
+        return ""
+    if isinstance(errmsg, bytes):
+        return errmsg.decode(errors="replace").replace("\x00", "").strip()
+    if hasattr(errmsg, "tobytes"):
+        try:
+            raw = errmsg.tobytes()
+        except Exception:
+            raw = None
+        if isinstance(raw, bytes):
+            return raw.decode(errors="replace").replace("\x00", "").strip()
+    return str(errmsg).replace("\x00", "").strip()
+
+
+def _split_result(result: Any) -> tuple[int, str]:
+    if isinstance(result, tuple):
+        if len(result) < 2:
+            raise RuntimeError("f2py wrapper did not return status and errmsg")
+        status = result[-2]
+        errmsg = result[-1]
+    else:
+        status = result
+        errmsg = ""
+    return int(status), _clean_errmsg(errmsg)
+
+
+def _check_status(result: Any) -> None:
+    status, errmsg = _split_result(result)
+    if status != NML_OK:
+        raise NmlError(status, errmsg)
+
+
+def _normalize_array(
+    value: Any,
+    rank: int,
+    name: str,
+    dtype: Any = None,
+    expected_shape: tuple[int, ...] | None = None,
+) -> np.ndarray:
+    array = np.asarray(value, dtype=dtype)
+    if expected_shape is not None:
+        if len(expected_shape) != rank:
+            raise ValueError(
+                f"array '{name}' has invalid wrapper metadata: "
+                f"shape rank {len(expected_shape)}, expected {rank}"
+            )
+        if array.ndim == 0:
+            return np.asfortranarray(
+                np.full(expected_shape, array.item(), dtype=dtype)
+            )
+        if array.ndim > rank:
+            raise ValueError(f"array '{name}' has rank {array.ndim}, expected {rank}")
+        if array.shape != expected_shape:
+            raise ValueError(
+                f"array '{name}' has shape {array.shape}, expected {expected_shape}"
+            )
+        return np.asfortranarray(array)
+    if array.ndim == 0:
+        target_shape = (1,) * rank
+    elif array.ndim <= rank:
+        target_shape = array.shape + (1,) * (rank - array.ndim)
+    else:
+        raise ValueError(f"array '{name}' has rank {array.ndim}, expected at most {rank}")
+    return np.asfortranarray(array.reshape(target_shape, order="F"))
+
+
+def _dummy_array(rank: int, dtype: Any = None) -> np.ndarray:
+    target_shape = (1,) * rank
+    return np.asfortranarray(np.zeros(target_shape, dtype=dtype))
+
+
+{% for cls in classes %}
+class {{ cls.class_name }}:
+{% if py_style == "doxygen" %}
+    """!
+    Python handle for the {{ cls.namelist_name }} namelist.
+
+    {{ cls.brief }}
+
+    @param handle (int): Opaque handle to a Fortran namelist instance.
+    """
+{% else %}
+    """Python handle for the {{ cls.namelist_name }} namelist.
+
+    {{ cls.brief }}
+
+    Parameters
+    ----------
+    handle : int
+        Opaque handle to a Fortran namelist instance.
+    """
+{% endif %}
+
+    _f2py = {{ cls.extension_module }}.{{ cls.f2py_module_name }}
+
+    def __init__(self, handle: int) -> None:
+        self.handle = int(handle)
+
+    def invalidate(self) -> None:
+{% if py_style == "doxygen" %}
+        """!
+        Clear this wrapper's stored Fortran handle.
+
+        This does not deallocate or notify the Fortran owner. It only prevents
+        this Python wrapper from accidentally reusing a handle that the owning
+        Fortran library has made invalid.
+        """
+{% else %}
+        """Clear this wrapper's stored Fortran handle.
+
+        This does not deallocate or notify the Fortran owner. It only prevents
+        this Python wrapper from accidentally reusing a handle that the owning
+        Fortran library has made invalid.
+        """
+{% endif %}
+        self.handle = 0
+
+    def from_file(self, file: str) -> None:
+{% if py_style == "doxygen" %}
+        """!
+        Read the {{ cls.namelist_name }} namelist from a file.
+
+        @param file (str): Namelist file path.
+        @throws NmlError: If reading the file fails.
+        """
+{% else %}
+        """Read the {{ cls.namelist_name }} namelist from a file.
+
+        Parameters
+        ----------
+        file : str
+            Namelist file path.
+
+        Raises
+        ------
+        NmlError
+            If reading the file fails.
+        """
+{% endif %}
+        result = self._f2py.{{ cls.namelist_name }}_from_file_wrapper(
+            self.handle,
+            str(file),
+        )
+        _check_status(result)
+
+    def set(
+        self,
+{% for arg in cls.required_args %}
+        {{ arg.name }}: Any,
+{% endfor %}
+{% for arg in cls.optional_args %}
+        {{ arg.name }}: Any = None,
+{% endfor %}
+    ) -> None:
+{% if py_style == "doxygen" %}
+        """!
+        Set {{ cls.namelist_name }} values.
+
+{% for arg in cls.all_args %}
+        @param {{ arg.name }} ({{ arg.doc_type }}{% if not arg.required %}, optional{% endif %}): {{ arg.title }}.
+{% endfor %}
+        @throws ValueError: If a required argument is None or an array shape/rank is invalid.
+        @throws NmlError: If the Fortran setter returns a non-OK status.
+        """
+{% else %}
+        """Set {{ cls.namelist_name }} values.
+
+        Parameters
+        ----------
+{% for arg in cls.all_args %}
+        {{ arg.name }} : {{ arg.doc_type }}{{ ", optional" if not arg.required else "" }}
+            {{ arg.title }}.
+{% endfor %}
+
+        Raises
+        ------
+        ValueError
+            If a required argument is None or an array shape/rank is invalid.
+        NmlError
+            If the Fortran setter returns a non-OK status.
+        """
+{% endif %}
+{% if cls.required_args %}
+{% for arg in cls.required_args %}
+        if {{ arg.name }} is None:
+            raise ValueError("required argument '{{ arg.name }}' must not be None")
+{% endfor %}
+{% endif %}
+        kwargs: dict[str, Any] = {}
+{% for arg in cls.all_args %}
+{% if arg.rank > 0 %}
+        if {{ arg.name }} is not None:
+            kwargs["{{ arg.name }}"] = _normalize_array(
+                {{ arg.name }},
+                {{ arg.rank }},
+                "{{ arg.name }}",
+                dtype={% if arg.numpy_dtype is none %}None{% else %}"{{ arg.numpy_dtype }}"{% endif %},
+                expected_shape={% if arg.fixed_shape is none %}None{% else %}({{ arg.fixed_shape | join(", ") }}{% if arg.fixed_shape | length == 1 %},{% endif %}){% endif %},
+            )
+        else:
+            kwargs["{{ arg.name }}"] = _dummy_array(
+                {{ arg.rank }},
+                dtype={% if arg.numpy_dtype is none %}None{% else %}"{{ arg.numpy_dtype }}"{% endif %},
+            )
+{% if arg.has_flag is not none %}
+        kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
+{% endif %}
+{% else %}
+        if {{ arg.name }} is not None:
+            kwargs["{{ arg.name }}"] = {{ arg.name }}
+        else:
+            kwargs["{{ arg.name }}"] = {{ arg.dummy_value }}
+{% if arg.has_flag is not none %}
+        kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
+{% endif %}
+{% endif %}
+{% endfor %}
+        result = self._f2py.{{ cls.namelist_name }}_set_wrapper(
+            self.handle,
+            **kwargs,
+        )
+        _check_status(result)
+
+    def is_set(self, name: str, idx: Any = None) -> bool:
+{% if py_style == "doxygen" %}
+        """!
+        Check whether a field is set.
+
+        @param name (str): Field name.
+        @param idx (int or array_like, optional): Optional field index.
+        @retval is_set (bool): True if the field is set, otherwise False.
+        @throws ValueError: If idx is not scalar or rank-1.
+        @throws NmlError: If the field name or index is invalid.
+        """
+{% else %}
+        """Check whether a field is set.
+
+        Parameters
+        ----------
+        name : str
+            Field name.
+        idx : int or array_like, optional
+            Optional field index.
+
+        Returns
+        -------
+        bool
+            True if the field is set, otherwise False.
+
+        Raises
+        ------
+        ValueError
+            If idx is not scalar or rank-1.
+        NmlError
+            If the field name or index is invalid.
+        """
+{% endif %}
+        kwargs: dict[str, Any] = {}
+        if idx is not None:
+            idx_array = np.asarray(idx, dtype=int)
+            if idx_array.ndim == 0:
+                idx_array = idx_array.reshape((1,))
+            elif idx_array.ndim != 1:
+                raise ValueError("idx must be a scalar or rank-1 array")
+            kwargs["idx"] = np.asfortranarray(idx_array)
+            kwargs["has_idx"] = True
+        else:
+            kwargs["idx"] = np.asfortranarray(np.zeros((1,), dtype=int))
+            kwargs["has_idx"] = False
+        result = self._f2py.{{ cls.namelist_name }}_is_set_wrapper(
+            self.handle,
+            name,
+            **kwargs,
+        )
+        status, errmsg = _split_result(result)
+        if status == NML_OK:
+            return True
+        if status == NML_ERR_NOT_SET:
+            return False
+        raise NmlError(status, errmsg)
+
+    def is_valid(self) -> None:
+{% if py_style == "doxygen" %}
+        """!
+        Validate the handled {{ cls.namelist_name }} instance.
+
+        @throws NmlError: If validation fails.
+        """
+{% else %}
+        """Validate the handled {{ cls.namelist_name }} instance.
+
+        Raises
+        ------
+        NmlError
+            If validation fails.
+        """
+{% endif %}
+        result = self._f2py.{{ cls.namelist_name }}_is_valid_wrapper(
+            self.handle,
+        )
+        _check_status(result)
+
+
+{% endfor %}
