@@ -94,6 +94,15 @@ class Config:
     def __init__(self, handle: int) -> None:
         self.handle = int(handle)
 
+    def invalidate(self) -> None:
+        """Clear this wrapper's stored Fortran handle.
+
+        This does not deallocate or notify the Fortran owner. It only prevents
+        this Python wrapper from accidentally reusing a handle that the owning
+        Fortran library has made invalid.
+        """
+        self.handle = 0
+
     def from_file(self, file: str) -> None:
         """Read the config namelist from a file.
 

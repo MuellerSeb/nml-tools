@@ -44,3 +44,13 @@ def test_required_python_arguments_reject_none() -> None:
 
     with pytest.raises(ValueError, match="required argument 'iterations'"):
         cfg.set(iterations=None, tolerance=1.0)
+
+
+def test_invalidate_clears_python_handle() -> None:
+    cfg = example.get_config()
+
+    cfg.invalidate()
+
+    with pytest.raises(example.NmlError, match="zero handle") as exc:
+        cfg.is_valid()
+    assert exc.value.status == 22

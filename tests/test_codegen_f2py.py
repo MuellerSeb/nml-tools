@@ -207,6 +207,10 @@ def test_generate_python_wrapper_normalizes_arrays_and_handles_status(
     assert calls[-1][1]["idx"].shape == (1,)
     assert calls[-1][1]["has_idx"] is False
     cfg.from_file("optimization.nml")
+    cfg.invalidate()
+    assert cfg.handle == 0
+    cfg.from_file("optimization.nml")
+    assert calls[-1][1]["file"] == "optimization.nml"
     with pytest.raises(module.NmlError) as exc:
         cfg.is_valid()
     assert exc.value.status == 11
@@ -228,6 +232,8 @@ def test_generate_python_wrapper_uses_package_relative_import(tmp_path: Path) ->
     assert "from . import f2py_config" in generated
     assert "importlib" not in generated
     assert "_f2py = f2py_config.f2py_optimization" in generated
+    assert "def invalidate(self) -> None:" in generated
+    assert "self.handle = 0" in generated
     assert "Parameters\n    ----------" in generated
     assert "Returns\n        -------" in generated
     assert "Raises\n        ------" in generated
@@ -245,6 +251,7 @@ def test_generate_python_wrapper_supports_doxygen_docstrings(tmp_path: Path) -> 
     generated = output.read_text()
     assert '"""!' in generated
     assert "@param handle (int): Opaque handle to a Fortran namelist instance." in generated
+    assert "Clear this wrapper's stored Fortran handle." in generated
     assert "@param method (str): method." in generated
     assert "@retval is_set (bool): True if the field is set, otherwise False." in generated
     assert "@throws NmlError: If validation fails." in generated
