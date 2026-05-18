@@ -18,7 +18,7 @@ module {{ module_name }}
     {{ kind_imports | join(', &\n    ') }}
 {% endif %}
 {% if f2py_handle_helpers %}
-  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_ptr
+  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
 {% endif %}
 
   implicit none
@@ -132,7 +132,7 @@ contains
       if (present(errmsg)) errmsg = "zero handle"
       return
     end if
-    ptr = transfer(handle, ptr)
+    ptr = transfer(handle, c_null_ptr)
     call c_f_pointer(ptr, this)
     status = NML_OK
   end subroutine {{ type_prefix }}_resolve_handle

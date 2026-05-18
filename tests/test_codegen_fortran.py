@@ -113,6 +113,32 @@ def test_generate_fortran_rejects_scalar_array_default(tmp_path: Path) -> None:
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
+def test_generate_fortran_handle_helper_uses_explicit_transfer_mold(tmp_path: Path) -> None:
+    schema = {
+        "title": "Handle helper",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "value": {"type": "integer", "x-fortran-kind": "i4"},
+        },
+    }
+    output = tmp_path / "nml_test.f90"
+
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        kind_allowlist={"i4"},
+        f2py_handle_helpers=True,
+    )
+
+    generated = output.read_text()
+    assert "use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr" in generated
+    assert "ptr = transfer(handle, c_null_ptr)" in generated
+    assert "ptr = transfer(handle, ptr)" not in generated
+
+
 def test_generate_fortran_allows_items_default(tmp_path: Path) -> None:
     schema = {
         "title": "Items default",

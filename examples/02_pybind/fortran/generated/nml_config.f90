@@ -33,7 +33,7 @@ module nml_config
   use iso_fortran_env, only: &
     i4=>int32, &
     dp=>real64
-  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_ptr
+  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
 
   implicit none
 
@@ -121,7 +121,7 @@ contains
       if (present(errmsg)) errmsg = "zero handle"
       return
     end if
-    ptr = transfer(handle, ptr)
+    ptr = transfer(handle, c_null_ptr)
     call c_f_pointer(ptr, this)
     status = NML_OK
   end subroutine nml_config_resolve_handle

@@ -31,7 +31,7 @@ contains
     type(c_ptr) :: ptr
 
     ptr = c_loc(config)
-    handle = transfer(ptr, handle)
+    handle = transfer(ptr, 0_c_intptr_t)
   end subroutine get_config_handle
 
   !> \brief Reset the persistent config instance to defaults and sentinels
