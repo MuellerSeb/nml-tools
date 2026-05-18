@@ -19,10 +19,10 @@ The split mirrors the intended use in larger projects:
 ## Regenerate bindings
 
 The generated files are checked in so the package can be built directly. To regenerate
-them from the schema and `nml-config.toml`, run from the repository root:
+them from the schema and `nml-config.toml`, run from this directory:
 
 ```bash
-PYTHONPATH=src python examples/02_pybind/scripts/generate.py
+nml-tools generate
 ```
 
 ## Build and test
