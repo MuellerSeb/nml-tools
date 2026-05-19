@@ -189,7 +189,7 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=:), allocatable :: name
+    character(len=this%constant_str_len) :: name
     integer(i4) :: iterations
     real(dp) :: tolerance
     logical :: enabled

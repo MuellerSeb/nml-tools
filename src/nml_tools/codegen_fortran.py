@@ -405,10 +405,11 @@ def _build_context(
                     name,
                     dynamic_length=dynamic_length,
                 )
-                local_decl = _render_runtime_declaration(
+                local_decl = _render_runtime_local_declaration(
                     type_info,
                     name,
-                    dynamic_length=dynamic_length,
+                    runtime_dimensions=runtime_dimensions,
+                    runtime_length_expr=runtime_length_expr,
                 )
                 runtime_allocations.extend(
                     _render_runtime_allocations(
@@ -1551,6 +1552,29 @@ def _render_runtime_declaration(
         type_spec = "character(len=:)"
     dims = ", ".join(":" for _ in type_info.dimensions)
     return f"{type_spec}, allocatable, dimension({dims}) :: {name}"
+
+
+def _render_runtime_local_declaration(
+    type_info: FieldTypeInfo,
+    name: str,
+    *,
+    runtime_dimensions: list[str],
+    runtime_length_expr: str | None,
+) -> str:
+    if type_info.category == "string":
+        if runtime_length_expr is None:
+            raise ValueError("runtime string local declaration requires length expression")
+        return f"character(len={runtime_length_expr}) :: {name}"
+    if type_info.category != "array":
+        raise ValueError("runtime local declaration is only supported for strings or arrays")
+
+    type_spec = type_info.type_spec
+    if type_info.element_category == "string":
+        if runtime_length_expr is None:
+            raise ValueError("runtime string array local declaration requires length expression")
+        type_spec = f"character(len={runtime_length_expr})"
+    dims = ", ".join(runtime_dimensions)
+    return f"{type_spec}, dimension({dims}) :: {name}"
 
 
 def _render_runtime_allocations(

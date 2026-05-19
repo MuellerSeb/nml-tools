@@ -289,16 +289,16 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=:), allocatable :: name
-    character(len=:), allocatable :: method
-    character(len=:), allocatable, dimension(:) :: try_methods
+    character(len=this%constant_buf) :: name
+    character(len=this%constant_buf) :: method
+    character(len=this%constant_buf), dimension(3) :: try_methods
     integer(i4), dimension(3) :: complex_sizes
     integer(i4) :: niterations
     real(dp) :: tolerance
     integer(i4) :: seed
     real(dp) :: dds_r
     logical :: mcmc_opti
-    real(dp), allocatable, dimension(:, :, :) :: mcmc_error_params
+    real(dp), dimension(3, 2, this%constant_max_iter) :: mcmc_error_params
     logical, dimension(3) :: include_parameters
     ! locals
     type(nml_file_t) :: nml

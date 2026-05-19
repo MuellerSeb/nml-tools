@@ -148,13 +148,13 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=:), allocatable :: name
+    character(len=this%constant_buf) :: name
     integer :: niterations
     real :: tolerance
     integer(i4) :: seed
     real(dp) :: dds_r
     logical :: mcmc_opti
-    real(dp), allocatable, dimension(:, :, :) :: mcmc_error_params
+    real(dp), dimension(3, 2, this%constant_max_iter) :: mcmc_error_params
     ! locals
     type(nml_file_t) :: nml
     integer :: iostat
