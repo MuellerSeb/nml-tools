@@ -12,6 +12,7 @@ from typing import Any
 import click
 import f90nml  # type: ignore
 from click.exceptions import Exit
+from packaging.version import InvalidVersion, Version
 
 from ._version import __version__
 from .codegen_f2py import (
@@ -37,6 +38,8 @@ else:  # pragma: no cover - python<3.11
 logger = logging.getLogger(__name__)
 _FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+_DEFAULT_CONFIG = Path("nml-config.toml")
+_PYPROJECT_CONFIG = Path("pyproject.toml")
 
 
 def _configure_logging(verbose: int, quiet: int) -> None:
@@ -46,7 +49,7 @@ def _configure_logging(verbose: int, quiet: int) -> None:
     logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
 
 
-def _load_config(path: Path) -> dict[str, Any]:
+def _load_toml(path: Path) -> dict[str, Any]:
     with path.open("rb") as handle:
         data = tomllib.load(handle)
     if not isinstance(data, dict):
@@ -54,13 +57,75 @@ def _load_config(path: Path) -> dict[str, Any]:
     return data
 
 
-def _load_config_checked(path: Path) -> dict[str, Any]:
+def _load_toml_checked(path: Path) -> dict[str, Any]:
     try:
-        return _load_config(path)
+        return _load_toml(path)
     except FileNotFoundError as exc:
         raise click.ClickException(str(exc)) from exc
     except Exception as exc:  # pragma: no cover - tomllib may raise ValueError
         raise click.ClickException(f"failed to read config: {exc}") from exc
+
+
+def _load_config_checked(path: Path | None) -> tuple[dict[str, Any], Path]:
+    config_path = _resolve_config_path(path)
+    raw_config = _load_toml_checked(config_path)
+    if config_path.name == _PYPROJECT_CONFIG.name:
+        config = _extract_pyproject_config(raw_config)
+    else:
+        config = raw_config
+    _check_minimum_version(config)
+    return config, config_path
+
+
+def _resolve_config_path(path: Path | None) -> Path:
+    if path is not None:
+        return path
+    if _DEFAULT_CONFIG.is_file():
+        return _DEFAULT_CONFIG
+    if _PYPROJECT_CONFIG.is_file():
+        raw_config = _load_toml_checked(_PYPROJECT_CONFIG)
+        if _has_pyproject_config(raw_config):
+            return _PYPROJECT_CONFIG
+    raise click.ClickException(
+        "no config found; create nml-config.toml or add [tool.nml-tools] to pyproject.toml"
+    )
+
+
+def _has_pyproject_config(config: dict[str, Any]) -> bool:
+    tool_raw = config.get("tool")
+    return isinstance(tool_raw, dict) and isinstance(tool_raw.get("nml-tools"), dict)
+
+
+def _extract_pyproject_config(config: dict[str, Any]) -> dict[str, Any]:
+    tool_raw = config.get("tool")
+    if not isinstance(tool_raw, dict):
+        raise click.ClickException("pyproject.toml must define [tool.nml-tools]")
+    nml_tools_raw = tool_raw.get("nml-tools")
+    if not isinstance(nml_tools_raw, dict):
+        raise click.ClickException("pyproject.toml must define [tool.nml-tools]")
+    return nml_tools_raw
+
+
+def _check_minimum_version(config: dict[str, Any]) -> None:
+    minimum_raw = config.get("minimum-version")
+    if minimum_raw is None:
+        return
+    if not isinstance(minimum_raw, str) or not minimum_raw.strip():
+        raise click.ClickException("config 'minimum-version' must be a non-empty string")
+    try:
+        minimum = Version(minimum_raw.strip())
+    except InvalidVersion as exc:
+        raise click.ClickException(
+            f"config 'minimum-version' is not a valid version: {minimum_raw}"
+        ) from exc
+    try:
+        current = Version(__version__)
+    except InvalidVersion as exc:  # pragma: no cover - package version should be valid
+        raise click.ClickException(f"nml-tools version is not valid: {__version__}") from exc
+    if current < minimum:
+        raise click.ClickException(
+            f"config requires nml-tools >= {minimum}, current version is {current}"
+        )
 
 
 def _resolve_optional_path(
@@ -544,13 +609,13 @@ def cli(verbose: int, quiet: int) -> None:
     "--config",
     "config_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default="nml-config.toml",
-    show_default=True,
+    default=None,
+    show_default="nml-config.toml, then pyproject.toml [tool.nml-tools]",
 )
-def generate(config_path: Path) -> None:
+def generate(config_path: Path | None) -> None:
     """Generate outputs from a configuration file."""
+    config, config_path = _load_config_checked(config_path)
     logger.info("Loading config from %s", config_path)
-    config = _load_config_checked(config_path)
     base_dir = config_path.parent
     logger.debug("Base directory: %s", base_dir)
     helper_path, helper_module, helper_buffer, helper_header = _load_helper_settings(
@@ -666,13 +731,13 @@ def generate(config_path: Path) -> None:
     "--config",
     "config_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default="nml-config.toml",
-    show_default=True,
+    default=None,
+    show_default="nml-config.toml, then pyproject.toml [tool.nml-tools]",
 )
-def gen_fortran(config_path: Path) -> None:
+def gen_fortran(config_path: Path | None) -> None:
     """Generate Fortran module(s)."""
+    config, config_path = _load_config_checked(config_path)
     logger.info("Loading config from %s", config_path)
-    config = _load_config_checked(config_path)
     base_dir = config_path.parent
     logger.debug("Base directory: %s", base_dir)
     helper_path, helper_module, helper_buffer, helper_header = _load_helper_settings(
@@ -791,8 +856,8 @@ def validate(
 
     if schema_paths:
         if config_path is not None:
+            config, config_path = _load_config_checked(config_path)
             logger.info("Loading config from %s", config_path)
-            config = _load_config_checked(config_path)
             cfg_constants, _ = _load_constants(config)
             constants = {**cfg_constants, **constants}
         for schema_file in schema_paths:
@@ -803,10 +868,8 @@ def validate(
                 raise click.ClickException(str(exc)) from exc
         require_all = True
     else:
-        if config_path is None:
-            config_path = Path("nml-config.toml")
+        config, config_path = _load_config_checked(config_path)
         logger.info("Loading config from %s", config_path)
-        config = _load_config_checked(config_path)
         base_dir = config_path.parent
         cfg_constants, _ = _load_constants(config)
         constants = {**cfg_constants, **constants}
@@ -880,13 +943,13 @@ def validate(
     "--config",
     "config_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default="nml-config.toml",
-    show_default=True,
+    default=None,
+    show_default="nml-config.toml, then pyproject.toml [tool.nml-tools]",
 )
-def gen_markdown(config_path: Path) -> None:
+def gen_markdown(config_path: Path | None) -> None:
     """Generate Markdown docs."""
+    config, config_path = _load_config_checked(config_path)
     logger.info("Loading config from %s", config_path)
-    config = _load_config_checked(config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
     _, md_doxygen_id_from_name, md_add_toc_statement, _ = _load_documentation_settings(
@@ -924,13 +987,13 @@ def gen_markdown(config_path: Path) -> None:
     "--config",
     "config_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    default="nml-config.toml",
-    show_default=True,
+    default=None,
+    show_default="nml-config.toml, then pyproject.toml [tool.nml-tools]",
 )
-def gen_template(config_path: Path) -> None:
+def gen_template(config_path: Path | None) -> None:
     """Generate template namelist(s)."""
+    config, config_path = _load_config_checked(config_path)
     logger.info("Loading config from %s", config_path)
-    config = _load_config_checked(config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
     _, kind_map, kind_allowlist = _load_kind_settings(config)
