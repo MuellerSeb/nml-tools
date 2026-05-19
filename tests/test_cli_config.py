@@ -253,3 +253,169 @@ def test_validate_uses_discovered_pyproject_config(
     monkeypatch.chdir(tmp_path)
 
     cli_module.validate.callback(None, (), None, (), Path("input.nml"))
+
+
+def test_check_command_passes_and_reports_differences(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                title: Demo
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  value:
+                    title: Demo value
+                    type: integer
+                    default: 1
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("pyproject.toml").write_text(
+            dedent(
+                """
+                [tool.nml-tools]
+                minimum-version = "0"
+
+                [tool.nml-tools.kinds]
+                module = "iso_fortran_env"
+                real = ["real64"]
+                integer = ["int32"]
+
+                [[tool.nml-tools.namelists]]
+                schema = "schema.yml"
+                mod_path = "out/nml_demo.f90"
+                doc_path = "out/nml_demo.md"
+
+                [[tool.nml-tools.templates]]
+                schemas = ["schema.yml"]
+                output = "out/demo.nml"
+                value_mode = "filled"
+                doc_mode = "plain"
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        generate_result = runner.invoke(cli_module.cli, ["generate"])
+        assert generate_result.exit_code == 0, generate_result.output
+
+        check_result = runner.invoke(cli_module.cli, ["check"])
+        assert check_result.exit_code == 0, check_result.output
+
+        Path("out/demo.nml").write_text("&demo\nvalue = 2\n/\n", encoding="ascii")
+        diff_result = runner.invoke(cli_module.cli, ["check", "--diff"])
+
+        assert diff_result.exit_code != 0
+        assert "DIFF: out/demo.nml" in diff_result.output
+        assert "--- current out/demo.nml" in diff_result.output
+        assert "+++ generated out/demo.nml" in diff_result.output
+        assert "generated files are out of date: 1 file(s) differ or are missing" in (
+            diff_result.output
+        )
+
+
+def test_check_command_reports_missing_files(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                title: Demo
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  value:
+                    type: integer
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("nml-config.toml").write_text(
+            dedent(
+                """
+                [kinds]
+                module = "iso_fortran_env"
+                real = ["real64"]
+                integer = ["int32"]
+
+                [[namelists]]
+                schema = "schema.yml"
+                mod_path = "out/nml_demo.f90"
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(cli_module.cli, ["check"])
+
+        assert result.exit_code != 0
+        assert "MISSING: out/nml_demo.f90" in result.output
+
+
+def test_collect_generated_outputs_groups_shared_f2py_files(tmp_path: Path) -> None:
+    for name in ["first", "second"]:
+        (tmp_path / f"{name}.yml").write_text(
+            dedent(
+                f"""
+                title: {name.title()}
+                x-fortran-namelist: {name}
+                type: object
+                required: [value]
+                properties:
+                  value:
+                    type: number
+                    x-fortran-kind: dp
+                """
+            ),
+            encoding="utf-8",
+        )
+    config_path = tmp_path / "nml-config.toml"
+    config_path.write_text(
+        dedent(
+            """
+            [helper]
+            path = "out/nml_helper.f90"
+            module = "nml_helper"
+
+            [kinds]
+            module = "iso_fortran_env"
+            real = ["real64"]
+            integer = ["int32"]
+            map = { dp = "real64" }
+
+            [f2py]
+            f2cmap_path = "out/.f2py_f2cmap"
+
+            [f2py.c_types.real]
+            dp = "double"
+
+            [[namelists]]
+            schema = "first.yml"
+            mod_path = "out/nml_first.f90"
+            f2py_path = "out/f2py_config.f90"
+            py_path = "out/config.py"
+
+            [[namelists]]
+            schema = "second.yml"
+            mod_path = "out/nml_second.f90"
+            f2py_path = "out/f2py_config.f90"
+            py_path = "out/config.py"
+            """
+        ),
+        encoding="utf-8",
+    )
+    config, resolved_path = cli_module._load_config_checked(config_path)
+
+    outputs = cli_module._collect_generated_outputs(config, resolved_path)
+    output_paths = [output.path.relative_to(tmp_path) for output in outputs]
+    by_path = {output.path.relative_to(tmp_path): output.content for output in outputs}
+
+    assert output_paths.count(Path("out/f2py_config.f90")) == 1
+    assert output_paths.count(Path("out/config.py")) == 1
+    assert "module f2py_first" in by_path[Path("out/f2py_config.f90")]
+    assert "module f2py_second" in by_path[Path("out/f2py_config.f90")]
+    assert "class First" in by_path[Path("out/config.py")]
+    assert "class Second" in by_path[Path("out/config.py")]

@@ -397,6 +397,7 @@ Common flags: `-h`/`--help`, `-V`/`--version`, `-v`/`-q` (repeatable).
 Primary subcommands:
 
 - `generate`: run the full pipeline (helper, Fortran modules, docs, templates).
+- `check`: verify configured generated files are up to date.
 - `gen-fortran`: generate helper + Fortran modules only.
 - `gen-markdown`: generate Markdown docs only.
 - `gen-template`: generate template namelists only.
@@ -422,6 +423,17 @@ If `f2py_path` is configured, `generate` and `gen-fortran` also emit the
 f2py-facing Fortran wrapper file. `generate` additionally emits `py_path`
 Python shims. If `[f2py].f2cmap_path` is configured, the generated map can be
 passed to f2py with `--f2cmap`.
+
+Check generated files without rewriting them:
+
+```bash
+nml-tools check --config nml-config.toml
+nml-tools check --config nml-config.toml --diff
+```
+
+`check` exits with a non-zero status if any configured generated file is
+missing or differs from the current generator output. This is intended for CI
+jobs that should ensure checked-in generated files are current.
 
 ### Validation
 

@@ -6,6 +6,8 @@ import logging
 import math
 import re
 import sys
+from dataclasses import dataclass
+from difflib import unified_diff
 from pathlib import Path
 from typing import Any
 
@@ -19,14 +21,20 @@ from .codegen_f2py import (
     F2pyCTypeMap,
     build_f2py_namelist_spec,
     collect_f2py_kind_usage,
-    generate_f2cmap,
-    generate_f2py_wrappers,
-    generate_python_wrappers,
     merge_f2py_kind_usage,
+    render_f2cmap,
+    render_f2py_wrappers,
+    render_python_wrappers,
 )
-from .codegen_fortran import ConstantSpec, generate_fortran, generate_helper
-from .codegen_markdown import generate_docs
-from .codegen_template import generate_template
+from .codegen_fortran import (
+    ConstantSpec,
+    generate_fortran,
+    generate_helper,
+    render_fortran,
+    render_helper,
+)
+from .codegen_markdown import generate_docs, render_docs
+from .codegen_template import generate_template, render_template
 from .schema import load_schema
 from .validate import validate_namelist
 
@@ -40,6 +48,14 @@ _FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _DEFAULT_CONFIG = Path("nml-config.toml")
 _PYPROJECT_CONFIG = Path("pyproject.toml")
+
+
+@dataclass(frozen=True)
+class GeneratedOutput:
+    """Generated file content for write/check commands."""
+
+    path: Path
+    content: str
 
 
 def _configure_logging(verbose: int, quiet: int) -> None:
@@ -512,7 +528,148 @@ def _iter_templates(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
     return entries
 
 
-def _generate_f2py_outputs(
+def _collect_generated_outputs(
+    config: dict[str, Any],
+    config_path: Path,
+) -> list[GeneratedOutput]:
+    base_dir = config_path.parent
+    logger.debug("Base directory: %s", base_dir)
+    helper_path, helper_module, helper_buffer, helper_header = _load_helper_settings(
+        config,
+        base_dir,
+    )
+    (
+        module_doc,
+        md_doxygen_id_from_name,
+        md_add_toc_statement,
+        py_style,
+    ) = _load_documentation_settings(config)
+    constants, constant_specs = _load_constants(config)
+    kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
+    f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
+    outputs: list[GeneratedOutput] = []
+
+    if helper_path is not None:
+        try:
+            logger.debug("Rendering helper module at %s", helper_path)
+            outputs.append(
+                GeneratedOutput(
+                    helper_path,
+                    render_helper(
+                        file_name=helper_path.name,
+                        module_name=helper_module,
+                        len_buf=helper_buffer,
+                        constants=constant_specs,
+                        module_doc=module_doc,
+                        helper_header=helper_header,
+                    ),
+                )
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    entries = _iter_namelists(config, base_dir)
+    logger.debug("Found %d schema entries", len(entries))
+    loaded_entries: list[dict[str, Any]] = []
+    for namelist_entry in entries:
+        schema_path = namelist_entry["schema"]
+        if schema_path is None:
+            raise click.ClickException("namelists entry missing schema path")
+        try:
+            logger.debug("Loading schema %s", schema_path)
+            schema = load_schema(schema_path)
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        loaded_entries.append({"entry": namelist_entry, "schema": schema})
+
+        mod_path = namelist_entry["mod_path"]
+        if mod_path is not None:
+            try:
+                logger.debug("Rendering Fortran module at %s", mod_path)
+                outputs.append(
+                    GeneratedOutput(
+                        mod_path,
+                        render_fortran(
+                            schema,
+                            file_name=mod_path.name,
+                            helper_module=helper_module,
+                            kind_module=kind_module,
+                            kind_map=kind_map,
+                            kind_allowlist=kind_allowlist,
+                            constants=constants,
+                            module_doc=module_doc,
+                            f2py_handle_helpers=namelist_entry["f2py_path"] is not None,
+                        ),
+                    )
+                )
+            except ValueError as exc:
+                raise click.ClickException(str(exc)) from exc
+
+        doc_path = namelist_entry["doc_path"]
+        if doc_path is not None:
+            try:
+                logger.debug("Rendering Markdown docs at %s", doc_path)
+                outputs.append(
+                    GeneratedOutput(
+                        doc_path,
+                        render_docs(
+                            schema,
+                            constants=constants,
+                            md_doxygen_id_from_name=md_doxygen_id_from_name,
+                            md_add_toc_statement=md_add_toc_statement,
+                        ),
+                    )
+                )
+            except ValueError as exc:
+                raise click.ClickException(str(exc)) from exc
+
+    outputs.extend(
+        _collect_f2py_outputs(
+            loaded_entries,
+            helper_module=helper_module,
+            helper_buffer=helper_buffer,
+            kind_module=kind_module,
+            kind_map=kind_map,
+            kind_allowlist=kind_allowlist,
+            constants=constants,
+            f2cmap_path=f2cmap_path,
+            f2py_c_types=f2py_c_types,
+            py_style=py_style,
+            include_python=True,
+        )
+    )
+
+    template_entries = _iter_templates(config, base_dir)
+    if template_entries:
+        logger.debug("Found %d template entries", len(template_entries))
+    for template_entry in template_entries:
+        try:
+            schemas = []
+            for schema_path in template_entry["schemas"]:
+                logger.debug("Loading schema %s", schema_path)
+                schemas.append(load_schema(schema_path))
+            logger.debug("Rendering template at %s", template_entry["output"])
+            outputs.append(
+                GeneratedOutput(
+                    template_entry["output"],
+                    render_template(
+                        schemas,
+                        doc_mode=template_entry["doc_mode"],
+                        value_mode=template_entry["value_mode"],
+                        constants=constants,
+                        kind_map=kind_map,
+                        kind_allowlist=kind_allowlist,
+                        values=template_entry["values"],
+                    ),
+                )
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    return outputs
+
+
+def _collect_f2py_outputs(
     loaded_entries: list[dict[str, Any]],
     *,
     helper_module: str,
@@ -525,7 +682,8 @@ def _generate_f2py_outputs(
     f2py_c_types: F2pyCTypeMap,
     py_style: str,
     include_python: bool,
-) -> None:
+) -> list[GeneratedOutput]:
+    outputs: list[GeneratedOutput] = []
     f2py_groups: dict[Path, list[dict[str, Any]]] = {}
     py_groups: dict[Path, list[tuple[dict[str, Any], Path]]] = {}
     for loaded in loaded_entries:
@@ -541,16 +699,21 @@ def _generate_f2py_outputs(
 
     for f2py_path, schemas in f2py_groups.items():
         try:
-            logger.info("Generating f2py wrappers at %s", f2py_path)
-            generate_f2py_wrappers(
-                schemas,
-                f2py_path,
-                helper_module=helper_module,
-                kind_module=kind_module,
-                kind_map=kind_map,
-                kind_allowlist=kind_allowlist,
-                constants=constants,
-                errmsg_len=helper_buffer,
+            logger.debug("Rendering f2py wrappers at %s", f2py_path)
+            outputs.append(
+                GeneratedOutput(
+                    f2py_path,
+                    render_f2py_wrappers(
+                        schemas,
+                        file_name=f2py_path.name,
+                        helper_module=helper_module,
+                        kind_module=kind_module,
+                        kind_map=kind_map,
+                        kind_allowlist=kind_allowlist,
+                        constants=constants,
+                        errmsg_len=helper_buffer,
+                    ),
+                )
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
@@ -561,16 +724,21 @@ def _generate_f2py_outputs(
                 collect_f2py_kind_usage(schemas, constants=constants)
                 for schemas in f2py_groups.values()
             )
-            logger.info("Generating f2py kind map at %s", f2cmap_path)
-            generate_f2cmap(f2cmap_path, usage, f2py_c_types)
+            logger.debug("Rendering f2py kind map at %s", f2cmap_path)
+            outputs.append(
+                GeneratedOutput(
+                    f2cmap_path,
+                    render_f2cmap(usage, f2py_c_types),
+                )
+            )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 
     if not include_python:
-        return
+        return outputs
     for py_path, entries in py_groups.items():
         try:
-            logger.info("Generating Python f2py wrappers at %s", py_path)
+            logger.debug("Rendering Python f2py wrappers at %s", py_path)
             specs = [
                 (
                     build_f2py_namelist_spec(
@@ -586,13 +754,81 @@ def _generate_f2py_outputs(
                 )
                 for schema, f2py_path in entries
             ]
-            generate_python_wrappers(
-                specs,
-                py_path,
-                py_style=py_style,
+            outputs.append(
+                GeneratedOutput(
+                    py_path,
+                    render_python_wrappers(
+                        specs,
+                        py_style=py_style,
+                    ),
+                )
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
+    return outputs
+
+
+def _generate_f2py_outputs(
+    loaded_entries: list[dict[str, Any]],
+    *,
+    helper_module: str,
+    helper_buffer: int,
+    kind_module: str,
+    kind_map: dict[str, str],
+    kind_allowlist: set[str],
+    constants: dict[str, int | float],
+    f2cmap_path: Path | None,
+    f2py_c_types: F2pyCTypeMap,
+    py_style: str,
+    include_python: bool,
+) -> None:
+    _write_generated_outputs(
+        _collect_f2py_outputs(
+            loaded_entries,
+            helper_module=helper_module,
+            helper_buffer=helper_buffer,
+            kind_module=kind_module,
+            kind_map=kind_map,
+            kind_allowlist=kind_allowlist,
+            constants=constants,
+            f2cmap_path=f2cmap_path,
+            f2py_c_types=f2py_c_types,
+            py_style=py_style,
+            include_python=include_python,
+        )
+    )
+
+
+def _write_generated_outputs(outputs: list[GeneratedOutput]) -> None:
+    for output in outputs:
+        logger.info("Writing generated file %s", output.path)
+        output.path.parent.mkdir(parents=True, exist_ok=True)
+        output.path.write_text(output.content, encoding="ascii")
+
+
+def _check_generated_outputs(outputs: list[GeneratedOutput], *, show_diff: bool) -> int:
+    failed = 0
+    for output in outputs:
+        if not output.path.exists():
+            failed += 1
+            click.echo(f"MISSING: {output.path}", err=True)
+            continue
+        current = output.path.read_text(encoding="ascii")
+        if current != output.content:
+            failed += 1
+            click.echo(f"DIFF: {output.path}", err=True)
+            if show_diff:
+                diff = unified_diff(
+                    current.splitlines(keepends=True),
+                    output.content.splitlines(keepends=True),
+                    fromfile=f"current {output.path}",
+                    tofile=f"generated {output.path}",
+                )
+                for line in diff:
+                    click.echo(line, nl=False)
+            continue
+        logger.debug("OK: %s", output.path)
+    return failed
 
 
 @click.group(context_settings=_CONTEXT_SETTINGS)
@@ -616,114 +852,35 @@ def generate(config_path: Path | None) -> None:
     """Generate outputs from a configuration file."""
     config, config_path = _load_config_checked(config_path)
     logger.info("Loading config from %s", config_path)
-    base_dir = config_path.parent
-    logger.debug("Base directory: %s", base_dir)
-    helper_path, helper_module, helper_buffer, helper_header = _load_helper_settings(
-        config,
-        base_dir,
-    )
-    (
-        module_doc,
-        md_doxygen_id_from_name,
-        md_add_toc_statement,
-        py_style,
-    ) = _load_documentation_settings(config)
-    constants, constant_specs = _load_constants(config)
-    kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
-    f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
-    if helper_path is not None:
-        try:
-            logger.info("Generating helper module at %s", helper_path)
-            generate_helper(
-                helper_path,
-                module_name=helper_module,
-                len_buf=helper_buffer,
-                constants=constant_specs,
-                module_doc=module_doc,
-                helper_header=helper_header,
-            )
-        except ValueError as exc:
-            raise click.ClickException(str(exc)) from exc
-    entries = _iter_namelists(config, base_dir)
-    logger.info("Found %d schema entries", len(entries))
-    loaded_entries: list[dict[str, Any]] = []
-    for namelist_entry in entries:
-        schema_path = namelist_entry["schema"]
-        if schema_path is None:
-            raise click.ClickException("namelists entry missing schema path")
-        try:
-            logger.info("Loading schema %s", schema_path)
-            schema = load_schema(schema_path)
-        except (FileNotFoundError, ValueError) as exc:
-            raise click.ClickException(str(exc)) from exc
-        loaded_entries.append({"entry": namelist_entry, "schema": schema})
-        mod_path = namelist_entry["mod_path"]
-        if mod_path is not None:
-            try:
-                logger.info("Generating Fortran module at %s", mod_path)
-                generate_fortran(
-                    schema,
-                    mod_path,
-                    helper_module=helper_module,
-                    kind_module=kind_module,
-                    kind_map=kind_map,
-                    kind_allowlist=kind_allowlist,
-                    constants=constants,
-                    module_doc=module_doc,
-                    f2py_handle_helpers=namelist_entry["f2py_path"] is not None,
-                )
-            except ValueError as exc:
-                raise click.ClickException(str(exc)) from exc
-        doc_path = namelist_entry["doc_path"]
-        if doc_path is not None:
-            try:
-                logger.info("Generating Markdown docs at %s", doc_path)
-                generate_docs(
-                    schema,
-                    doc_path,
-                    constants=constants,
-                    md_doxygen_id_from_name=md_doxygen_id_from_name,
-                    md_add_toc_statement=md_add_toc_statement,
-                )
-            except ValueError as exc:
-                raise click.ClickException(str(exc)) from exc
+    _write_generated_outputs(_collect_generated_outputs(config, config_path))
 
-    _generate_f2py_outputs(
-        loaded_entries,
-        helper_module=helper_module,
-        helper_buffer=helper_buffer,
-        kind_module=kind_module,
-        kind_map=kind_map,
-        kind_allowlist=kind_allowlist,
-        constants=constants,
-        f2cmap_path=f2cmap_path,
-        f2py_c_types=f2py_c_types,
-        py_style=py_style,
-        include_python=True,
-    )
 
-    template_entries = _iter_templates(config, base_dir)
-    if template_entries:
-        logger.info("Found %d template entries", len(template_entries))
-    for template_entry in template_entries:
-        try:
-            schemas = []
-            for schema_path in template_entry["schemas"]:
-                logger.info("Loading schema %s", schema_path)
-                schemas.append(load_schema(schema_path))
-            logger.info("Generating template at %s", template_entry["output"])
-            generate_template(
-                schemas,
-                template_entry["output"],
-                doc_mode=template_entry["doc_mode"],
-                value_mode=template_entry["value_mode"],
-                constants=constants,
-                kind_map=kind_map,
-                kind_allowlist=kind_allowlist,
-                values=template_entry["values"],
-            )
-        except (FileNotFoundError, ValueError) as exc:
-            raise click.ClickException(str(exc)) from exc
+@cli.command("check", context_settings=_CONTEXT_SETTINGS)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    show_default="nml-config.toml, then pyproject.toml [tool.nml-tools]",
+)
+@click.option(
+    "--diff",
+    "show_diff",
+    is_flag=True,
+    help="Show unified diffs for generated files that differ.",
+)
+def check(config_path: Path | None, show_diff: bool) -> None:
+    """Check that configured generated files are up to date."""
+    config, config_path = _load_config_checked(config_path)
+    logger.debug("Loading config from %s", config_path)
+    failures = _check_generated_outputs(
+        _collect_generated_outputs(config, config_path),
+        show_diff=show_diff,
+    )
+    if failures:
+        raise click.ClickException(
+            f"generated files are out of date: {failures} file(s) differ or are missing"
+        )
 
 
 @cli.command("gen-fortran", context_settings=_CONTEXT_SETTINGS)
