@@ -203,6 +203,10 @@ class {{ cls.class_name }}:
         """!
         Set runtime constants for the handled {{ cls.namelist_name }} instance.
 
+        Omitted or None values reset the corresponding constant to the configured
+        helper-module default. Applying constants reinitializes the handled
+        Fortran object and clears previously configured namelist values.
+
 {% for arg in cls.set_constants_args %}
         @param {{ arg.name }} (int, optional): Runtime override for {{ arg.name }}.
 {% endfor %}
@@ -210,6 +214,10 @@ class {{ cls.class_name }}:
         """
 {% else %}
         """Set runtime constants for the handled {{ cls.namelist_name }} instance.
+
+        Omitted or None values reset the corresponding constant to the configured
+        helper-module default. Applying constants reinitializes the handled
+        Fortran object and clears previously configured namelist values.
 
         Parameters
         ----------

@@ -151,6 +151,10 @@ class Config:
     ) -> None:
         """Set runtime constants for the handled config instance.
 
+        Omitted or None values reset the corresponding constant to the configured
+        helper-module default. Applying constants reinitializes the handled
+        Fortran object and clears previously configured namelist values.
+
         Parameters
         ----------
         str_len : int, optional
