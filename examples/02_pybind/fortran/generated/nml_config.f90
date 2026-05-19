@@ -148,7 +148,7 @@ contains
     block
       integer :: nml_len
       nml_len = min(len(this%name), len(name_default))
-    this%name = repeat(" ", len(this%name))
+      this%name = repeat(" ", len(this%name))
       if (nml_len > 0) then
         this%name(1:nml_len) = name_default(1:nml_len)
       end if
@@ -195,7 +195,7 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=:), allocatable :: name
+    character(len=this%constant_str_len) :: name
     integer(i4) :: iterations
     real(dp) :: tolerance
     logical :: enabled
@@ -215,9 +215,6 @@ contains
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
-    ! allocate local namelist variables matching runtime-sized fields
-    if (allocated(name)) deallocate(name)
-    allocate(character(len=this%constant_str_len) :: name)
     name = this%name
     iterations = this%iterations
     tolerance = this%tolerance
@@ -251,7 +248,7 @@ contains
     block
       integer :: nml_len
       nml_len = min(len(this%name), len(name))
-    this%name = repeat(" ", len(this%name))
+      this%name = repeat(" ", len(this%name))
       if (nml_len > 0) then
         this%name(1:nml_len) = name(1:nml_len)
       end if
@@ -297,7 +294,7 @@ contains
       block
         integer :: nml_len
         nml_len = min(len(this%name), len(name))
-      this%name = repeat(" ", len(this%name))
+        this%name = repeat(" ", len(this%name))
         if (nml_len > 0) then
           this%name(1:nml_len) = name(1:nml_len)
         end if

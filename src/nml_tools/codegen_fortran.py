@@ -418,7 +418,7 @@ def _build_context(
                     )
                 )
                 runtime_local_allocations.extend(
-                    _render_runtime_allocations(
+                    _render_runtime_local_allocations(
                         type_info,
                         name,
                         runtime_dimensions=runtime_dimensions,
@@ -1628,13 +1628,20 @@ def _render_runtime_local_declaration(
     runtime_length_expr: str | None,
 ) -> str:
     if type_info.category == "string":
-        return f"character(len=:), allocatable :: {name}"
+        if runtime_length_expr is None:
+            raise ValueError("runtime string local declaration requires length expression")
+        return f"character(len={runtime_length_expr}) :: {name}"
     if type_info.category != "array":
         raise ValueError("runtime local declaration is only supported for strings or arrays")
 
     type_spec = type_info.type_spec
     if type_info.element_category == "string":
-        type_spec = "character(len=:)"
+        if runtime_length_expr is None:
+            raise ValueError("runtime string array local declaration requires length expression")
+        type_spec = f"character(len={runtime_length_expr})"
+        dims = ", ".join(runtime_dimensions)
+        return f"{type_spec}, dimension({dims}) :: {name}"
+
     dims = ", ".join(":" for _ in runtime_dimensions)
     return f"{type_spec}, allocatable, dimension({dims}) :: {name}"
 
@@ -1670,13 +1677,30 @@ def _render_runtime_allocations(
     return lines
 
 
+def _render_runtime_local_allocations(
+    type_info: FieldTypeInfo,
+    name: str,
+    *,
+    runtime_dimensions: list[str],
+    runtime_length_expr: str | None,
+) -> list[str]:
+    if type_info.category == "string" or type_info.element_category == "string":
+        return []
+    return _render_runtime_allocations(
+        type_info,
+        name,
+        runtime_dimensions=runtime_dimensions,
+        runtime_length_expr=runtime_length_expr,
+    )
+
+
 def _render_runtime_string_copy_assignment(*, target_ref: str, source_ref: str) -> str:
     """Render an assignment that preserves deferred-length allocation of target_ref."""
     return (
         "block\n"
         "  integer :: nml_len\n"
         f"  nml_len = min(len({target_ref}), len({source_ref}))\n"
-        f"{target_ref} = repeat(\" \", len({target_ref}))\n"
+        f"  {target_ref} = repeat(\" \", len({target_ref}))\n"
         "  if (nml_len > 0) then\n"
         f"    {target_ref}(1:nml_len) = {source_ref}(1:nml_len)\n"
         "  end if\n"

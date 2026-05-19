@@ -289,9 +289,9 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=:), allocatable :: name
-    character(len=:), allocatable :: method
-    character(len=:), allocatable, dimension(:) :: try_methods
+    character(len=this%constant_buf) :: name
+    character(len=this%constant_buf) :: method
+    character(len=this%constant_buf), dimension(3) :: try_methods
     integer(i4), dimension(3) :: complex_sizes
     integer(i4) :: niterations
     real(dp) :: tolerance
@@ -322,12 +322,6 @@ contains
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
-    if (allocated(name)) deallocate(name)
-    allocate(character(len=this%constant_buf) :: name)
-    if (allocated(method)) deallocate(method)
-    allocate(character(len=this%constant_buf) :: method)
-    if (allocated(try_methods)) deallocate(try_methods)
-    allocate(character(len=this%constant_buf) :: try_methods(3))
     if (allocated(mcmc_error_params)) deallocate(mcmc_error_params)
     allocate(mcmc_error_params(3, 2, this%constant_max_iter))
     name = this%name
@@ -369,7 +363,7 @@ contains
     block
       integer :: nml_len
       nml_len = min(len(this%name), len(name))
-    this%name = repeat(" ", len(this%name))
+      this%name = repeat(" ", len(this%name))
       if (nml_len > 0) then
         this%name(1:nml_len) = name(1:nml_len)
       end if
@@ -377,7 +371,7 @@ contains
     block
       integer :: nml_len
       nml_len = min(len(this%method), len(method))
-    this%method = repeat(" ", len(this%method))
+      this%method = repeat(" ", len(this%method))
       if (nml_len > 0) then
         this%method(1:nml_len) = method(1:nml_len)
       end if
@@ -447,7 +441,7 @@ contains
     block
       integer :: nml_len
       nml_len = min(len(this%method), len(method))
-    this%method = repeat(" ", len(this%method))
+      this%method = repeat(" ", len(this%method))
       if (nml_len > 0) then
         this%method(1:nml_len) = method(1:nml_len)
       end if
@@ -479,7 +473,7 @@ contains
       block
         integer :: nml_len
         nml_len = min(len(this%name), len(name))
-      this%name = repeat(" ", len(this%name))
+        this%name = repeat(" ", len(this%name))
         if (nml_len > 0) then
           this%name(1:nml_len) = name(1:nml_len)
         end if

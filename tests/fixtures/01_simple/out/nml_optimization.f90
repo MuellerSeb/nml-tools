@@ -148,7 +148,7 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=:), allocatable :: name
+    character(len=this%constant_buf) :: name
     integer :: niterations
     real :: tolerance
     integer(i4) :: seed
@@ -173,8 +173,6 @@ contains
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
-    if (allocated(name)) deallocate(name)
-    allocate(character(len=this%constant_buf) :: name)
     if (allocated(mcmc_error_params)) deallocate(mcmc_error_params)
     allocate(mcmc_error_params(3, 2, this%constant_max_iter))
     name = this%name
@@ -212,7 +210,7 @@ contains
     block
       integer :: nml_len
       nml_len = min(len(this%name), len(name))
-    this%name = repeat(" ", len(this%name))
+      this%name = repeat(" ", len(this%name))
       if (nml_len > 0) then
         this%name(1:nml_len) = name(1:nml_len)
       end if
@@ -268,7 +266,7 @@ contains
       block
         integer :: nml_len
         nml_len = min(len(this%name), len(name))
-      this%name = repeat(" ", len(this%name))
+        this%name = repeat(" ", len(this%name))
         if (nml_len > 0) then
           this%name(1:nml_len) = name(1:nml_len)
         end if
