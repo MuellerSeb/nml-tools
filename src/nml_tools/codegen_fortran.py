@@ -96,6 +96,34 @@ def generate_fortran(
 ) -> None:
     """Generate a Fortran module from *schema* at *output*."""
     output_path = Path(output)
+    rendered = render_fortran(
+        schema,
+        file_name=output_path.name,
+        helper_module=helper_module,
+        kind_module=kind_module,
+        kind_map=kind_map,
+        kind_allowlist=kind_allowlist,
+        constants=constants,
+        module_doc=module_doc,
+        f2py_handle_helpers=f2py_handle_helpers,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(rendered, encoding="ascii")
+
+
+def render_fortran(
+    schema: dict[str, Any],
+    *,
+    file_name: str,
+    helper_module: str = "nml_helper",
+    kind_module: str | None = None,
+    kind_map: dict[str, str] | None = None,
+    kind_allowlist: Iterable[str] | None = None,
+    constants: dict[str, int | float] | None = None,
+    module_doc: str | None = None,
+    f2py_handle_helpers: bool = False,
+) -> str:
+    """Render a Fortran module from *schema*."""
     context = _build_context(
         schema,
         helper_module=helper_module,
@@ -106,10 +134,8 @@ def generate_fortran(
         module_doc=module_doc,
         f2py_handle_helpers=f2py_handle_helpers,
     )
-    context["file_name"] = output_path.name
-    rendered = _TEMPLATE_ENV.get_template("fortran_module.f90.j2").render(context)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(rendered, encoding="ascii")
+    context["file_name"] = file_name
+    return _TEMPLATE_ENV.get_template("fortran_module.f90.j2").render(context)
 
 
 def generate_helper(
@@ -122,14 +148,36 @@ def generate_helper(
     helper_header: str | None = None,
 ) -> None:
     """Generate the helper Fortran module at *output*."""
+    output_path = Path(output)
+    rendered = render_helper(
+        file_name=output_path.name,
+        module_name=module_name,
+        len_buf=len_buf,
+        constants=constants,
+        module_doc=module_doc,
+        helper_header=helper_header,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(rendered, encoding="ascii")
+
+
+def render_helper(
+    *,
+    file_name: str,
+    module_name: str = "nml_helper",
+    len_buf: int = 1024,
+    constants: list[ConstantSpec] | None = None,
+    module_doc: str | None = None,
+    helper_header: str | None = None,
+) -> str:
+    """Render the helper Fortran module."""
     if not module_name:
         raise ValueError("helper module name must be a non-empty string")
     if len_buf <= 0:
         raise ValueError("helper len_buf must be positive")
-    output_path = Path(output)
-    rendered = _TEMPLATE_ENV.get_template("nml_helper.f90.j2").render(
+    return _TEMPLATE_ENV.get_template("nml_helper.f90.j2").render(
         {
-            "file_name": output_path.name,
+            "file_name": file_name,
             "module_name": module_name,
             "len_buf": len_buf,
             "constants": constants or [],
@@ -137,8 +185,6 @@ def generate_helper(
             "helper_header": helper_header,
         }
     )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(rendered, encoding="ascii")
 
 
 def _build_context(

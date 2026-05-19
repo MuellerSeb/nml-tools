@@ -33,6 +33,25 @@ def generate_docs(
     md_add_toc_statement: bool = False,
 ) -> None:
     """Generate Markdown docs for *schema* at *output*."""
+    rendered = render_docs(
+        schema,
+        constants=constants,
+        md_doxygen_id_from_name=md_doxygen_id_from_name,
+        md_add_toc_statement=md_add_toc_statement,
+    )
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(rendered, encoding="ascii")
+
+
+def render_docs(
+    schema: dict[str, Any],
+    *,
+    constants: dict[str, int | float] | None = None,
+    md_doxygen_id_from_name: bool = False,
+    md_add_toc_statement: bool = False,
+) -> str:
+    """Render Markdown docs for *schema*."""
     namelist_name = schema.get("x-fortran-namelist")
     if not isinstance(namelist_name, str):
         raise ValueError("schema must define 'x-fortran-namelist'")
@@ -183,10 +202,7 @@ def generate_docs(
     lines.append("```")
     lines.append("")
 
-    rendered = "\n".join(lines) + "\n"
-    output_path = Path(output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(rendered, encoding="ascii")
+    return "\n".join(lines) + "\n"
 
 
 def _validate_required(values: list[Any]) -> set[str]:

@@ -123,6 +123,33 @@ def generate_f2py_wrappers(
     errmsg_len: int = 1024,
 ) -> None:
     """Generate f2py-facing Fortran wrappers for *schemas* at *output*."""
+    output_path = Path(output)
+    rendered = render_f2py_wrappers(
+        schemas,
+        file_name=output_path.name,
+        helper_module=helper_module,
+        kind_module=kind_module,
+        kind_map=kind_map,
+        kind_allowlist=kind_allowlist,
+        constants=constants,
+        errmsg_len=errmsg_len,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(rendered, encoding="ascii")
+
+
+def render_f2py_wrappers(
+    schemas: Iterable[dict[str, Any]],
+    *,
+    file_name: str,
+    helper_module: str = "nml_helper",
+    kind_module: str | None = None,
+    kind_map: dict[str, str] | None = None,
+    kind_allowlist: Iterable[str] | None = None,
+    constants: dict[str, int | float] | None = None,
+    errmsg_len: int = 1024,
+) -> str:
+    """Render f2py-facing Fortran wrappers for *schemas*."""
     specs = [
         build_f2py_namelist_spec(
             schema,
@@ -135,12 +162,9 @@ def generate_f2py_wrappers(
         )
         for schema in schemas
     ]
-    output_path = Path(output)
-    rendered = _TEMPLATE_ENV.get_template("f2py_wrappers.f90.j2").render(
-        {"file_name": output_path.name, "specs": specs}
+    return _TEMPLATE_ENV.get_template("f2py_wrappers.f90.j2").render(
+        {"file_name": file_name, "specs": specs}
     )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(rendered, encoding="ascii")
 
 
 def generate_python_wrappers(
@@ -150,9 +174,20 @@ def generate_python_wrappers(
     py_style: str = "numpy",
 ) -> None:
     """Generate Python wrapper classes for f2py namelist *specs* at *output*."""
+    rendered = render_python_wrappers(specs, py_style=py_style)
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(rendered, encoding="ascii")
+
+
+def render_python_wrappers(
+    specs: Iterable[tuple[F2pyNamelistSpec, str]],
+    *,
+    py_style: str = "numpy",
+) -> str:
+    """Render Python wrapper classes for f2py namelist *specs*."""
     if py_style not in {"numpy", "doxygen"}:
         raise ValueError("python documentation style must be 'numpy' or 'doxygen'")
-    output_path = Path(output)
     spec_entries = list(specs)
     extension_modules: set[str] = set()
     for _, extension_module in spec_entries:
@@ -172,11 +207,9 @@ def generate_python_wrappers(
                 all_args=spec.all_args,
             )
         )
-    rendered = _TEMPLATE_ENV.get_template("python_wrappers.py.j2").render(
+    return _TEMPLATE_ENV.get_template("python_wrappers.py.j2").render(
         {"imports": sorted(extension_modules), "classes": classes, "py_style": py_style}
     )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(rendered, encoding="ascii")
 
 
 def generate_f2cmap(
@@ -185,6 +218,17 @@ def generate_f2cmap(
     c_types: F2pyCTypeMap,
 ) -> None:
     """Generate a .f2py_f2cmap file for the explicitly mapped *usage*."""
+    rendered = render_f2cmap(usage, c_types)
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(rendered, encoding="ascii")
+
+
+def render_f2cmap(
+    usage: F2pyKindUsage,
+    c_types: F2pyCTypeMap,
+) -> str:
+    """Render a .f2py_f2cmap file for the explicitly mapped *usage*."""
     missing_real = sorted(usage.real - set(c_types.real))
     missing_integer = sorted(usage.integer - set(c_types.integer))
     if missing_real:
@@ -202,10 +246,7 @@ def generate_f2cmap(
     integer_items = ", ".join(
         f"{name}={integer_map[name]!r}" for name in sorted(usage.integer | {"c_intptr_t"})
     )
-    rendered = f"dict(real=dict({real_items}), integer=dict({integer_items}))\n"
-    output_path = Path(output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(rendered, encoding="ascii")
+    return f"dict(real=dict({real_items}), integer=dict({integer_items}))\n"
 
 
 def collect_f2py_kind_usage(
