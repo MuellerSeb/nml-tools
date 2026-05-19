@@ -223,12 +223,30 @@ contains
     allocate(this%mcmc_error_params(3, 2, this%constant_max_iter))
 
     ! sentinel values for required/optional parameters
-    this%name(1:1) = achar(0) ! sentinel for optional string
-    this%method(1:1) = achar(0) ! NULL string as sentinel for required string
     block
-      integer :: nml_i1
+      integer :: nml_len
+      nml_len = len(this%name)
+      if (nml_len > 0) then
+        this%name(1:nml_len) = repeat(" ", nml_len)
+        this%name(1:1) = achar(0) ! sentinel for optional string
+      end if
+    end block
+    block
+      integer :: nml_len
+      nml_len = len(this%method)
+      if (nml_len > 0) then
+        this%method(1:nml_len) = repeat(" ", nml_len)
+        this%method(1:1) = achar(0) ! NULL string as sentinel for required string
+      end if
+    end block
+    block
+      integer :: nml_i1, nml_len
       do nml_i1 = lbound(this%try_methods, 1), ubound(this%try_methods, 1)
-        this%try_methods(nml_i1)(1:1) = achar(0) ! sentinel for optional string array
+        nml_len = len(this%try_methods(nml_i1))
+        if (nml_len > 0) then
+          this%try_methods(nml_i1)(1:nml_len) = repeat(" ", nml_len)
+          this%try_methods(nml_i1)(1:1) = achar(0) ! sentinel for optional string array
+        end if
       end do
     end block
     this%complex_sizes = -huge(this%complex_sizes) ! sentinel for optional integer array

@@ -1791,9 +1791,13 @@ def _render_sentinel_assignment(
     target_ref: str,
     value_expr: str,
     comment: str,
-    ) -> str:
+) -> str:
     if type_info.category == "string":
-        return f"{target_ref}(1:1) = {value_expr}{comment}"
+        return _render_string_sentinel_assignment(
+            target_ref=target_ref,
+            value_expr=value_expr,
+            comment=comment,
+        )
     if type_info.category == "array" and type_info.element_category == "string":
         return _render_string_array_sentinel_assignment(
             target_ref=target_ref,
@@ -1802,6 +1806,26 @@ def _render_sentinel_assignment(
             comment=comment,
         )
     return f"{target_ref} = {value_expr}{comment}"
+
+
+def _render_string_sentinel_assignment(
+    *,
+    target_ref: str,
+    value_expr: str,
+    comment: str,
+) -> str:
+    return "\n".join(
+        [
+            "block",
+            "  integer :: nml_len",
+            f"  nml_len = len({target_ref})",
+            "  if (nml_len > 0) then",
+            f"    {target_ref}(1:nml_len) = repeat(\" \", nml_len)",
+            f"    {target_ref}(1:1) = {value_expr}{comment}",
+            "  end if",
+            "end block",
+        ]
+    )
 
 
 def _render_string_array_sentinel_assignment(
@@ -1813,14 +1837,19 @@ def _render_string_array_sentinel_assignment(
 ) -> str:
     lines = ["block"]
     index_vars = [f"nml_i{dim}" for dim in range(1, rank + 1)]
-    lines.append(f"  integer :: {', '.join(index_vars)}")
+    lines.append(f"  integer :: {', '.join([*index_vars, 'nml_len'])}")
     for dim, index_var in enumerate(index_vars, start=1):
         lines.append(
             f"  do {index_var} = lbound({target_ref}, {dim}), ubound({target_ref}, {dim})"
         )
     indent = "  " * (rank + 1)
     indices = ", ".join(index_vars)
-    lines.append(f"{indent}{target_ref}({indices})(1:1) = {value_expr}{comment}")
+    element_ref = f"{target_ref}({indices})"
+    lines.append(f"{indent}nml_len = len({element_ref})")
+    lines.append(f"{indent}if (nml_len > 0) then")
+    lines.append(f"{indent}  {element_ref}(1:nml_len) = repeat(\" \", nml_len)")
+    lines.append(f"{indent}  {element_ref}(1:1) = {value_expr}{comment}")
+    lines.append(f"{indent}end if")
     for _ in range(rank):
         lines.append("  end do")
     lines.append("end block")
