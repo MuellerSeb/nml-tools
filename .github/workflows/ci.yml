@@ -35,10 +35,13 @@ jobs:
         include:
           - compiler: gfortran
             experimental: false
+            debug-flags: -g -O0 -fbacktrace -fcheck=all
           - compiler: ifx
             experimental: false
+            debug-flags: -g -O0 -traceback -check all
           - compiler: flang-new
             experimental: false
+            debug-flags: -g -O0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -52,11 +55,15 @@ jobs:
           extra-packages: pip
       - name: Install Python build tools
         run: python -m pip install -U pip build pytest
+      - name: Check generated 01_simple files
+        run: python -m pip install -e . && nml-tools check --config examples/01_simple/nml-config.toml --diff
+      - name: Check generated 02_pybind files
+        run: nml-tools check --config examples/02_pybind/pyproject.toml --diff
       - name: Build 01_simple
         run: >
           cmake -S examples/01_simple -B build/01_simple -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
-          -DCMAKE_Fortran_FLAGS_DEBUG="-g -O0 -fbacktrace -fcheck=all"
+          -DCMAKE_Fortran_FLAGS_DEBUG="${{ matrix.debug-flags }}"
       - name: Compile 01_simple
         run: cmake --build build/01_simple --parallel
       - name: Run 01_simple
