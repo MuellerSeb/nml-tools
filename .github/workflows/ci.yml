@@ -53,10 +53,15 @@ jobs:
       - name: Install Python build tools
         run: python -m pip install -U pip build pytest
       - name: Build 01_simple
-        run: cmake -S examples/01_simple -B build/01_simple -G Ninja
+        run: >
+          cmake -S examples/01_simple -B build/01_simple -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_Fortran_FLAGS_DEBUG="-g -O0 -fbacktrace -fcheck=all"
       - name: Compile 01_simple
         run: cmake --build build/01_simple --parallel
       - name: Run 01_simple
+        env:
+          GFORTRAN_ERROR_BACKTRACE: "1"
         run: ./build/01_simple/nml_optimization_example examples/01_simple/out/optimization.nml
       - name: Build 02_pybind package
         run: python -m pip install -e "examples/02_pybind[test]"
