@@ -82,7 +82,7 @@ contains
     allocate(this%mcmc_error_params(3, 2, this%constant_max_iter))
 
     ! sentinel values for required/optional parameters
-    this%name = repeat(achar(0), len(this%name)) ! sentinel for optional string
+    this%name(1:1) = achar(0) ! sentinel for optional string
     this%niterations = -huge(this%niterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
     ! default values
@@ -321,7 +321,7 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'name'"
         return
       end if
-      if (this%name == repeat(achar(0), len(this%name))) status = NML_ERR_NOT_SET
+      if (this%name(1:1) == achar(0)) status = NML_ERR_NOT_SET
     case ("niterations")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX

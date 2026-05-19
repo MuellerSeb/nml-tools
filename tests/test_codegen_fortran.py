@@ -693,6 +693,39 @@ def test_generate_fortran_runtime_sized_string_array_preserves_length(
     assert "this%names(lb_1:ub_1)(1:nml_len) = names(:)(1:nml_len)" in generated
 
 
+def test_generate_fortran_multidimensional_string_array_sentinels(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Two dimensional string array",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "names": {
+                "type": "array",
+                "items": {"type": "string", "x-fortran-len": "name_len"},
+                "x-fortran-shape": ["nrow", "ncol"],
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"name_len": 16, "nrow": 2, "ncol": 3},
+    )
+
+    generated = output.read_text()
+    assert "integer :: nml_i1, nml_i2" in generated
+    assert "do nml_i1 = lbound(this%names, 1), ubound(this%names, 1)" in generated
+    assert "do nml_i2 = lbound(this%names, 2), ubound(this%names, 2)" in generated
+    assert "this%names(nml_i1, nml_i2)(1:1) = achar(0)" in generated
+    assert "this%names(:, :)(1:1) == achar(0)" in generated
+
+
 def test_generate_fortran_array_default_pad_order(tmp_path: Path) -> None:
     schema = {
         "title": "Array default pad",

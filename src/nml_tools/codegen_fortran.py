@@ -507,9 +507,11 @@ def _build_context(
                     type_info,
                     var_ref=f"this%{name}",
                 )
-                sentinel_assignment = (
-                    f"this%{name} = {value_expr}"
-                    f"{_sentinel_comment(type_info, required=is_required)}"
+                sentinel_assignment = _render_sentinel_assignment(
+                    type_info,
+                    target_ref=f"this%{name}",
+                    value_expr=value_expr,
+                    comment=_sentinel_comment(type_info, required=is_required),
                 )
                 sentinel_condition = condition_expr
                 sentinel_assignments.append(sentinel_assignment)
@@ -525,7 +527,14 @@ def _build_context(
                     set_sentinel_condition = set_condition_expr
                     if needs_sentinel:
                         sent_com = _sentinel_comment(type_info, required=False)
-                        set_optional_defaults.append(f"this%{name} = {set_value_expr}{sent_com}")
+                        set_optional_defaults.append(
+                            _render_sentinel_assignment(
+                                type_info,
+                                target_ref=f"this%{name}",
+                                value_expr=set_value_expr,
+                                comment=sent_com,
+                            )
+                        )
 
             if is_required and type_info.category != "array":
                 required_scalar_names.add(name)
@@ -536,7 +545,7 @@ def _build_context(
                     raise ValueError("array field missing element category")
                 all_missing, any_missing, uses_ieee = _array_missing_conditions(
                     element_category,
-                    var_ref=f"this%{name}",
+                    var_ref=_array_section_ref(f"this%{name}", len(type_info.dimensions)),
                     len_ref=f"this%{name}",
                 )
                 required_array_by_name[name] = {
@@ -1776,6 +1785,48 @@ def _sentinel_comment(type_info: FieldTypeInfo, *, required: bool) -> str:
     return ""
 
 
+def _render_sentinel_assignment(
+    type_info: FieldTypeInfo,
+    *,
+    target_ref: str,
+    value_expr: str,
+    comment: str,
+    ) -> str:
+    if type_info.category == "string":
+        return f"{target_ref}(1:1) = {value_expr}{comment}"
+    if type_info.category == "array" and type_info.element_category == "string":
+        return _render_string_array_sentinel_assignment(
+            target_ref=target_ref,
+            rank=len(type_info.dimensions),
+            value_expr=value_expr,
+            comment=comment,
+        )
+    return f"{target_ref} = {value_expr}{comment}"
+
+
+def _render_string_array_sentinel_assignment(
+    *,
+    target_ref: str,
+    rank: int,
+    value_expr: str,
+    comment: str,
+) -> str:
+    lines = ["block"]
+    index_vars = [f"nml_i{dim}" for dim in range(1, rank + 1)]
+    lines.append(f"  integer :: {', '.join(index_vars)}")
+    for dim, index_var in enumerate(index_vars, start=1):
+        lines.append(
+            f"  do {index_var} = lbound({target_ref}, {dim}), ubound({target_ref}, {dim})"
+        )
+    indent = "  " * (rank + 1)
+    indices = ", ".join(index_vars)
+    lines.append(f"{indent}{target_ref}({indices})(1:1) = {value_expr}{comment}")
+    for _ in range(rank):
+        lines.append("  end do")
+    lines.append("end block")
+    return "\n".join(lines)
+
+
 def _sentinel_expressions(
     type_info: FieldTypeInfo,
     *,
@@ -1786,9 +1837,11 @@ def _sentinel_expressions(
     if category == "array":
         element = type_info.element_category
         if element == "string":
-            length_ref = len_ref or var_ref
-            value_expr = f"repeat(achar(0), len({length_ref}))"
-            return value_expr, f"all({var_ref} == {value_expr})", False
+            first_char_ref = _string_array_first_char_ref(
+                var_ref,
+                rank=len(type_info.dimensions),
+            )
+            return "achar(0)", f"all({first_char_ref} == achar(0))", False
         if element == "integer":
             return f"-huge({var_ref})", f"all({var_ref} == -huge({var_ref}))", False
         if element == "real":
@@ -1801,9 +1854,7 @@ def _sentinel_expressions(
             raise ValueError("boolean arrays cannot use sentinels")
         raise ValueError(f"unsupported sentinel array element '{element}'")
     if category == "string":
-        length_ref = len_ref or var_ref
-        value_expr = f"repeat(achar(0), len({length_ref}))"
-        return value_expr, f"{var_ref} == {value_expr}", False
+        return "achar(0)", f"{var_ref}(1:1) == achar(0)", False
     if category == "integer":
         return f"-huge({var_ref})", f"{var_ref} == -huge({var_ref})", False
     if category == "real":
@@ -1824,13 +1875,24 @@ def _element_missing_expression(
     len_ref: str | None = None,
 ) -> tuple[str, bool]:
     if category == "string":
-        length_ref = len_ref or var_ref
-        return f"{var_ref} == repeat(achar(0), len({length_ref}))", False
+        return f"{_string_array_first_char_ref(var_ref)} == achar(0)", False
     if category == "integer":
         return f"{var_ref} == -huge({var_ref})", False
     if category == "real":
         return f"ieee_is_nan({var_ref})", True
     raise ValueError(f"unsupported missing category '{category}'")
+
+
+def _string_array_first_char_ref(var_ref: str, rank: int | None = None) -> str:
+    if _is_array_ref(var_ref):
+        return f"{var_ref}(1:1)"
+    if rank is not None:
+        return f"{_array_section_ref(var_ref, rank)}(1:1)"
+    return f"{var_ref}(:)(1:1)"
+
+
+def _is_array_ref(var_ref: str) -> bool:
+    return var_ref.endswith(")")
 
 
 def _array_missing_conditions(
