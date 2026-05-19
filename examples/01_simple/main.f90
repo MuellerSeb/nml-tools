@@ -41,13 +41,6 @@ program main
     stop status
   end if
 
-  allocate(try_methods(size(cfg%try_methods)))
-  allocate(complex_sizes(size(cfg%complex_sizes)))
-  allocate(mcmc_error_params( &
-    size(cfg%mcmc_error_params, 1), &
-    size(cfg%mcmc_error_params, 2), &
-    size(cfg%mcmc_error_params, 3)))
-
   status = cfg%filled_shape("mcmc_error_params", filled=shp, errmsg=errmsg)
   if (status /= NML_OK) then
     write(error_unit, '(a)') "failed to get filled shape: " // trim(errmsg)
@@ -55,6 +48,13 @@ program main
   else
     write(*,*) "filled shape of mcmc_error_params: ", shp
   end if
+
+  allocate(try_methods(size(cfg%try_methods)))
+  allocate(complex_sizes(size(cfg%complex_sizes)))
+  allocate(mcmc_error_params( &
+    shp(1), &
+    shp(2), &
+    shp(3)))
 
   name = cfg%name
   method = cfg%method
@@ -65,7 +65,7 @@ program main
   seed = cfg%seed
   dds_r = cfg%dds_r
   mcmc_opti = cfg%mcmc_opti
-  mcmc_error_params = cfg%mcmc_error_params
+  mcmc_error_params = cfg%mcmc_error_params(1:shp(1), 1:shp(2), 1:shp(3))
   include_parameters = cfg%include_parameters
   write(*, nml=optimization)
 end program main
