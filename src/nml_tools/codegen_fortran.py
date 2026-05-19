@@ -6,7 +6,7 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -544,20 +544,20 @@ def _build_context(
                 element_category = type_info.element_category
                 if element_category is None:
                     raise ValueError("array field missing element category")
-                flex_dims = list(range(rank - flex_dim + 1, rank + 1))
+                flex_dims: list[int] = list(range(rank - flex_dim + 1, rank + 1))
                 slice_missing_conditions: list[str] = []
                 slice_uses_ieee = False
                 bounds: list[dict[str, Any]] = []
                 lb_vars: dict[int, str] = {}
                 ub_vars: dict[int, str] = {}
-                for dim in flex_dims:
-                    lb_var, ub_var = _flex_bound_vars(dim)
-                    lb_vars[dim] = lb_var
-                    ub_vars[dim] = ub_var
-                    bounds.append({"dim": dim, "lb_var": lb_var, "ub_var": ub_var})
+                for flex_dim_index in flex_dims:
+                    lb_var, ub_var = _flex_bound_vars(flex_dim_index)
+                    lb_vars[flex_dim_index] = lb_var
+                    ub_vars[flex_dim_index] = ub_var
+                    bounds.append({"dim": flex_dim_index, "lb_var": lb_var, "ub_var": ub_var})
                     flex_bound_vars.add(lb_var)
                     flex_bound_vars.add(ub_var)
-                    slice_ref = _slice_ref(name, rank, dim, "idx")
+                    slice_ref = _slice_ref(name, rank, flex_dim_index, "idx")
                     slice_missing_expr, uses_ieee = _element_missing_expression(
                         element_category,
                         var_ref=slice_ref,
@@ -593,9 +593,9 @@ def _build_context(
             elif type_info.category == "array" and has_default:
                 rank = len(type_info.dimensions)
                 bounds = []
-                for dim in range(1, rank + 1):
-                    lb_var, ub_var = _flex_bound_vars(dim)
-                    bounds.append({"dim": dim, "lb_var": lb_var, "ub_var": ub_var})
+                for array_dim_index in range(1, rank + 1):
+                    lb_var, ub_var = _flex_bound_vars(array_dim_index)
+                    bounds.append({"dim": array_dim_index, "lb_var": lb_var, "ub_var": ub_var})
                     flex_bound_vars.add(lb_var)
                     flex_bound_vars.add(ub_var)
                 partial_bounds = bounds
@@ -1119,35 +1119,38 @@ def _build_context(
         for entry in runtime_constants
     ]
 
-    candidate_name_map = {
-        entry["name"]: entry["candidate_name"] for entry in set_constants_arguments
+    candidate_name_map: dict[str, str] = {
+        str(entry["name"]): str(entry["candidate_name"]) for entry in set_constants_arguments
     }
     set_constants_extent_checks: list[dict[str, str]] = []
     seen_extent_checks: set[tuple[str, str]] = set()
     for requirement in runtime_default_extent_requirements:
         factors: list[str] = []
-        for dim in requirement["dimensions"]:
-            if dim == ":":
+        dimensions = cast("list[str]", requirement["dimensions"])
+        for extent_dim in dimensions:
+            if extent_dim == ":":
                 continue
-            if _is_int_literal(dim):
-                factors.append(dim)
+            if _is_int_literal(extent_dim):
+                factors.append(extent_dim)
             else:
-                factors.append(candidate_name_map.get(dim, dim))
+                factors.append(candidate_name_map.get(extent_dim, extent_dim))
         if not factors:
             continue
         product_expr = " * ".join(factors)
         if len(factors) > 1:
             product_expr = f"({product_expr})"
-        condition = f"{product_expr} < {requirement['required_elements']}"
-        message = (
-            f"shape constants for '{requirement['field']}' must allow at least "
-            f"{requirement['required_elements']} default values"
+        required_elements = cast("int", requirement["required_elements"])
+        condition = f"{product_expr} < {required_elements}"
+        field_name = cast("str", requirement["field"])
+        extent_message = (
+            f"shape constants for '{field_name}' must allow at least "
+            f"{required_elements} default values"
         )
-        key = (condition, message)
-        if key in seen_extent_checks:
+        extent_key = (condition, extent_message)
+        if extent_key in seen_extent_checks:
             continue
-        seen_extent_checks.add(key)
-        set_constants_extent_checks.append({"condition": condition, "message": message})
+        seen_extent_checks.add(extent_key)
+        set_constants_extent_checks.append({"condition": condition, "message": extent_message})
 
     context = {
         "module_name": module_name,
