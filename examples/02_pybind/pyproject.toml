@@ -24,7 +24,6 @@ minimum-version = "3.26"
 build-type = "Release"
 
 [tool.nml-tools]
-minimum-version = "0.2.2.dev0"
 
 [tool.nml-tools.helper]
 path = "fortran/generated/nml_helper.f90"
