@@ -657,6 +657,42 @@ def test_generate_fortran_runtime_sized_array_with_default_uses_partial_set(tmp_
     assert "dimension 1 mismatch for 'values'" not in generated
 
 
+def test_generate_fortran_runtime_sized_string_array_preserves_length(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Dynamic string array",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "names": {
+                "type": "array",
+                "items": {"type": "string", "x-fortran-len": "name_len"},
+                "x-fortran-shape": "max_names",
+                "default": ["alpha", "beta"],
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"name_len": 16, "max_names": 2},
+    )
+
+    generated = output.read_text()
+    assert "this%names(:) = names_default" not in generated
+    assert 'this%names(:) = repeat(" ", len(this%names))' in generated
+    assert "nml_len = min(len(this%names), len(names_default))" in generated
+    assert "this%names(:)(1:nml_len) = names_default(:)(1:nml_len)" in generated
+    assert "this%names(lb_1:ub_1) = names" not in generated
+    assert "nml_len = min(len(this%names), len(names))" in generated
+    assert "this%names(lb_1:ub_1)(1:nml_len) = names(:)(1:nml_len)" in generated
+
+
 def test_generate_fortran_array_default_pad_order(tmp_path: Path) -> None:
     schema = {
         "title": "Array default pad",

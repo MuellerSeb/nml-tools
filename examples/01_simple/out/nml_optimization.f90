@@ -361,7 +361,12 @@ contains
     this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
     this%method = repeat(" ", len(this%method))
     this%method(1:min(len(this%method), len(method))) = method(1:min(len(this%method), len(method)))
-    this%try_methods = try_methods
+    block
+      integer :: nml_len
+      nml_len = min(len(this%try_methods), len(try_methods))
+      this%try_methods(:) = repeat(" ", len(this%try_methods))
+      this%try_methods(:)(1:nml_len) = try_methods(:)(1:nml_len)
+    end block
     this%complex_sizes = complex_sizes
     this%niterations = niterations
     this%tolerance = tolerance
@@ -451,7 +456,12 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 mismatch for 'try_methods'"
         return
       end if
-      this%try_methods = try_methods
+      block
+        integer :: nml_len
+        nml_len = min(len(this%try_methods), len(try_methods))
+        this%try_methods(:) = repeat(" ", len(this%try_methods))
+        this%try_methods(:)(1:nml_len) = try_methods(:)(1:nml_len)
+      end block
     end if
     if (present(complex_sizes)) this%complex_sizes = complex_sizes
     if (present(seed)) this%seed = seed

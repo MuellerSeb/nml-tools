@@ -10,6 +10,8 @@ from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from nml_tools._utils import strip_trailing_whitespace
+
 _TEMPLATE_ENV = Environment(
     loader=FileSystemLoader(Path(__file__).resolve().parent / "templates"),
     trim_blocks=True,
@@ -17,14 +19,6 @@ _TEMPLATE_ENV = Environment(
     keep_trailing_newline=True,
     undefined=StrictUndefined,
 )
-
-
-def _strip_trailing_whitespace(text: str) -> str:
-    """Strip trailing horizontal whitespace from each line while preserving final newline."""
-    cleaned = "\n".join(line.rstrip() for line in text.splitlines())
-    if text.endswith("\n"):
-        cleaned += "\n"
-    return cleaned
 
 
 @dataclass
@@ -70,6 +64,8 @@ class FieldSpec:
     argument_declaration: str
     type_category: str
     runtime_sized_string: bool = False
+    runtime_sized_string_array: bool = False
+    rank: int = 0
 
 
 @dataclass
@@ -145,7 +141,7 @@ def render_fortran(
     )
     context["file_name"] = file_name
     rendered = _TEMPLATE_ENV.get_template("fortran_module.f90.j2").render(context)
-    return _strip_trailing_whitespace(rendered)
+    return strip_trailing_whitespace(rendered)
 
 
 def generate_helper(
@@ -434,6 +430,11 @@ def _build_context(
             declaration_with_doc = f"{declaration} !< {title}"
 
             dynamic_array = type_info.category == "array" and is_runtime_sized
+            dynamic_string_array = (
+                type_info.category == "array"
+                and type_info.element_category == "string"
+                and dynamic_length
+            )
 
             is_required = name in required_set
             if type_info.category == "array":
@@ -682,14 +683,38 @@ def _build_context(
                         )
 
                     if default_from_items:
-                        default_assignment = f"this%{name} = {default_const_name}"
+                        if dynamic_string_array:
+                            target_ref = _array_section_ref(
+                                f"this%{name}",
+                                len(type_info.dimensions),
+                            )
+                            default_assignment = _render_runtime_string_array_copy_assignment(
+                                target_ref=target_ref,
+                                source_ref=default_const_name,
+                                len_ref=f"this%{name}",
+                                source_len_ref=default_const_name,
+                            )
+                        else:
+                            default_assignment = f"this%{name} = {default_const_name}"
                     elif (
                         len(type_info.dimensions) == 1
                         and array_default_spec is not None
                         and array_default_spec.order_values is None
                         and array_default_spec.pad_values is None
                     ):
-                        default_assignment = f"this%{name} = {default_const_name}"
+                        if dynamic_string_array:
+                            target_ref = _array_section_ref(
+                                f"this%{name}",
+                                len(type_info.dimensions),
+                            )
+                            default_assignment = _render_runtime_string_array_copy_assignment(
+                                target_ref=target_ref,
+                                source_ref=f"{default_const_name}(:)",
+                                len_ref=f"this%{name}",
+                                source_len_ref=default_const_name,
+                            )
+                        else:
+                            default_assignment = f"this%{name} = {default_const_name}"
                     else:
                         source_expr = default_const_name
                         shape_expr = ", ".join(runtime_dimensions)
@@ -714,7 +739,16 @@ def _build_context(
                                         else f"[{pad_const_name}]"
                                     )
                                 arguments.append(f"pad={pad_expr}")
-                        default_assignment = _format_reshape_assignment(name, arguments)
+                        if dynamic_string_array:
+                            default_assignment = _format_runtime_string_array_reshape_assignment(
+                                name,
+                                arguments,
+                                len(type_info.dimensions),
+                                default_const_name,
+                                runtime_dimensions,
+                            )
+                        else:
+                            default_assignment = _format_reshape_assignment(name, arguments)
                     set_default_assignment = default_assignment
                 else:
                     default_literal = _format_default(prop["default"], type_info, prop, constants)
@@ -942,6 +976,7 @@ def _build_context(
                             len(type_info.dimensions),
                             flex_dim,
                             flex_bounds or [],
+                            preserve_string_length=dynamic_string_array,
                         )
                     )
                 elif is_array and has_default:
@@ -952,11 +987,16 @@ def _build_context(
                             name,
                             len(type_info.dimensions),
                             partial_bounds or [],
+                            preserve_string_length=dynamic_string_array,
                         )
                     )
                 elif is_array and dynamic_array:
                     set_required_assignments.append(
-                        _render_exact_set_block(name, len(type_info.dimensions))
+                        _render_exact_set_block(
+                            name,
+                            len(type_info.dimensions),
+                            preserve_string_length=dynamic_string_array,
+                        )
                     )
                 elif type_info.category == "string" and dynamic_length:
                     set_required_assignments.append(
@@ -975,6 +1015,7 @@ def _build_context(
                         len(type_info.dimensions),
                         flex_dim,
                         flex_bounds or [],
+                        preserve_string_length=dynamic_string_array,
                     )
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
@@ -987,13 +1028,18 @@ def _build_context(
                         name,
                         len(type_info.dimensions),
                         partial_bounds or [],
+                        preserve_string_length=dynamic_string_array,
                     )
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
                         f"if (present({name})) then\n{indented_block}\nend if"
                     )
                 elif is_array and dynamic_array:
-                    block = _render_exact_set_block(name, len(type_info.dimensions))
+                    block = _render_exact_set_block(
+                        name,
+                        len(type_info.dimensions),
+                        preserve_string_length=dynamic_string_array,
+                    )
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
                         f"if (present({name})) then\n{indented_block}\nend if"
@@ -1076,6 +1122,8 @@ def _build_context(
                     argument_declaration=argument_decl,
                     type_category=type_info.category,
                     runtime_sized_string=type_info.category == "string" and dynamic_length,
+                    runtime_sized_string_array=dynamic_string_array,
+                    rank=len(type_info.dimensions),
                 )
             )
 
@@ -1181,6 +1229,13 @@ def _build_context(
                 source_ref=field.name,
             )
             if field.runtime_sized_string
+            else _render_runtime_string_array_copy_assignment(
+                target_ref=_array_section_ref(f"this%{field.name}", field.rank),
+                source_ref=_array_section_ref(field.name, field.rank),
+                len_ref=f"this%{field.name}",
+                source_len_ref=field.name,
+            )
+            if field.runtime_sized_string_array
             else f"this%{field.name} = {field.name}"
             for field in fields
         ],
@@ -1617,6 +1672,29 @@ def _render_runtime_string_copy_assignment(*, target_ref: str, source_ref: str) 
     )
 
 
+def _render_runtime_string_array_copy_assignment(
+    *,
+    target_ref: str,
+    source_ref: str,
+    len_ref: str,
+    source_len_ref: str,
+) -> str:
+    """Render an array assignment that preserves deferred-length allocation."""
+    return (
+        "block\n"
+        "  integer :: nml_len\n"
+        f"  nml_len = min(len({len_ref}), len({source_len_ref}))\n"
+        f"  {target_ref} = repeat(\" \", len({len_ref}))\n"
+        f"  {target_ref}(1:nml_len) = {source_ref}(1:nml_len)\n"
+        "end block"
+    )
+
+
+def _array_section_ref(base_ref: str, rank: int) -> str:
+    dims = ", ".join(":" for _ in range(rank))
+    return f"{base_ref}({dims})"
+
+
 def _render_argument_declaration(
     *,
     name: str,
@@ -1760,6 +1838,8 @@ def _render_flex_set_block(
     rank: int,
     flex_dim_count: int,
     bounds: list[dict[str, Any]],
+    *,
+    preserve_string_length: bool = False,
 ) -> str:
     flex_dims = list(range(rank - flex_dim_count + 1, rank + 1))
     lb_vars = {entry["dim"]: entry["lb_var"] for entry in bounds}
@@ -1786,11 +1866,27 @@ def _render_flex_set_block(
         lines.append("end if")
         lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
         lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
-    lines.append(f"{_slice_ref_bounds(name, rank, flex_dims, lb_vars, ub_vars)} = {name}")
+    target_ref = _slice_ref_bounds(name, rank, flex_dims, lb_vars, ub_vars)
+    if preserve_string_length:
+        lines.append(
+            _render_runtime_string_array_copy_assignment(
+                target_ref=target_ref,
+                source_ref=_array_section_ref(name, rank),
+                len_ref=f"this%{name}",
+                source_len_ref=name,
+            )
+        )
+    else:
+        lines.append(f"{target_ref} = {name}")
     return "\n".join(lines)
 
 
-def _render_exact_set_block(name: str, rank: int) -> str:
+def _render_exact_set_block(
+    name: str,
+    rank: int,
+    *,
+    preserve_string_length: bool = False,
+) -> str:
     lines: list[str] = []
     for dim in range(1, rank + 1):
         lines.append(f"if (size({name}, {dim}) /= size(this%{name}, {dim})) then")
@@ -1800,11 +1896,27 @@ def _render_exact_set_block(name: str, rank: int) -> str:
         )
         lines.append("  return")
         lines.append("end if")
-    lines.append(f"this%{name} = {name}")
+    if preserve_string_length:
+        lines.append(
+            _render_runtime_string_array_copy_assignment(
+                target_ref=_array_section_ref(f"this%{name}", rank),
+                source_ref=_array_section_ref(name, rank),
+                len_ref=f"this%{name}",
+                source_len_ref=name,
+            )
+        )
+    else:
+        lines.append(f"this%{name} = {name}")
     return "\n".join(lines)
 
 
-def _render_partial_set_block(name: str, rank: int, bounds: list[dict[str, Any]]) -> str:
+def _render_partial_set_block(
+    name: str,
+    rank: int,
+    bounds: list[dict[str, Any]],
+    *,
+    preserve_string_length: bool = False,
+) -> str:
     lb_vars = {entry["dim"]: entry["lb_var"] for entry in bounds}
     ub_vars = {entry["dim"]: entry["ub_var"] for entry in bounds}
     dims_all = [entry["dim"] for entry in bounds]
@@ -1822,7 +1934,18 @@ def _render_partial_set_block(name: str, rank: int, bounds: list[dict[str, Any]]
         lines.append("end if")
         lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
         lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
-    lines.append(f"{_slice_ref_bounds(name, rank, dims_all, lb_vars, ub_vars)} = {name}")
+    target_ref = _slice_ref_bounds(name, rank, dims_all, lb_vars, ub_vars)
+    if preserve_string_length:
+        lines.append(
+            _render_runtime_string_array_copy_assignment(
+                target_ref=target_ref,
+                source_ref=_array_section_ref(name, rank),
+                len_ref=f"this%{name}",
+                source_len_ref=name,
+            )
+        )
+    else:
+        lines.append(f"{target_ref} = {name}")
     return "\n".join(lines)
 
 
@@ -1842,6 +1965,32 @@ def _format_reshape_assignment(name: str, arguments: list[str]) -> str:
     for index, arg in enumerate(arguments):
         suffix = ", &" if index < len(arguments) - 1 else ")"
         lines.append(f"  {arg}{suffix}")
+    return "\n".join(lines)
+
+
+def _format_runtime_string_array_reshape_assignment(
+    name: str,
+    arguments: list[str],
+    rank: int,
+    default_const_name: str,
+    runtime_dimensions: list[str],
+) -> str:
+    temp_name = f"nml_{name}_default_values"
+    lines = ["block"]
+    dims = ", ".join(runtime_dimensions)
+    lines.append(f"  character(len=len({default_const_name})), dimension({dims}) :: {temp_name}")
+    lines.append(f"  {temp_name} = reshape( &")
+    for index, arg in enumerate(arguments):
+        suffix = ", &" if index < len(arguments) - 1 else ")"
+        lines.append(f"    {arg}{suffix}")
+    copy_lines = _render_runtime_string_array_copy_assignment(
+        target_ref=_array_section_ref(f"this%{name}", rank),
+        source_ref=_array_section_ref(temp_name, rank),
+        len_ref=f"this%{name}",
+        source_len_ref=temp_name,
+    ).splitlines()
+    lines.extend(f"  {line}" for line in copy_lines)
+    lines.append("end block")
     return "\n".join(lines)
 
 
