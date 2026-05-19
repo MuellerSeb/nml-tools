@@ -23,8 +23,8 @@ module nml_optimization
     NML_ERR_INVALID_INDEX, &
     idx_check, &
     to_lower, &
-    buf, &
-    max_iter, &
+    buf_default=>buf, &
+    max_iter_default=>max_iter, &
     NML_ERR_PARTLY_SET
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
@@ -41,10 +41,10 @@ module nml_optimization
   logical, parameter, public :: include_parameters_default = .true.
 
   ! enum values
-  character(len=buf), parameter, public :: &
-    method_enum_values(3) = [character(len=buf) :: "DDS", "MCMC", "SCE"]
-  character(len=buf), parameter, public :: &
-    try_methods_enum_values(3) = [character(len=buf) :: "DDS", "MCMC", "SCE"]
+  character(len=buf_default), parameter, public :: &
+    method_enum_values(3) = [character(len=buf_default) :: "DDS", "MCMC", "SCE"]
+  character(len=buf_default), parameter, public :: &
+    try_methods_enum_values(3) = [character(len=buf_default) :: "DDS", "MCMC", "SCE"]
   integer(i4), parameter, public :: complex_sizes_enum_values(5) = [5_i4, 10_i4, 15_i4, 20_i4, 30_i4]
 
   ! bounds values
@@ -58,19 +58,22 @@ module nml_optimization
   !> \details All relevant configurations for the optimization parameters.
   type, public :: nml_optimization_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    character(len=buf) :: name !< Optimization name
-    character(len=buf) :: method !< Optimization method
-    character(len=buf), dimension(3) :: try_methods !< Try alternative methods
+    integer :: constant_buf = buf_default !< runtime override for buf
+    integer :: constant_max_iter = max_iter_default !< runtime override for max_iter
+    character(len=:), allocatable :: name !< Optimization name
+    character(len=:), allocatable :: method !< Optimization method
+    character(len=:), allocatable, dimension(:) :: try_methods !< Try alternative methods
     integer(i4), dimension(3) :: complex_sizes !< Complex sizes for SCE
     integer(i4) :: niterations !< Number of iterations
     real(dp) :: tolerance !< Convergence tolerance
     integer(i4) :: seed !< Random seed
     real(dp) :: dds_r !< DDS perturbation rate
     logical :: mcmc_opti !< MCMC optimization
-    real(dp), dimension(3, 2, max_iter) :: mcmc_error_params !< MCMC error parameters per iteration
+    real(dp), allocatable, dimension(:, :, :) :: mcmc_error_params !< MCMC error parameters per iteration
     logical, dimension(3) :: include_parameters !< Include parameters
   contains
     procedure :: init => nml_optimization_init
+    procedure :: set_constants => nml_optimization_set_constants
     procedure :: from_file => nml_optimization_from_file
     procedure :: set => nml_optimization_set
     procedure :: is_set => nml_optimization_is_set
@@ -209,6 +212,16 @@ contains
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
 
+    ! allocate runtime-sized fields
+    if (allocated(this%name)) deallocate(this%name)
+    allocate(character(len=this%constant_buf) :: this%name)
+    if (allocated(this%method)) deallocate(this%method)
+    allocate(character(len=this%constant_buf) :: this%method)
+    if (allocated(this%try_methods)) deallocate(this%try_methods)
+    allocate(character(len=this%constant_buf) :: this%try_methods(3))
+    if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
+    allocate(this%mcmc_error_params(3, 2, this%constant_max_iter))
+
     ! sentinel values for required/optional parameters
     this%name = repeat(achar(0), len(this%name)) ! sentinel for optional string
     this%method = repeat(achar(0), len(this%method)) ! NULL string as sentinel for required string
@@ -224,22 +237,68 @@ contains
     this%include_parameters = include_parameters_default
   end function nml_optimization_init
 
+  !> \brief Reset runtime constants for optimization
+  integer function nml_optimization_set_constants(this, &
+    buf, &
+    max_iter, &
+    errmsg) result(status)
+    class(nml_optimization_t), intent(inout) :: this !< namelist instance
+    integer, intent(in), optional :: buf !< runtime override for buf
+    integer, intent(in), optional :: max_iter !< runtime override for max_iter
+    integer :: candidate_buf
+    integer :: candidate_max_iter
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (present(buf)) then
+      candidate_buf = buf
+    else
+      candidate_buf = buf_default
+    end if
+    if (candidate_buf <= 0) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "constant 'buf' must be positive"
+      return
+    end if
+    if (candidate_buf < 4) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "constant 'buf' must be >= 4"
+      return
+    end if
+    if (present(max_iter)) then
+      candidate_max_iter = max_iter
+    else
+      candidate_max_iter = max_iter_default
+    end if
+    if (candidate_max_iter <= 0) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "constant 'max_iter' must be positive"
+      return
+    end if
+    this%constant_buf = candidate_buf
+    this%constant_max_iter = candidate_max_iter
+
+    status = this%init(errmsg=errmsg)
+  end function nml_optimization_set_constants
+
+
   !> \brief Read optimization namelist from file
   integer function nml_optimization_from_file(this, file, errmsg) result(status)
     class(nml_optimization_t), intent(inout) :: this !< namelist instance
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=buf) :: name
-    character(len=buf) :: method
-    character(len=buf), dimension(3) :: try_methods
+    character(len=:), allocatable :: name
+    character(len=:), allocatable :: method
+    character(len=:), allocatable, dimension(:) :: try_methods
     integer(i4), dimension(3) :: complex_sizes
     integer(i4) :: niterations
     real(dp) :: tolerance
     integer(i4) :: seed
     real(dp) :: dds_r
     logical :: mcmc_opti
-    real(dp), dimension(3, 2, max_iter) :: mcmc_error_params
+    real(dp), allocatable, dimension(:, :, :) :: mcmc_error_params
     logical, dimension(3) :: include_parameters
     ! locals
     type(nml_file_t) :: nml
@@ -298,8 +357,10 @@ contains
     end if
 
     ! assign values
-    this%name = name
-    this%method = method
+    this%name = repeat(" ", len(this%name))
+    this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
+    this%method = repeat(" ", len(this%method))
+    this%method(1:min(len(this%method), len(method))) = method(1:min(len(this%method), len(method)))
     this%try_methods = try_methods
     this%complex_sizes = complex_sizes
     this%niterations = niterations
@@ -337,7 +398,7 @@ contains
     real(dp), intent(in) :: tolerance !< Convergence tolerance
     real(dp), dimension(:, :, :), intent(in) :: mcmc_error_params !< MCMC error parameters per iteration
     character(len=*), intent(in), optional :: name !< Optimization name
-    character(len=*), dimension(3), intent(in), optional :: try_methods !< Try alternative methods
+    character(len=*), dimension(:), intent(in), optional :: try_methods !< Try alternative methods
     integer(i4), dimension(3), intent(in), optional :: complex_sizes !< Complex sizes for SCE
     integer(i4), intent(in), optional :: seed !< Random seed
     real(dp), intent(in), optional :: dds_r !< DDS perturbation rate
@@ -355,7 +416,8 @@ contains
     if (status /= NML_OK) return
 
     ! required parameters
-    this%method = method
+    this%method = repeat(" ", len(this%method))
+    this%method(1:min(len(this%method), len(method))) = method(1:min(len(this%method), len(method)))
     this%niterations = niterations
     this%tolerance = tolerance
     if (size(mcmc_error_params, 1) /= size(this%mcmc_error_params, 1)) then
@@ -379,8 +441,18 @@ contains
     ub_3 = lb_3 + size(mcmc_error_params, 3) - 1
     this%mcmc_error_params(:, lb_2:ub_2, lb_3:ub_3) = mcmc_error_params
     ! override with provided values
-    if (present(name)) this%name = name
-    if (present(try_methods)) this%try_methods = try_methods
+    if (present(name)) then
+      this%name = repeat(" ", len(this%name))
+      this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
+    end if
+    if (present(try_methods)) then
+      if (size(try_methods, 1) /= size(this%try_methods, 1)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 1 mismatch for 'try_methods'"
+        return
+      end if
+      this%try_methods = try_methods
+    end if
     if (present(complex_sizes)) this%complex_sizes = complex_sizes
     if (present(seed)) this%seed = seed
     if (present(dds_r)) this%dds_r = dds_r

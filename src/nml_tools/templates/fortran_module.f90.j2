@@ -49,11 +49,19 @@ module {{ module_name }}
   !> \details {{ details_text | replace('\n', '\n  !! ') }}
   type, public :: {{ type_name }}
     logical :: is_configured = .false. !< whether the namelist has been configured
+{% if runtime_constants %}
+{% for entry in runtime_constants %}
+    integer :: {{ entry.local_name }} = {{ entry.default_name }} !< runtime override for {{ entry.name }}
+{% endfor %}
+{% endif %}
 {% for field in fields %}
 {{ field.declaration | indent(4, True) }}
 {% endfor %}
   contains
     procedure :: init => {{ type_prefix }}_init
+{% if runtime_constants %}
+    procedure :: set_constants => {{ type_prefix }}_set_constants
+{% endif %}
     procedure :: from_file => {{ type_prefix }}_from_file
     procedure :: set => {{ type_prefix }}_set
     procedure :: is_set => {{ type_prefix }}_is_set
@@ -147,6 +155,13 @@ contains
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
 
+{% if runtime_allocations %}
+    ! allocate runtime-sized fields
+{% for stmt in runtime_allocations %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+
 {% if sentinel_assignments %}
     ! sentinel values for required/optional parameters
 {% for stmt in sentinel_assignments %}
@@ -160,6 +175,61 @@ contains
 {% endfor %}
 {% endif %}
   end function {{ type_prefix }}_init
+
+{% if runtime_constants %}
+  !> \brief Reset runtime constants for {{ namelist_name }}
+{% if set_constants_arguments %}
+  integer function {{ type_prefix }}_set_constants(this, &
+    {{ set_constants_arguments | map(attribute='arg_name') | join(', &\n    ') }}, &
+    errmsg) result(status)
+{% else %}
+  integer function {{ type_prefix }}_set_constants(this, errmsg) result(status)
+{% endif %}
+    class({{ type_name }}), intent(inout) :: this !< namelist instance
+{% for entry in set_constants_arguments %}
+    integer, intent(in), optional :: {{ entry.arg_name }} !< runtime override for {{ entry.name }}
+{% endfor %}
+{% for entry in set_constants_arguments %}
+    integer :: {{ entry.candidate_name }}
+{% endfor %}
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+{% for entry in set_constants_arguments %}
+    if (present({{ entry.arg_name }})) then
+      {{ entry.candidate_name }} = {{ entry.arg_name }}
+    else
+      {{ entry.candidate_name }} = {{ entry.default_name }}
+    end if
+    if ({{ entry.candidate_name }} <= 0) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "constant '{{ entry.name }}' must be positive"
+      return
+    end if
+{% if entry.min_required > 1 %}
+    if ({{ entry.candidate_name }} < {{ entry.min_required }}) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "constant '{{ entry.name }}' must be >= {{ entry.min_required }}"
+      return
+    end if
+{% endif %}
+{% endfor %}
+{% for check in set_constants_extent_checks %}
+    if ({{ check.condition }}) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "{{ check.message }}"
+      return
+    end if
+{% endfor %}
+{% for entry in set_constants_arguments %}
+    this%{{ entry.local_name }} = {{ entry.candidate_name }}
+{% endfor %}
+
+    status = this%init(errmsg=errmsg)
+  end function {{ type_prefix }}_set_constants
+
+{% endif %}
 
   !> \brief Read {{ namelist_name }} namelist from file
   integer function {{ type_prefix }}_from_file(this, file, errmsg) result(status)

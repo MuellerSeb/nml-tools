@@ -186,8 +186,12 @@ def test_generate_fortran_accepts_dimension_constants(tmp_path: Path) -> None:
     )
 
     generated = output.read_text()
-    assert "dimension(max_layers)" in generated
+    assert "integer :: constant_max_layers = max_layers_default" in generated
+    assert "integer(i4), allocatable, dimension(:) :: values" in generated
+    assert "procedure :: set_constants => nml_test_nml_set_constants" in generated
+    assert "allocate(this%values(this%constant_max_layers))" in generated
     assert "use nml_helper, only:" in generated
+    assert "max_layers_default=>max_layers" in generated
     assert "max_layers" in generated
     assert "integer(i4), parameter, public :: values_default = 1_i4" in generated
     assert "this%values = values_default" in generated
@@ -490,9 +494,167 @@ def test_generate_fortran_accepts_string_length_constants(tmp_path: Path) -> Non
     )
 
     generated = output.read_text()
-    assert "character(len=name_len) :: name" in generated
+    assert "integer :: constant_name_len = name_len_default" in generated
+    assert "character(len=:), allocatable :: name" in generated
+    assert "procedure :: set_constants => nml_test_nml_set_constants" in generated
+    assert "allocate(character(len=this%constant_name_len) :: this%name)" in generated
     assert "use nml_helper, only:" in generated
+    assert "name_len_default=>name_len" in generated
     assert "name_len" in generated
+
+
+def test_generate_fortran_set_constants_uses_non_shadowing_args(tmp_path: Path) -> None:
+    schema = {
+        "title": "String length constants",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "x-fortran-len": "name_len",
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"name_len": 32},
+    )
+
+    generated = output.read_text()
+    assert "integer, intent(in), optional :: name_len" in generated
+    assert "integer :: candidate_name_len" in generated
+    assert "if (present(name_len)) then" in generated
+    assert "candidate_name_len = name_len" in generated
+    assert "candidate_name_len = name_len_default" in generated
+    assert "this%constant_name_len = candidate_name_len" in generated
+
+
+def test_generate_fortran_set_constants_checks_string_length_minimum(tmp_path: Path) -> None:
+    schema = {
+        "title": "String length constants",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "x-fortran-len": "name_len",
+                "default": "alpha",
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"name_len": 32},
+    )
+
+    generated = output.read_text()
+    assert "if (candidate_name_len < 5) then" in generated
+    assert "constant 'name_len' must be >= 5" in generated
+
+
+def test_generate_fortran_set_constants_checks_pybind_length_minimum(tmp_path: Path) -> None:
+    schema = {
+        "title": "Pybind-style length constant",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "x-fortran-len": "str_len",
+                "default": "pybind-example",
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"str_len": 128},
+    )
+
+    generated = output.read_text()
+    assert "if (candidate_str_len < 14) then" in generated
+    assert "constant 'str_len' must be >= 14" in generated
+
+
+def test_generate_fortran_set_constants_validates_before_assignment(tmp_path: Path) -> None:
+    schema = {
+        "title": "Transactional constants",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "x-fortran-len": "name_len",
+                "default": "alpha",
+            },
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": "max_layers",
+                "default": [1, 2, 3, 4],
+            },
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"name_len": 32, "max_layers": 4},
+    )
+
+    generated = output.read_text()
+    assert "if (candidate_max_layers < 4) then" in generated
+    assert "shape constants for 'values' must allow at least 4 default values" in generated
+    validate_idx = generated.index("if (candidate_max_layers <= 0) then")
+    assign_idx = generated.index("this%constant_name_len = candidate_name_len")
+    assert assign_idx > validate_idx
+
+
+def test_generate_fortran_runtime_sized_array_with_default_uses_partial_set(tmp_path: Path) -> None:
+    schema = {
+        "title": "Dynamic array partial set",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": "max_layers",
+                "default": [1, 2, 3, 4],
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"max_layers": 4},
+    )
+
+    generated = output.read_text()
+    assert "if (size(values, 1) > size(this%values, 1)) then" in generated
+    assert "this%values(lb_1:ub_1) = values" in generated
+    assert "dimension 1 mismatch for 'values'" not in generated
 
 
 def test_generate_fortran_array_default_pad_order(tmp_path: Path) -> None:
