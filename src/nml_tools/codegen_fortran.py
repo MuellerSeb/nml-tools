@@ -276,6 +276,7 @@ def _build_context(
     runtime_constant_minimums: dict[str, int] = {}
     runtime_default_extent_requirements: list[dict[str, Any]] = []
     runtime_allocations: list[str] = []
+    runtime_local_allocations: list[str] = []
     kind_ids: list[str] = []
     requires_ieee = False
     uses_partly_set = False
@@ -408,6 +409,15 @@ def _build_context(
                     runtime_length_expr=runtime_length_expr,
                 )
                 runtime_allocations.extend(
+                    _render_runtime_allocations(
+                        type_info,
+                        name,
+                        runtime_dimensions=runtime_dimensions,
+                        runtime_length_expr=runtime_length_expr,
+                        target_prefix="this%",
+                    )
+                )
+                runtime_local_allocations.extend(
                     _render_runtime_allocations(
                         type_info,
                         name,
@@ -1213,6 +1223,7 @@ def _build_context(
         "fields": fields,
         "runtime_constants": runtime_constants,
         "runtime_allocations": runtime_allocations,
+        "runtime_local_allocations": runtime_local_allocations,
         "namelist_vars": namelist_vars,
         "sentinel_assignments": sentinel_assignments,
         "default_assignments": default_assignments,
@@ -1617,19 +1628,15 @@ def _render_runtime_local_declaration(
     runtime_length_expr: str | None,
 ) -> str:
     if type_info.category == "string":
-        if runtime_length_expr is None:
-            raise ValueError("runtime string local declaration requires length expression")
-        return f"character(len={runtime_length_expr}) :: {name}"
+        return f"character(len=:), allocatable :: {name}"
     if type_info.category != "array":
         raise ValueError("runtime local declaration is only supported for strings or arrays")
 
     type_spec = type_info.type_spec
     if type_info.element_category == "string":
-        if runtime_length_expr is None:
-            raise ValueError("runtime string array local declaration requires length expression")
-        type_spec = f"character(len={runtime_length_expr})"
-    dims = ", ".join(runtime_dimensions)
-    return f"{type_spec}, dimension({dims}) :: {name}"
+        type_spec = "character(len=:)"
+    dims = ", ".join(":" for _ in runtime_dimensions)
+    return f"{type_spec}, allocatable, dimension({dims}) :: {name}"
 
 
 def _render_runtime_allocations(
@@ -1638,13 +1645,15 @@ def _render_runtime_allocations(
     *,
     runtime_dimensions: list[str],
     runtime_length_expr: str | None,
+    target_prefix: str = "",
 ) -> list[str]:
     lines: list[str] = []
+    target_ref = f"{target_prefix}{name}"
     if type_info.category == "string":
         if runtime_length_expr is None:
             raise ValueError("runtime string allocation requires a length expression")
-        lines.append(f"if (allocated(this%{name})) deallocate(this%{name})")
-        lines.append(f"allocate(character(len={runtime_length_expr}) :: this%{name})")
+        lines.append(f"if (allocated({target_ref})) deallocate({target_ref})")
+        lines.append(f"allocate(character(len={runtime_length_expr}) :: {target_ref})")
         return lines
 
     if type_info.category != "array":
@@ -1652,23 +1661,26 @@ def _render_runtime_allocations(
     if any(dim == ":" for dim in runtime_dimensions):
         raise ValueError("runtime-sized arrays do not support deferred-size dimensions")
 
-    lines.append(f"if (allocated(this%{name})) deallocate(this%{name})")
+    lines.append(f"if (allocated({target_ref})) deallocate({target_ref})")
     dims_expr = ", ".join(runtime_dimensions)
     if type_info.element_category == "string" and runtime_length_expr is not None:
-        lines.append(
-            f"allocate(character(len={runtime_length_expr}) :: this%{name}({dims_expr}))"
-        )
+        lines.append(f"allocate(character(len={runtime_length_expr}) :: {target_ref}({dims_expr}))")
     else:
-        lines.append(f"allocate(this%{name}({dims_expr}))")
+        lines.append(f"allocate({target_ref}({dims_expr}))")
     return lines
 
 
 def _render_runtime_string_copy_assignment(*, target_ref: str, source_ref: str) -> str:
     """Render an assignment that preserves deferred-length allocation of target_ref."""
     return (
+        "block\n"
+        "  integer :: nml_len\n"
+        f"  nml_len = min(len({target_ref}), len({source_ref}))\n"
         f"{target_ref} = repeat(\" \", len({target_ref}))\n"
-        f"{target_ref}(1:min(len({target_ref}), len({source_ref}))) = "
-        f"{source_ref}(1:min(len({target_ref}), len({source_ref})))"
+        "  if (nml_len > 0) then\n"
+        f"    {target_ref}(1:nml_len) = {source_ref}(1:nml_len)\n"
+        "  end if\n"
+        "end block"
     )
 
 
@@ -1685,7 +1697,9 @@ def _render_runtime_string_array_copy_assignment(
         "  integer :: nml_len\n"
         f"  nml_len = min(len({len_ref}), len({source_len_ref}))\n"
         f"  {target_ref} = repeat(\" \", len({len_ref}))\n"
-        f"  {target_ref}(1:nml_len) = {source_ref}(1:nml_len)\n"
+        "  if (nml_len > 0) then\n"
+        f"    {target_ref}(1:nml_len) = {source_ref}(1:nml_len)\n"
+        "  end if\n"
         "end block"
     )
 

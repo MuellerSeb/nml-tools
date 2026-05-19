@@ -148,13 +148,13 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=this%constant_buf) :: name
+    character(len=:), allocatable :: name
     integer :: niterations
     real :: tolerance
     integer(i4) :: seed
     real(dp) :: dds_r
     logical :: mcmc_opti
-    real(dp), dimension(3, 2, this%constant_max_iter) :: mcmc_error_params
+    real(dp), allocatable, dimension(:, :, :) :: mcmc_error_params
     ! locals
     type(nml_file_t) :: nml
     integer :: iostat
@@ -172,6 +172,11 @@ contains
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
+    ! allocate local namelist variables matching runtime-sized fields
+    if (allocated(name)) deallocate(name)
+    allocate(character(len=this%constant_buf) :: name)
+    if (allocated(mcmc_error_params)) deallocate(mcmc_error_params)
+    allocate(mcmc_error_params(3, 2, this%constant_max_iter))
     name = this%name
     niterations = this%niterations
     tolerance = this%tolerance
@@ -204,8 +209,14 @@ contains
     end if
 
     ! assign values
+    block
+      integer :: nml_len
+      nml_len = min(len(this%name), len(name))
     this%name = repeat(" ", len(this%name))
-    this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
+      if (nml_len > 0) then
+        this%name(1:nml_len) = name(1:nml_len)
+      end if
+    end block
     this%niterations = niterations
     this%tolerance = tolerance
     this%seed = seed
@@ -254,8 +265,14 @@ contains
     this%tolerance = tolerance
     ! override with provided values
     if (present(name)) then
+      block
+        integer :: nml_len
+        nml_len = min(len(this%name), len(name))
       this%name = repeat(" ", len(this%name))
-      this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
+        if (nml_len > 0) then
+          this%name(1:nml_len) = name(1:nml_len)
+        end if
+      end block
     end if
     if (present(seed)) this%seed = seed
     if (present(dds_r)) this%dds_r = dds_r

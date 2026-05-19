@@ -289,16 +289,16 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=this%constant_buf) :: name
-    character(len=this%constant_buf) :: method
-    character(len=this%constant_buf), dimension(3) :: try_methods
+    character(len=:), allocatable :: name
+    character(len=:), allocatable :: method
+    character(len=:), allocatable, dimension(:) :: try_methods
     integer(i4), dimension(3) :: complex_sizes
     integer(i4) :: niterations
     real(dp) :: tolerance
     integer(i4) :: seed
     real(dp) :: dds_r
     logical :: mcmc_opti
-    real(dp), dimension(3, 2, this%constant_max_iter) :: mcmc_error_params
+    real(dp), allocatable, dimension(:, :, :) :: mcmc_error_params
     logical, dimension(3) :: include_parameters
     ! locals
     type(nml_file_t) :: nml
@@ -321,6 +321,15 @@ contains
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
+    ! allocate local namelist variables matching runtime-sized fields
+    if (allocated(name)) deallocate(name)
+    allocate(character(len=this%constant_buf) :: name)
+    if (allocated(method)) deallocate(method)
+    allocate(character(len=this%constant_buf) :: method)
+    if (allocated(try_methods)) deallocate(try_methods)
+    allocate(character(len=this%constant_buf) :: try_methods(3))
+    if (allocated(mcmc_error_params)) deallocate(mcmc_error_params)
+    allocate(mcmc_error_params(3, 2, this%constant_max_iter))
     name = this%name
     method = this%method
     try_methods = this%try_methods
@@ -357,15 +366,29 @@ contains
     end if
 
     ! assign values
+    block
+      integer :: nml_len
+      nml_len = min(len(this%name), len(name))
     this%name = repeat(" ", len(this%name))
-    this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
+      if (nml_len > 0) then
+        this%name(1:nml_len) = name(1:nml_len)
+      end if
+    end block
+    block
+      integer :: nml_len
+      nml_len = min(len(this%method), len(method))
     this%method = repeat(" ", len(this%method))
-    this%method(1:min(len(this%method), len(method))) = method(1:min(len(this%method), len(method)))
+      if (nml_len > 0) then
+        this%method(1:nml_len) = method(1:nml_len)
+      end if
+    end block
     block
       integer :: nml_len
       nml_len = min(len(this%try_methods), len(try_methods))
       this%try_methods(:) = repeat(" ", len(this%try_methods))
-      this%try_methods(:)(1:nml_len) = try_methods(:)(1:nml_len)
+      if (nml_len > 0) then
+        this%try_methods(:)(1:nml_len) = try_methods(:)(1:nml_len)
+      end if
     end block
     this%complex_sizes = complex_sizes
     this%niterations = niterations
@@ -421,8 +444,14 @@ contains
     if (status /= NML_OK) return
 
     ! required parameters
+    block
+      integer :: nml_len
+      nml_len = min(len(this%method), len(method))
     this%method = repeat(" ", len(this%method))
-    this%method(1:min(len(this%method), len(method))) = method(1:min(len(this%method), len(method)))
+      if (nml_len > 0) then
+        this%method(1:nml_len) = method(1:nml_len)
+      end if
+    end block
     this%niterations = niterations
     this%tolerance = tolerance
     if (size(mcmc_error_params, 1) /= size(this%mcmc_error_params, 1)) then
@@ -447,8 +476,14 @@ contains
     this%mcmc_error_params(:, lb_2:ub_2, lb_3:ub_3) = mcmc_error_params
     ! override with provided values
     if (present(name)) then
+      block
+        integer :: nml_len
+        nml_len = min(len(this%name), len(name))
       this%name = repeat(" ", len(this%name))
-      this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
+        if (nml_len > 0) then
+          this%name(1:nml_len) = name(1:nml_len)
+        end if
+      end block
     end if
     if (present(try_methods)) then
       if (size(try_methods, 1) /= size(this%try_methods, 1)) then
@@ -460,7 +495,9 @@ contains
         integer :: nml_len
         nml_len = min(len(this%try_methods), len(try_methods))
         this%try_methods(:) = repeat(" ", len(this%try_methods))
-        this%try_methods(:)(1:nml_len) = try_methods(:)(1:nml_len)
+        if (nml_len > 0) then
+          this%try_methods(:)(1:nml_len) = try_methods(:)(1:nml_len)
+        end if
       end block
     end if
     if (present(complex_sizes)) this%complex_sizes = complex_sizes

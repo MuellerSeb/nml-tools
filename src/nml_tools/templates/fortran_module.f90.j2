@@ -251,6 +251,12 @@ contains
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
+{% if runtime_local_allocations %}
+    ! allocate local namelist variables matching runtime-sized fields
+{% for stmt in runtime_local_allocations %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
 {% for stmt in local_init_assignments %}
 {{ stmt | indent(4, True) }}
 {% endfor %}

@@ -145,8 +145,14 @@ contains
     this%iterations = -huge(this%iterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
     ! default values
+    block
+      integer :: nml_len
+      nml_len = min(len(this%name), len(name_default))
     this%name = repeat(" ", len(this%name))
-    this%name(1:min(len(this%name), len(name_default))) = name_default(1:min(len(this%name), len(name_default)))
+      if (nml_len > 0) then
+        this%name(1:nml_len) = name_default(1:nml_len)
+      end if
+    end block
     this%enabled = enabled_default ! bool values always need a default
     this%weights = weights_default
   end function nml_config_init
@@ -189,7 +195,7 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=this%constant_str_len) :: name
+    character(len=:), allocatable :: name
     integer(i4) :: iterations
     real(dp) :: tolerance
     logical :: enabled
@@ -209,6 +215,9 @@ contains
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
+    ! allocate local namelist variables matching runtime-sized fields
+    if (allocated(name)) deallocate(name)
+    allocate(character(len=this%constant_str_len) :: name)
     name = this%name
     iterations = this%iterations
     tolerance = this%tolerance
@@ -239,8 +248,14 @@ contains
     end if
 
     ! assign values
+    block
+      integer :: nml_len
+      nml_len = min(len(this%name), len(name))
     this%name = repeat(" ", len(this%name))
-    this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
+      if (nml_len > 0) then
+        this%name(1:nml_len) = name(1:nml_len)
+      end if
+    end block
     this%iterations = iterations
     this%tolerance = tolerance
     this%enabled = enabled
@@ -279,8 +294,14 @@ contains
     this%tolerance = tolerance
     ! override with provided values
     if (present(name)) then
+      block
+        integer :: nml_len
+        nml_len = min(len(this%name), len(name))
       this%name = repeat(" ", len(this%name))
-      this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
+        if (nml_len > 0) then
+          this%name(1:nml_len) = name(1:nml_len)
+        end if
+      end block
     end if
     if (present(enabled)) this%enabled = enabled
     if (present(weights)) then
