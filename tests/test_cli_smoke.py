@@ -193,3 +193,234 @@ def test_cli_rejects_f2py_path_without_mod_path(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "f2py_path" in result.stderr
     assert "mod_path" in result.stderr
+
+
+def test_cli_generate_discovers_pyproject_tool_config(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    (tmp_path / "schema.yml").write_text(
+        dedent(
+            """
+            title: Demo
+            x-fortran-namelist: demo
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        dedent(
+            """
+            [project]
+            name = "demo"
+            version = "0.1.0"
+
+            [tool.nml-tools]
+            minimum-version = "0"
+
+            [tool.nml-tools.kinds]
+            module = "iso_fortran_env"
+            real = ["real64"]
+            integer = ["int32"]
+
+            [[tool.nml-tools.namelists]]
+            schema = "schema.yml"
+            mod_path = "out/nml_demo.f90"
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "nml_tools.cli", "generate"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0
+    assert (tmp_path / "out" / "nml_demo.f90").exists()
+
+
+def test_cli_default_prefers_nml_config_over_pyproject(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    (tmp_path / "schema.yml").write_text(
+        dedent(
+            """
+            title: Demo
+            x-fortran-namelist: demo
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "nml-config.toml").write_text(
+        dedent(
+            """
+            [kinds]
+            module = "iso_fortran_env"
+            real = ["real64"]
+            integer = ["int32"]
+
+            [[namelists]]
+            schema = "schema.yml"
+            mod_path = "out/from_nml_config.f90"
+            """
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        dedent(
+            """
+            [tool.nml-tools]
+            minimum-version = "9999"
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "nml_tools.cli", "generate"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert result.returncode == 0
+    assert (tmp_path / "out" / "from_nml_config.f90").exists()
+
+
+def test_cli_rejects_pyproject_without_tool_section(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    (tmp_path / "pyproject.toml").write_text(
+        dedent(
+            """
+            [project]
+            name = "demo"
+            version = "0.1.0"
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nml_tools.cli",
+            "generate",
+            "--config",
+            str(tmp_path / "pyproject.toml"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode != 0
+    assert "tool.nml-tools" in result.stderr
+
+
+def test_cli_minimum_version_validation(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    (tmp_path / "schema.yml").write_text(
+        dedent(
+            """
+            title: Demo
+            x-fortran-namelist: demo
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "input.nml").write_text("&demo\nvalue = 1\n/\n", encoding="utf-8")
+    (tmp_path / "ok.toml").write_text('minimum-version = "0"\n', encoding="utf-8")
+    (tmp_path / "too-new.toml").write_text(
+        'minimum-version = "9999"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "bad.toml").write_text(
+        'minimum-version = "not a version"\n',
+        encoding="utf-8",
+    )
+
+    ok = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nml_tools.cli",
+            "validate",
+            "--config",
+            str(tmp_path / "ok.toml"),
+            "--schema",
+            str(tmp_path / "schema.yml"),
+            str(tmp_path / "input.nml"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert ok.returncode == 0
+
+    too_new = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nml_tools.cli",
+            "validate",
+            "--config",
+            str(tmp_path / "too-new.toml"),
+            "--schema",
+            str(tmp_path / "schema.yml"),
+            str(tmp_path / "input.nml"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert too_new.returncode != 0
+    assert "requires nml-tools" in too_new.stderr
+
+    bad = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nml_tools.cli",
+            "validate",
+            "--config",
+            str(tmp_path / "bad.toml"),
+            "--schema",
+            str(tmp_path / "schema.yml"),
+            str(tmp_path / "input.nml"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert bad.returncode != 0
+    assert "minimum-version" in bad.stderr
+    assert "valid version" in bad.stderr

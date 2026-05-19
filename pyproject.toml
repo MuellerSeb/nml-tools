@@ -15,6 +15,7 @@ dependencies = [
     "jsonschema",
     "f90nml",
     "jinja2",
+    "packaging",
     "PyYAML",
     "tomli; python_version < '3.11'",
 ]

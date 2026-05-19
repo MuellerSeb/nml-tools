@@ -22,3 +22,36 @@ wheel.packages = ["src/nml_pybind_example"]
 [tool.scikit-build.cmake]
 minimum-version = "3.26"
 build-type = "Release"
+
+[tool.nml-tools]
+minimum-version = "0.2.2.dev0"
+
+[tool.nml-tools.helper]
+path = "fortran/generated/nml_helper.f90"
+module = "nml_helper"
+buffer = 512
+
+[tool.nml-tools.constants.str_len]
+value = 128
+doc = "String buffer length for the pybind example."
+
+[tool.nml-tools.kinds]
+module = "iso_fortran_env"
+real = ["real64"]
+integer = ["int32"]
+map = { dp = "real64", i4 = "int32" }
+
+[tool.nml-tools.f2py]
+f2cmap_path = "f2py/generated/.f2py_f2cmap"
+
+[tool.nml-tools.f2py.c_types.real]
+dp = "double"
+
+[tool.nml-tools.f2py.c_types.integer]
+i4 = "int"
+
+[[tool.nml-tools.namelists]]
+schema = "schema/config.yml"
+mod_path = "fortran/generated/nml_config.f90"
+f2py_path = "f2py/generated/f2py_config.f90"
+py_path = "src/nml_pybind_example/config_wrappers.py"
