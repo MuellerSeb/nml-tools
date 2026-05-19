@@ -4,7 +4,7 @@
 
 !> \brief Python binding config
 !> \details Minimal namelist used by the pybind example.
-!! 
+!!
 !! The generated f2py wrapper configures a persistent Fortran target instance
 !! through an opaque integer handle.
 module f2py_config
@@ -85,6 +85,33 @@ contains
       weights=maybe_weights, &
       errmsg=errmsg)
   end subroutine config_set_wrapper
+
+  !> \brief Set runtime constants on the handled config instance
+  subroutine config_set_constants_wrapper(handle, &
+    str_len, &
+    has_str_len, &
+    status, errmsg)
+    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
+    integer, intent(in) :: str_len !< runtime override for str_len
+    logical, intent(in) :: has_str_len !< whether str_len was provided
+    integer, intent(out) :: status !< nml-tools status code
+    character(len=512), intent(out) :: errmsg !< error message for non-OK status values
+    type(nml_config_t), pointer :: this
+    integer, allocatable :: maybe_str_len
+
+    call nml_config_resolve_handle(handle, this, status, errmsg)
+    if (.not. associated(this)) then
+      return
+    end if
+    if (has_str_len) then
+      allocate(maybe_str_len)
+      maybe_str_len = str_len
+    end if
+    status = this%set_constants( &
+      str_len=maybe_str_len, &
+      errmsg=errmsg)
+  end subroutine config_set_constants_wrapper
+
 
   !> \brief Check whether a config field is set
   subroutine config_is_set_wrapper(handle, name, idx_n1, idx, has_idx, status, errmsg)

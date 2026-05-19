@@ -29,6 +29,14 @@ _TEMPLATE_ENV = Environment(
 )
 
 
+def _strip_trailing_whitespace(text: str) -> str:
+    """Strip trailing horizontal whitespace from each line while preserving final newline."""
+    cleaned = "\n".join(line.rstrip() for line in text.splitlines())
+    if text.endswith("\n"):
+        cleaned += "\n"
+    return cleaned
+
+
 @dataclass
 class F2pyArgumentSpec:
     """Python wrapper argument metadata."""
@@ -75,6 +83,12 @@ class F2pyNamelistSpec:
     bridge_declarations: list[str]
     bridge_assignments: list[str]
     set_call_arguments: list[str]
+    set_constants_argument_list: list[str]
+    set_constants_argument_declarations: list[str]
+    set_constants_bridge_declarations: list[str]
+    set_constants_bridge_assignments: list[str]
+    set_constants_call_arguments: list[str]
+    set_constants_args: list[F2pyArgumentSpec]
     array_dimensions: list[F2pyArrayDimensionSpec]
     required_args: list[F2pyArgumentSpec]
     optional_args: list[F2pyArgumentSpec]
@@ -93,6 +107,7 @@ class PythonWrapperSpec:
     required_args: list[F2pyArgumentSpec]
     optional_args: list[F2pyArgumentSpec]
     all_args: list[F2pyArgumentSpec]
+    set_constants_args: list[F2pyArgumentSpec]
 
 
 @dataclass
@@ -162,9 +177,10 @@ def render_f2py_wrappers(
         )
         for schema in schemas
     ]
-    return _TEMPLATE_ENV.get_template("f2py_wrappers.f90.j2").render(
+    rendered = _TEMPLATE_ENV.get_template("f2py_wrappers.f90.j2").render(
         {"file_name": file_name, "specs": specs}
     )
+    return _strip_trailing_whitespace(rendered)
 
 
 def generate_python_wrappers(
@@ -205,11 +221,13 @@ def render_python_wrappers(
                 required_args=spec.required_args,
                 optional_args=spec.optional_args,
                 all_args=spec.all_args,
+                set_constants_args=spec.set_constants_args,
             )
         )
-    return _TEMPLATE_ENV.get_template("python_wrappers.py.j2").render(
+    rendered = _TEMPLATE_ENV.get_template("python_wrappers.py.j2").render(
         {"imports": sorted(extension_modules), "classes": classes, "py_style": py_style}
     )
+    return _strip_trailing_whitespace(rendered)
 
 
 def generate_f2cmap(
@@ -313,6 +331,12 @@ def build_f2py_namelist_spec(
     bridge_declarations: list[str] = []
     bridge_assignments: list[str] = []
     set_call_arguments: list[str] = []
+    set_constants_argument_list: list[str] = []
+    set_constants_argument_declarations: list[str] = []
+    set_constants_bridge_declarations: list[str] = []
+    set_constants_bridge_assignments: list[str] = []
+    set_constants_call_arguments: list[str] = []
+    set_constants_args: list[F2pyArgumentSpec] = []
     array_dimensions: list[F2pyArrayDimensionSpec] = []
     for field in fields:
         type_info = type_infos[field.name]
@@ -354,6 +378,43 @@ def build_f2py_namelist_spec(
         else:
             set_call_arguments.append(f"{field.name}={field.name}")
 
+    runtime_constant_args = cast("list[dict[str, str]]", context["set_constants_arguments"])
+    for entry in runtime_constant_args:
+        const_name = entry["name"]
+        arg_name = entry["arg_name"]
+        has_flag = f"has_{const_name}"
+        set_constants_args.append(
+            F2pyArgumentSpec(
+                name=const_name,
+                title=f"Runtime override for {const_name}",
+                required=False,
+                rank=0,
+                numpy_dtype="int",
+                dummy_value="0",
+                doc_type="int",
+                requirement="optional",
+                has_flag=has_flag,
+                fixed_shape=None,
+            )
+        )
+        set_constants_argument_list.append(const_name)
+        set_constants_argument_declarations.append(
+            f"integer, intent(in) :: {const_name} !< runtime override for {const_name}"
+        )
+        set_constants_argument_list.append(has_flag)
+        set_constants_argument_declarations.append(
+            f"logical, intent(in) :: {has_flag} !< whether {const_name} was provided"
+        )
+        maybe_name = f"maybe_{const_name}"
+        set_constants_bridge_declarations.append(f"integer, allocatable :: {maybe_name}")
+        set_constants_bridge_assignments.append(
+            f"if ({has_flag}) then\n"
+            f"  allocate({maybe_name})\n"
+            f"  {maybe_name} = {const_name}\n"
+            "end if"
+        )
+        set_constants_call_arguments.append(f"{arg_name}={maybe_name}")
+
     namelist_name = cast("str", context["namelist_name"])
     details = cast("str", context["details_text"])
     return F2pyNamelistSpec(
@@ -375,6 +436,12 @@ def build_f2py_namelist_spec(
         bridge_declarations=bridge_declarations,
         bridge_assignments=bridge_assignments,
         set_call_arguments=set_call_arguments,
+        set_constants_argument_list=set_constants_argument_list,
+        set_constants_argument_declarations=set_constants_argument_declarations,
+        set_constants_bridge_declarations=set_constants_bridge_declarations,
+        set_constants_bridge_assignments=set_constants_bridge_assignments,
+        set_constants_call_arguments=set_constants_call_arguments,
+        set_constants_args=set_constants_args,
         array_dimensions=array_dimensions,
         required_args=required_args,
         optional_args=optional_args,

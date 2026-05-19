@@ -44,6 +44,20 @@ def _schema(name: str = "optimization") -> dict[str, Any]:
     }
 
 
+def _runtime_constant_schema(name: str = "config") -> dict[str, Any]:
+    return {
+        "title": "Runtime constants",
+        "x-fortran-namelist": name,
+        "type": "object",
+        "required": ["iterations", "tolerance"],
+        "properties": {
+            "name": {"type": "string", "x-fortran-len": "str_len"},
+            "iterations": {"type": "integer", "x-fortran-kind": "i4"},
+            "tolerance": {"type": "number", "x-fortran-kind": "dp"},
+        },
+    }
+
+
 def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     codegen = _import_codegen_f2py()
     output = tmp_path / "f2py_config_wrappers.f90"
@@ -144,6 +158,29 @@ def test_generate_f2py_wrappers_uses_deferred_length_for_string_array_bridges(
         in generated
     )
     assert "character(len=*), dimension(:, :), allocatable :: maybe_names" not in generated
+
+
+def test_generate_f2py_wrappers_exposes_set_constants_wrapper(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    output = tmp_path / "f2py_config_wrappers.f90"
+
+    codegen.generate_f2py_wrappers(
+        [_runtime_constant_schema()],
+        output,
+        kind_module="iso_fortran_env",
+        kind_map={"dp": "real64", "i4": "int32"},
+        kind_allowlist={"real64", "int32"},
+        constants={"str_len": 32},
+    )
+
+    generated = output.read_text()
+    assert "subroutine config_set_constants_wrapper" in generated
+    assert "integer, intent(in) :: str_len !< runtime override for str_len" in generated
+    assert "logical, intent(in) :: has_str_len !< whether str_len was provided" in generated
+    assert "integer, allocatable :: maybe_str_len" in generated
+    assert "if (has_str_len) then" in generated
+    assert "status = this%set_constants(" in generated
+    assert "str_len=maybe_str_len" in generated
 
 
 def test_generate_f2cmap_requires_explicit_kind_mappings(tmp_path: Path) -> None:
@@ -281,6 +318,51 @@ def test_generate_python_wrapper_uses_package_relative_import(tmp_path: Path) ->
     assert "values : array_like of float" in generated
     assert "expected_shape=(3, 2)," in generated
     assert "expected_shape=None," in generated
+
+
+def test_generate_python_wrapper_exposes_set_constants(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    spec = codegen.build_f2py_namelist_spec(
+        _runtime_constant_schema(),
+        constants={"str_len": 32},
+    )
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    output = package_dir / "config_wrappers.py"
+    calls: list[dict[str, Any]] = []
+
+    class FakeF2pyConfig:
+        @staticmethod
+        def config_set_constants_wrapper(handle: int, **kwargs: Any) -> tuple[int, str]:
+            calls.append(kwargs)
+            return 0, ""
+
+    class FakeExtension:
+        f2py_config = FakeF2pyConfig
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setitem(sys.modules, "pkg.f2py_config", FakeExtension)
+    try:
+        codegen.generate_python_wrappers([(spec, "f2py_config")], output)
+
+        module_spec = importlib.util.spec_from_file_location("pkg.config_wrappers", output)
+        assert module_spec is not None
+        assert module_spec.loader is not None
+        module = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(module)
+
+        cfg = module.Config(7)
+        cfg.set_constants(str_len=4)
+        cfg.set_constants()
+    finally:
+        monkeypatch.undo()
+
+    assert calls[0]["str_len"] == 4
+    assert calls[0]["has_str_len"] is True
+    assert calls[1]["str_len"] == 0
+    assert calls[1]["has_str_len"] is False
 
 
 def test_generate_python_wrapper_supports_doxygen_docstrings(tmp_path: Path) -> None:

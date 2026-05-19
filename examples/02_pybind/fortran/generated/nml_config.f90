@@ -3,10 +3,10 @@
 
 !> \brief Python binding config
 !> \details Minimal namelist used by the pybind example.
-!! 
+!!
 !! The generated f2py wrapper configures a persistent Fortran target instance
 !! through an opaque integer handle.
-!! 
+!!
 module nml_config
   use nml_helper, only: &
     nml_file_t, &
@@ -27,7 +27,7 @@ module nml_config
     idx_check, &
     to_lower, &
     NML_ERR_INVALID_HANDLE, &
-    str_len
+    str_len_default=>str_len
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -38,7 +38,7 @@ module nml_config
   implicit none
 
   ! default values
-  character(len=str_len), parameter, public :: name_default = "pybind-example"
+  character(len=str_len_default), parameter, public :: name_default = "pybind-example"
   logical, parameter, public :: enabled_default = .false.
   real(dp), parameter, public :: weights_default = 1.0_dp
 
@@ -49,19 +49,21 @@ module nml_config
   !> \class nml_config_t
   !> \brief Python binding config
   !> \details Minimal namelist used by the pybind example.
-  !! 
+  !!
   !! The generated f2py wrapper configures a persistent Fortran target instance
   !! through an opaque integer handle.
-  !! 
+  !!
   type, public :: nml_config_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    character(len=str_len) :: name !< Config name
+    integer :: constant_str_len = str_len_default !< runtime override for str_len
+    character(len=:), allocatable :: name !< Config name
     integer(i4) :: iterations !< Iterations
     real(dp) :: tolerance !< Tolerance
     logical :: enabled !< Enabled
     real(dp), dimension(3) :: weights !< Weights
   contains
     procedure :: init => nml_config_init
+    procedure :: set_constants => nml_config_set_constants
     procedure :: from_file => nml_config_from_file
     procedure :: set => nml_config_set
     procedure :: is_set => nml_config_is_set
@@ -135,14 +137,51 @@ contains
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
 
+    ! allocate runtime-sized fields
+    if (allocated(this%name)) deallocate(this%name)
+    allocate(character(len=this%constant_str_len) :: this%name)
+
     ! sentinel values for required/optional parameters
     this%iterations = -huge(this%iterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
     ! default values
-    this%name = name_default
+    this%name = repeat(" ", len(this%name))
+    this%name(1:min(len(this%name), len(name_default))) = name_default(1:min(len(this%name), len(name_default)))
     this%enabled = enabled_default ! bool values always need a default
     this%weights = weights_default
   end function nml_config_init
+
+  !> \brief Reset runtime constants for config
+  integer function nml_config_set_constants(this, &
+    str_len, &
+    errmsg) result(status)
+    class(nml_config_t), intent(inout) :: this !< namelist instance
+    integer, intent(in), optional :: str_len !< runtime override for str_len
+    integer :: candidate_str_len
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (present(str_len)) then
+      candidate_str_len = str_len
+    else
+      candidate_str_len = str_len_default
+    end if
+    if (candidate_str_len <= 0) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "constant 'str_len' must be positive"
+      return
+    end if
+    if (candidate_str_len < 14) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "constant 'str_len' must be >= 14"
+      return
+    end if
+    this%constant_str_len = candidate_str_len
+
+    status = this%init(errmsg=errmsg)
+  end function nml_config_set_constants
+
 
   !> \brief Read config namelist from file
   integer function nml_config_from_file(this, file, errmsg) result(status)
@@ -150,7 +189,7 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=str_len) :: name
+    character(len=:), allocatable :: name
     integer(i4) :: iterations
     real(dp) :: tolerance
     logical :: enabled
@@ -200,7 +239,8 @@ contains
     end if
 
     ! assign values
-    this%name = name
+    this%name = repeat(" ", len(this%name))
+    this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
     this%iterations = iterations
     this%tolerance = tolerance
     this%enabled = enabled
@@ -238,7 +278,10 @@ contains
     this%iterations = iterations
     this%tolerance = tolerance
     ! override with provided values
-    if (present(name)) this%name = name
+    if (present(name)) then
+      this%name = repeat(" ", len(this%name))
+      this%name(1:min(len(this%name), len(name))) = name(1:min(len(this%name), len(name)))
+    end if
     if (present(enabled)) this%enabled = enabled
     if (present(weights)) then
       if (size(weights, 1) > size(this%weights, 1)) then

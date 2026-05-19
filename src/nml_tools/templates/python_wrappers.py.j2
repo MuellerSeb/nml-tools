@@ -192,6 +192,55 @@ class {{ cls.class_name }}:
         )
         _check_status(result)
 
+{% if cls.set_constants_args %}
+    def set_constants(
+        self,
+{% for arg in cls.set_constants_args %}
+        {{ arg.name }}: Any = None,
+{% endfor %}
+    ) -> None:
+{% if py_style == "doxygen" %}
+        """!
+        Set runtime constants for the handled {{ cls.namelist_name }} instance.
+
+{% for arg in cls.set_constants_args %}
+        @param {{ arg.name }} (int, optional): Runtime override for {{ arg.name }}.
+{% endfor %}
+        @throws NmlError: If the Fortran setter returns a non-OK status.
+        """
+{% else %}
+        """Set runtime constants for the handled {{ cls.namelist_name }} instance.
+
+        Parameters
+        ----------
+{% for arg in cls.set_constants_args %}
+        {{ arg.name }} : int, optional
+            Runtime override for {{ arg.name }}.
+{% endfor %}
+
+        Raises
+        ------
+        NmlError
+            If the Fortran setter returns a non-OK status.
+        """
+{% endif %}
+        kwargs: dict[str, Any] = {}
+{% for arg in cls.set_constants_args %}
+        if {{ arg.name }} is not None:
+            kwargs["{{ arg.name }}"] = {{ arg.name }}
+        else:
+            kwargs["{{ arg.name }}"] = {{ arg.dummy_value }}
+{% if arg.has_flag is not none %}
+        kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
+{% endif %}
+{% endfor %}
+        result = self._f2py.{{ cls.namelist_name }}_set_constants_wrapper(
+            self.handle,
+            **kwargs,
+        )
+        _check_status(result)
+{% endif %}
+
     def set(
         self,
 {% for arg in cls.required_args %}
@@ -348,6 +397,4 @@ class {{ cls.class_name }}:
             self.handle,
         )
         _check_status(result)
-
-
 {% endfor %}

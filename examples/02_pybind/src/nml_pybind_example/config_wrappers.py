@@ -145,6 +145,34 @@ class Config:
         )
         _check_status(result)
 
+    def set_constants(
+        self,
+        str_len: Any = None,
+    ) -> None:
+        """Set runtime constants for the handled config instance.
+
+        Parameters
+        ----------
+        str_len : int, optional
+            Runtime override for str_len.
+
+        Raises
+        ------
+        NmlError
+            If the Fortran setter returns a non-OK status.
+        """
+        kwargs: dict[str, Any] = {}
+        if str_len is not None:
+            kwargs["str_len"] = str_len
+        else:
+            kwargs["str_len"] = 0
+        kwargs["has_str_len"] = str_len is not None
+        result = self._f2py.config_set_constants_wrapper(
+            self.handle,
+            **kwargs,
+        )
+        _check_status(result)
+
     def set(
         self,
         iterations: Any,
@@ -276,5 +304,3 @@ class Config:
             self.handle,
         )
         _check_status(result)
-
-

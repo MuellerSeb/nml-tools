@@ -53,9 +53,14 @@ python -m pytest tests
 ## Usage
 
 ```python
-from nml_pybind_example import get_config, get_iterations, get_weights
+from nml_pybind_example import (
+  get_config,
+  get_iterations,
+  get_weights,
+)
 
 cfg = get_config()
+cfg.set_constants(str_len=32)
 cfg.set(iterations=20, tolerance=1.0e-4, weights=1.0)
 cfg.is_valid()
 
@@ -76,3 +81,6 @@ type-bound `set` method, so omitted values still behave like absent optional
 arguments in normal Fortran. This uses the Fortran 2008 behavior where an
 unallocated allocatable actual argument associated with an optional
 nonallocatable dummy argument is considered not present.
+
+Runtime constants are configured through the generated Python wrapper method
+`cfg.set_constants(...)`, for example `cfg.set_constants(str_len=32)`.
