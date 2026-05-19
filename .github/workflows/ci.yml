@@ -55,8 +55,10 @@ jobs:
           extra-packages: pip
       - name: Install Python build tools
         run: python -m pip install -U pip build pytest
+      - name: Install nml-tools
+        run: python -m pip install -e .
       - name: Check generated 01_simple files
-        run: python -m pip install -e . && nml-tools check --config examples/01_simple/nml-config.toml --diff
+        run: nml-tools check --config examples/01_simple/nml-config.toml --diff
       - name: Check generated 02_pybind files
         run: nml-tools check --config examples/02_pybind/pyproject.toml --diff
       - name: Build 01_simple
