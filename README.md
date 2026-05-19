@@ -225,10 +225,32 @@ counts:
     minimum: 1
 ```
 
-## Configuration (nml-config.toml)
+## Configuration (`nml-config.toml` or `pyproject.toml`)
 
-The CLI reads a TOML config file. Paths are resolved relative to the config
-file location.
+The CLI reads a TOML config file. If `--config` is omitted, nml-tools first
+looks for `nml-config.toml` and then for `[tool.nml-tools]` in
+`pyproject.toml`. Paths are resolved relative to the config file location.
+
+Standalone config files use the tables shown below at the TOML root. In
+`pyproject.toml`, put the same content under `[tool.nml-tools]`, for example
+`[tool.nml-tools.helper]` and `[[tool.nml-tools.namelists]]`.
+
+- `minimum-version` (string, optional): lower bound for the nml-tools version
+  required by this config. This is not an exact version pin.
+
+Example:
+
+```toml
+[tool.nml-tools]
+minimum-version = "0.2.2"
+
+[tool.nml-tools.helper]
+path = "out/nml_helper.f90"
+
+[[tool.nml-tools.namelists]]
+schema = "optimization.yml"
+mod_path = "out/nml_optimization.f90"
+```
 
 ### [helper]
 

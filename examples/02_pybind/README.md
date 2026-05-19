@@ -33,8 +33,9 @@ The split mirrors the intended use in larger projects:
 
 ## Regenerate bindings
 
-The generated files are checked in so the package can be built directly. To regenerate
-them from the schema and `nml-config.toml`, run from this directory:
+The generated files are checked in so the package can be built directly. This
+example keeps the nml-tools configuration in `pyproject.toml` under
+`[tool.nml-tools]`. To regenerate from the schema, run from this directory:
 
 ```bash
 nml-tools generate
