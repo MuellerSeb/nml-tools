@@ -10,6 +10,7 @@ from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from ._utils import strip_trailing_whitespace
 from .codegen_fortran import (
     FieldSpec,
     FieldTypeInfo,
@@ -27,14 +28,6 @@ _TEMPLATE_ENV = Environment(
     keep_trailing_newline=True,
     undefined=StrictUndefined,
 )
-
-
-def _strip_trailing_whitespace(text: str) -> str:
-    """Strip trailing horizontal whitespace from each line while preserving final newline."""
-    cleaned = "\n".join(line.rstrip() for line in text.splitlines())
-    if text.endswith("\n"):
-        cleaned += "\n"
-    return cleaned
 
 
 @dataclass
@@ -180,7 +173,7 @@ def render_f2py_wrappers(
     rendered = _TEMPLATE_ENV.get_template("f2py_wrappers.f90.j2").render(
         {"file_name": file_name, "specs": specs}
     )
-    return _strip_trailing_whitespace(rendered)
+    return strip_trailing_whitespace(rendered)
 
 
 def generate_python_wrappers(
@@ -227,7 +220,7 @@ def render_python_wrappers(
     rendered = _TEMPLATE_ENV.get_template("python_wrappers.py.j2").render(
         {"imports": sorted(extension_modules), "classes": classes, "py_style": py_style}
     )
-    return _strip_trailing_whitespace(rendered)
+    return strip_trailing_whitespace(rendered)
 
 
 def generate_f2cmap(
