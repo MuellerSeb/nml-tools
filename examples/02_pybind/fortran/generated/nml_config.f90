@@ -28,7 +28,7 @@ module nml_config
     to_lower, &
     NML_ERR_INVALID_HANDLE, &
     str_len, &
-    n_weights_default=>n_weights
+    n_weights_default_=>n_weights
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -56,7 +56,7 @@ module nml_config
   !!
   type, public :: nml_config_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: dim_n_weights = n_weights_default !< runtime dimension for n_weights
+    integer :: dim_n_weights_ = n_weights_default_ !< runtime dimension for n_weights
     character(len=str_len) :: name !< Config name
     integer(i4) :: iterations !< Iterations
     real(dp) :: tolerance !< Tolerance
@@ -140,7 +140,7 @@ contains
 
     ! allocate runtime-sized fields
     if (allocated(this%weights)) deallocate(this%weights)
-    allocate(this%weights(this%dim_n_weights))
+    allocate(this%weights(this%dim_n_weights_))
 
     ! sentinel values for required/optional parameters
     this%iterations = -huge(this%iterations) ! sentinel for required integer
@@ -165,14 +165,14 @@ contains
     if (present(n_weights)) then
       candidate_n_weights = n_weights
     else
-      candidate_n_weights = n_weights_default
+      candidate_n_weights = n_weights_default_
     end if
     if (candidate_n_weights <= 0) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'n_weights' must be positive"
       return
     end if
-    this%dim_n_weights = candidate_n_weights
+    this%dim_n_weights_ = candidate_n_weights
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%weights)) deallocate(this%weights)
@@ -208,7 +208,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(weights)) deallocate(weights)
-    allocate(weights(this%dim_n_weights))
+    allocate(weights(this%dim_n_weights_))
     name = this%name
     iterations = this%iterations
     tolerance = this%tolerance

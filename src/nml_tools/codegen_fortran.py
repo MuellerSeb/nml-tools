@@ -314,16 +314,43 @@ def _build_context(
     if f2py_handle_helpers:
         helper_imports.append("NML_ERR_INVALID_HANDLE")
 
+    def _helper_import_local_name(import_spec: str) -> str:
+        if "=>" in import_spec:
+            return import_spec.split("=>", 1)[0].strip()
+        return import_spec.strip()
+
+    def _helper_import_local_names() -> set[str]:
+        return {_helper_import_local_name(existing).lower() for existing in helper_imports}
+
     def _add_helper_import(name: str) -> None:
         if not any(existing.lower() == name.lower() for existing in helper_imports):
             helper_imports.append(name)
 
+    def _unique_helper_import_alias(base_name: str) -> str:
+        local_names = _helper_import_local_names() | set(static_constants)
+        if base_name.lower() not in local_names:
+            return base_name
+        index = 1
+        while True:
+            if base_name.endswith("_"):
+                candidate = f"{base_name}{index}_"
+            else:
+                candidate = f"{base_name}_{index}"
+            if candidate.lower() not in local_names:
+                return candidate
+            index += 1
+
     def _register_runtime_dimension(dim_name: str) -> str:
         local_name = runtime_dimension_locals.get(dim_name)
         if local_name is None:
-            local_name = f"dim_{dim_name}"
+            local_name = f"dim_{dim_name}_"
+            if local_name.lower() in property_name_map:
+                raise ValueError(
+                    f"property '{property_name_map[local_name.lower()]}' conflicts with "
+                    f"runtime dimension field '{local_name}'"
+                )
             runtime_dimension_locals[dim_name] = local_name
-            default_name = f"{dim_name}_default"
+            default_name = _unique_helper_import_alias(f"{dim_name}_default_")
             _add_helper_import(f"{default_name}=>{dim_name}")
             runtime_dimensions.append(
                 {
