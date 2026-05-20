@@ -57,8 +57,8 @@ def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
         if not isinstance(entry, dict) or "value" not in entry:
             raise ValueError("config constant entries must define a value")
         value = entry.get("value")
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError("config constants must be integers or reals")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("config constants must be integers")
         constants[name] = value
     dimensions_raw = config.get("dimensions", {})
     if not isinstance(dimensions_raw, dict):
@@ -238,6 +238,30 @@ def test_generate_fortran_matches_constants_case_insensitively(tmp_path: Path) -
     generated = output.read_text()
     assert "integer(i4), dimension(MAX_LAYERS) :: values" in generated
     assert "character(len=BUF) :: name" in generated
+
+
+def test_generate_fortran_rejects_non_integer_constants(tmp_path: Path) -> None:
+    schema = {
+        "title": "Constant shapes",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": "max_layers",
+            },
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match="must be an integer"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test.f90",
+            kind_module="mo_kind",
+            constants={"max_layers": 3.5},
+        )
 
 
 def test_generate_fortran_accepts_runtime_dimensions(tmp_path: Path) -> None:

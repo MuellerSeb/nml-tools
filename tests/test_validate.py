@@ -132,6 +132,13 @@ def test_validate_namelist_rejects_constant_dimension_name_overlap() -> None:
             constants={"n_values": 3, "N_VALUES": 4},
         )
 
+    with pytest.raises(ValueError, match="must be an integer"):
+        validate_namelist(
+            schema,
+            {"arr": [1, 2, 3]},
+            constants={"n_values": 3.5},
+        )
+
 
 def test_validate_namelist_rejects_invalid_dimensions() -> None:
     schema = {

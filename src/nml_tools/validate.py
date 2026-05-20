@@ -83,6 +83,8 @@ def _normalize_constants(
         canonical_name = name.lower()
         if canonical_name in normalized:
             raise ValueError(f"constant '{name}' duplicates another constant name")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"constant '{name}' must be an integer")
         normalized[canonical_name] = value
     return normalized
 

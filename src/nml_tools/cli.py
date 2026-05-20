@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import re
 import sys
 from dataclasses import dataclass
@@ -292,19 +291,12 @@ def _load_f2py_ctype_table(c_types: dict[str, Any], key: str) -> dict[str, str]:
     return values
 
 
-def _format_constant_literal(value: int | float) -> tuple[str, str]:
+def _format_constant_literal(value: int) -> tuple[str, str]:
     if isinstance(value, bool):
         raise click.ClickException("config constants must not be boolean")
     if isinstance(value, int):
         return "integer", str(value)
-    if isinstance(value, float):
-        literal = repr(float(value))
-        if literal.lower() == "nan":
-            raise click.ClickException("config constants must not be NaN")
-        if "." not in literal and "e" not in literal and "E" not in literal:
-            literal = f"{literal}.0"
-        return "real", literal
-    raise click.ClickException("config constants must be integers or reals")
+    raise click.ClickException("config constants must be integers")
 
 
 def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], list[ConstantSpec]]:
@@ -336,8 +328,8 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
         if "value" not in entry:
             raise click.ClickException(f"config constant '{name}' must define 'value'")
         value = entry.get("value")
-        if not isinstance(value, (int, float)):
-            raise click.ClickException("config constants must be integers or reals")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise click.ClickException("config constants must be integers")
         type_spec, literal = _format_constant_literal(value)
         doc = entry.get("doc")
         if doc is not None:
@@ -473,19 +465,9 @@ def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
         value_text = raw_value.strip()
         if not value_text:
             raise click.ClickException(f"constant '{name}' must define a value")
-        if value_text.lower() in {"nan", "+nan", "-nan", "inf", "+inf", "-inf"}:
-            raise click.ClickException(f"constant '{name}' must be finite")
-        if re.fullmatch(r"[+-]?\d+", value_text):
-            value: int | float = int(value_text)
-        else:
-            try:
-                value = float(value_text)
-            except ValueError as exc:
-                raise click.ClickException(
-                    f"constant '{name}' value '{value_text}' must be numeric"
-                ) from exc
-            if math.isinf(value) or math.isnan(value):
-                raise click.ClickException(f"constant '{name}' must be finite")
+        if not re.fullmatch(r"[+-]?\d+", value_text):
+            raise click.ClickException(f"constant '{name}' value must be an integer")
+        value: int | float = int(value_text)
         constants[canonical_name] = value
     return constants
 

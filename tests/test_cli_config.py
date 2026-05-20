@@ -133,6 +133,9 @@ def test_load_constants_normalizes_names_case_insensitively() -> None:
             }
         )
 
+    with pytest.raises(click.ClickException, match="must be integers"):
+        cli_module._load_constants({"constants": {"ratio": {"value": 1.5}}})
+
 
 def test_load_dimensions_validates_values_and_duplicate_names() -> None:
     constants = {"BUF": 128}
@@ -188,6 +191,9 @@ def test_parse_cli_constants_normalizes_and_rejects_duplicates() -> None:
 
     with pytest.raises(click.ClickException, match="duplicates another constant"):
         cli_module._parse_cli_constants(("buf=128", "BUF=256"))
+
+    with pytest.raises(click.ClickException, match="must be an integer"):
+        cli_module._parse_cli_constants(("ratio=1.5",))
 
 
 def test_load_toml_checked_reports_missing_file(tmp_path: Path) -> None:
