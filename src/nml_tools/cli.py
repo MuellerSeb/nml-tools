@@ -49,6 +49,47 @@ _DEFAULT_CONFIG = Path("nml-config.toml")
 _PYPROJECT_CONFIG = Path("pyproject.toml")
 
 
+class NamedIntegerType(click.ParamType):
+    """Parse NAME=INT values for CLI options."""
+
+    name = "NAME=INT"
+
+    def __init__(self, *, label: str, positive: bool = False) -> None:
+        self._label = label
+        self._positive = positive
+
+    def convert(
+        self,
+        value: Any,
+        param: click.Parameter | None,
+        ctx: click.Context | None,
+    ) -> tuple[str, int]:
+        if not isinstance(value, str) or "=" not in value:
+            self.fail("must be NAME=INT", param, ctx)
+
+        raw_name, raw_value = value.split("=", 1)
+        name = raw_name.strip()
+        if not name:
+            self.fail("must use non-empty names", param, ctx)
+        if not _FORTRAN_IDENTIFIER.match(name):
+            self.fail(f"{self._label} '{name}' must be a valid identifier", param, ctx)
+
+        value_text = raw_value.strip()
+        if not value_text:
+            self.fail(f"{self._label} '{name}' must define a value", param, ctx)
+        if not re.fullmatch(r"[+-]?\d+", value_text):
+            self.fail(f"{self._label} '{name}' value must be an integer", param, ctx)
+
+        parsed_value = int(value_text)
+        if self._positive and parsed_value <= 0:
+            self.fail(f"{self._label} '{name}' value must be positive", param, ctx)
+        return name.lower(), parsed_value
+
+
+_CONSTANT_TYPE = NamedIntegerType(label="constant")
+_DIMENSION_TYPE = NamedIntegerType(label="dimension", positive=True)
+
+
 @dataclass(frozen=True)
 class GeneratedOutput:
     """Generated file content for write/check commands."""
@@ -448,53 +489,23 @@ def _load_documentation_settings(
     return module_doc, md_doxygen_id_from_name, md_add_toc_statement, py_style
 
 
-def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
+def _parse_cli_constants(values: tuple[tuple[str, int], ...]) -> dict[str, int | float]:
     constants: dict[str, int | float] = {}
-    for entry in values:
-        if "=" not in entry:
-            raise click.ClickException("constants must be provided as NAME=VALUE")
-        raw_name, raw_value = entry.split("=", 1)
-        name = raw_name.strip()
-        if not name:
-            raise click.ClickException("constants must use non-empty names")
-        if not _FORTRAN_IDENTIFIER.match(name):
-            raise click.ClickException(f"constant '{name}' must be a valid identifier")
-        canonical_name = name.lower()
-        if canonical_name in constants:
+    for name, value in values:
+        if name in constants:
             raise click.ClickException(f"constant '{name}' duplicates another constant name")
-        value_text = raw_value.strip()
-        if not value_text:
-            raise click.ClickException(f"constant '{name}' must define a value")
-        if not re.fullmatch(r"[+-]?\d+", value_text):
-            raise click.ClickException(f"constant '{name}' value must be an integer")
-        value: int | float = int(value_text)
-        constants[canonical_name] = value
+        constants[name] = value
     return constants
 
 
-def _parse_cli_dimensions(values: tuple[str, ...]) -> dict[str, int]:
+def _parse_cli_dimensions(values: tuple[tuple[str, int], ...]) -> dict[str, int]:
     dimensions: dict[str, int] = {}
-    for entry in values:
-        if "=" not in entry:
-            raise click.ClickException("dimensions must be provided as NAME=VALUE")
-        raw_name, raw_value = entry.split("=", 1)
-        name = raw_name.strip()
-        if not name:
-            raise click.ClickException("dimensions must use non-empty names")
-        if not _FORTRAN_IDENTIFIER.match(name):
-            raise click.ClickException(f"dimension '{name}' must be a valid identifier")
-        canonical_name = name.lower()
-        if canonical_name in dimensions:
+    for name, value in values:
+        if name in dimensions:
             raise click.ClickException(f"dimension '{name}' duplicates another dimension name")
-        value_text = raw_value.strip()
-        if not value_text:
-            raise click.ClickException(f"dimension '{name}' must define a value")
-        if not re.fullmatch(r"[+-]?\d+", value_text):
-            raise click.ClickException(f"dimension '{name}' value must be an integer")
-        value = int(value_text)
         if value <= 0:
             raise click.ClickException(f"dimension '{name}' value must be positive")
-        dimensions[canonical_name] = value
+        dimensions[name] = value
     return dimensions
 
 
@@ -1087,14 +1098,18 @@ def gen_fortran(config_path: Path | None) -> None:
 @click.option(
     "--constants",
     "constant_args",
+    metavar="NAME=INT",
+    type=_CONSTANT_TYPE,
     multiple=True,
-    help="Additional constants as NAME=VALUE (repeatable).",
+    help="Additional integer constants as NAME=INT (repeatable).",
 )
 @click.option(
     "--dimensions",
     "dimension_args",
+    metavar="NAME=INT",
+    type=_DIMENSION_TYPE,
     multiple=True,
-    help="Runtime dimensions as NAME=VALUE (repeatable).",
+    help="Runtime dimensions as NAME=INT (repeatable).",
 )
 @click.argument(
     "input_path",
@@ -1105,8 +1120,8 @@ def validate(
     config_path: Path | None,
     schema_paths: tuple[Path, ...],
     input_option: Path | None,
-    constant_args: tuple[str, ...],
-    dimension_args: tuple[str, ...],
+    constant_args: tuple[tuple[str, int], ...],
+    dimension_args: tuple[tuple[str, int], ...],
     input_path: Path | None,
 ) -> None:
     """Validate a namelist file against schema definitions."""
