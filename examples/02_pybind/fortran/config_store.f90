@@ -61,7 +61,11 @@ contains
   subroutine get_weight_count(value)
     integer, intent(out) :: value !< current weight array extent
 
-    value = size(config%weights)
+    if (allocated(config%weights)) then
+      value = size(config%weights)
+    else
+      value = 0
+    end if
   end subroutine get_weight_count
 
   !> \brief Return one configured weight

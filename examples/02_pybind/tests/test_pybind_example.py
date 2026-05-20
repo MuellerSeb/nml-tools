@@ -51,6 +51,7 @@ def test_runtime_weight_dimension_is_applied() -> None:
     cfg = example.get_config()
 
     cfg.set_dims(n_weights=2)
+    assert example.get_weight_count() == 0
     cfg.set(iterations=3, tolerance=1.0e-3, weights=[4.0, 5.0])
     cfg.is_valid()
     assert example.get_weight_count() == 2
