@@ -189,6 +189,22 @@ values_pad_c:
 Only a subset of JSON Schema validation keywords is implemented.
 Validation is opt-in: call `is_valid()` on the generated type to check required values, enum and bound constraints.
 
+## Array set semantics
+
+Generated `set(...)` methods follow Fortran namelist-buffer semantics for
+arrays. When an array argument is provided, the setter writes the supplied values
+into the leading subsection of the target array. The provided extents must not
+exceed the configured target extents, but they do not have to fill the full
+array.
+
+Completeness is checked by `is_valid()`, not by `set(...)`. This means a
+required array can be partly set without an immediate setter error, but
+`is_valid()` will fail until the required entries are fully provided.
+
+Generated Python wrappers use the same semantics: scalar and lower-rank array
+inputs are normalized to singleton trailing dimensions before calling the
+Fortran setter.
+
 ### Enum support
 Enums are supported for strings and integers only.
 For arrays, enums are defined on `items` (not on the array itself).
@@ -357,6 +373,10 @@ simple while preserving the normal generated Fortran setter semantics. This
 relies on the Fortran 2008 rule that an unallocated allocatable actual argument
 associated with an optional nonallocatable dummy argument is treated as not
 present.
+
+For array arguments, the generated Python shim follows the same partial-set
+semantics as the Fortran setter. Scalar inputs become shape `(1, ..., 1)`;
+lower-rank inputs get singleton trailing dimensions before being passed to f2py.
 
 The f2py wrappers use opaque integer handles for Fortran-owned namelist
 instances. nml-tools assumes that the owning Fortran library creates those

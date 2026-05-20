@@ -70,8 +70,8 @@ print(get_weights(5))
 
 Scalar array values are normalized by the generated Python shim before calling f2py.
 For `weights=1.0`, only the first array entry is overwritten, matching the generated
-Fortran `set` method's partial-array behavior; the remaining entries keep their
-defaults.
+Fortran `set` method's partial-array behavior for arrays with defaults; the remaining
+entries keep their defaults.
 
 The f2py-facing Fortran wrappers deliberately avoid `optional` dummy arguments
 and assumed-shape arrays. The Python shim passes `has_<name>` flags plus dummy
