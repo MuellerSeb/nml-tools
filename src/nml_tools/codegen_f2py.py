@@ -19,6 +19,7 @@ from .codegen_fortran import (
     _field_type_info,
     _parse_default_dimensions,
     _parse_flex_dim,
+    _reject_runtime_dimension_lengths,
 )
 
 _TEMPLATE_ENV = Environment(
@@ -456,10 +457,12 @@ def _iter_field_type_infos(
     dimensions: dict[str, int] | None = None,
 ) -> list[tuple[str, FieldTypeInfo]]:
     properties = _normalized_properties(schema)
-    return [
-        (name, _field_type_info(prop, constants))
-        for name, prop in properties.items()
-    ]
+    runtime_dimension_values = dimensions if dimensions is not None else {}
+    field_types: list[tuple[str, FieldTypeInfo]] = []
+    for name, prop in properties.items():
+        _reject_runtime_dimension_lengths(prop, runtime_dimension_values)
+        field_types.append((name, _field_type_info(prop, constants)))
+    return field_types
 
 
 def _normalized_properties(schema: dict[str, Any]) -> dict[str, dict[str, Any]]:

@@ -190,6 +190,24 @@ def test_generate_f2py_wrappers_exposes_set_dims_wrapper(tmp_path: Path) -> None
     assert "n_weights=maybe_n_weights" in generated
 
 
+def test_collect_f2py_kind_usage_rejects_dimension_as_string_length() -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "title": "Invalid runtime string length",
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "x-fortran-len": "n_weights",
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="cannot be used as x-fortran-len"):
+        codegen.collect_f2py_kind_usage([schema], dimensions={"n_weights": 3})
+
+
 def test_generate_f2cmap_requires_explicit_kind_mappings(tmp_path: Path) -> None:
     codegen = _import_codegen_f2py()
     usage = codegen.collect_f2py_kind_usage([_schema()])
