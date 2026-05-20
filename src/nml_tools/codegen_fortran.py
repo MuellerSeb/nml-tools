@@ -417,7 +417,6 @@ def _build_context(
                     type_info,
                     name,
                     runtime_dimensions=runtime_shape,
-                    runtime_length_expr=runtime_length_expr,
                 )
                 runtime_allocations.extend(
                     _render_runtime_allocations(
@@ -1560,9 +1559,12 @@ def _render_runtime_declaration(
     name: str,
 ) -> str:
     if type_info.category == "string":
-        raise ValueError("runtime scalar strings are not supported")
+        raise ValueError("runtime scalar strings are not supported; only runtime arrays")
     if type_info.category != "array":
-        raise ValueError("runtime declaration is only supported for strings or arrays")
+        raise ValueError(
+            "runtime declaration is only supported for arrays, "
+            f"got category '{type_info.category}'"
+        )
 
     dims = ", ".join(":" for _ in type_info.dimensions)
     return f"{type_info.type_spec}, allocatable, dimension({dims}) :: {name}"
@@ -1573,12 +1575,14 @@ def _render_runtime_local_declaration(
     name: str,
     *,
     runtime_dimensions: list[str],
-    runtime_length_expr: str | None,
 ) -> str:
     if type_info.category == "string":
-        raise ValueError("runtime scalar strings are not supported")
+        raise ValueError("runtime scalar strings are not supported; only runtime arrays")
     if type_info.category != "array":
-        raise ValueError("runtime local declaration is only supported for strings or arrays")
+        raise ValueError(
+            "runtime local declaration is only supported for arrays, "
+            f"got category '{type_info.category}'"
+        )
 
     type_spec = type_info.type_spec
     dims = ", ".join(":" for _ in runtime_dimensions)
