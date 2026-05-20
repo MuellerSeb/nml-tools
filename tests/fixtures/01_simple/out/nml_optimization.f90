@@ -25,7 +25,7 @@ module nml_optimization
     idx_check, &
     to_lower, &
     buf, &
-    max_iter_default_=>max_iter
+    nml_default__max_iter__=>max_iter
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -46,7 +46,7 @@ module nml_optimization
   !! This namelist corresponds to the `optimization` section in the MHM configuration.
   type, public :: nml_optimization_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: dim_max_iter_ = max_iter_default_ !< runtime dimension for max_iter
+    integer :: nml_dim__max_iter__ = nml_default__max_iter__ !< runtime dimension for max_iter
     character(len=buf) :: name !< Optimization name
     integer :: niterations !< Number of iterations
     real :: tolerance !< Convergence tolerance
@@ -76,7 +76,7 @@ contains
 
     ! allocate runtime-sized fields
     if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
-    allocate(this%mcmc_error_params(3, 2, this%dim_max_iter_))
+    allocate(this%mcmc_error_params(3, 2, this%nml_dim__max_iter__))
 
     ! sentinel values for required/optional parameters
     this%name = achar(0) ! sentinel for optional string
@@ -88,7 +88,7 @@ contains
     this%mcmc_opti = mcmc_opti_default ! bool values always need a default
     this%mcmc_error_params = reshape( &
       mcmc_error_params_default, &
-      shape=[3, 2, this%dim_max_iter_], &
+      shape=[3, 2, this%nml_dim__max_iter__], &
       order=[3, 2, 1], &
       pad=mcmc_error_params_default)
   end function nml_optimization_init
@@ -99,27 +99,27 @@ contains
     errmsg) result(status)
     class(nml_optimization_t), intent(inout) :: this !< namelist instance
     integer, intent(in), optional :: max_iter !< runtime dimension override for max_iter
-    integer :: candidate_max_iter_
+    integer :: nml_candidate__max_iter__
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(max_iter)) then
-      candidate_max_iter_ = max_iter
+      nml_candidate__max_iter__ = max_iter
     else
-      candidate_max_iter_ = max_iter_default_
+      nml_candidate__max_iter__ = nml_default__max_iter__
     end if
-    if (candidate_max_iter_ <= 0) then
+    if (nml_candidate__max_iter__ <= 0) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'max_iter' must be positive"
       return
     end if
-    if ((3 * 2 * candidate_max_iter_) < 4) then
+    if ((3 * 2 * nml_candidate__max_iter__) < 4) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "shape constants for 'mcmc_error_params' must allow at least 4 default values"
       return
     end if
-    this%dim_max_iter_ = candidate_max_iter_
+    this%nml_dim__max_iter__ = nml_candidate__max_iter__
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
@@ -159,7 +159,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(mcmc_error_params)) deallocate(mcmc_error_params)
-    allocate(mcmc_error_params(3, 2, this%dim_max_iter_))
+    allocate(mcmc_error_params(3, 2, this%nml_dim__max_iter__))
     name = this%name
     niterations = this%niterations
     tolerance = this%tolerance

@@ -332,7 +332,9 @@ def _build_context(
             return base_name
         index = 1
         while True:
-            if base_name.endswith("_"):
+            if base_name.endswith("__"):
+                candidate = f"{base_name}{index}__"
+            elif base_name.endswith("_"):
                 candidate = f"{base_name}{index}_"
             else:
                 candidate = f"{base_name}_{index}"
@@ -343,14 +345,14 @@ def _build_context(
     def _register_runtime_dimension(dim_name: str) -> str:
         local_name = runtime_dimension_locals.get(dim_name)
         if local_name is None:
-            local_name = f"dim_{dim_name}_"
+            local_name = f"nml_dim__{dim_name}__"
             if local_name.lower() in property_name_map:
                 raise ValueError(
                     f"property '{property_name_map[local_name.lower()]}' conflicts with "
                     f"runtime dimension field '{local_name}'"
                 )
             runtime_dimension_locals[dim_name] = local_name
-            default_name = _unique_helper_import_alias(f"{dim_name}_default_")
+            default_name = _unique_helper_import_alias(f"nml_default__{dim_name}__")
             _add_helper_import(f"{default_name}=>{dim_name}")
             runtime_dimensions.append(
                 {
@@ -1087,7 +1089,7 @@ def _build_context(
             "default_name": entry["default_name"],
             "local_name": entry["local_name"],
             "arg_name": entry["name"],
-            "candidate_name": f"candidate_{entry['name']}_",
+            "candidate_name": f"nml_candidate__{entry['name']}__",
             "min_required": 1,
         }
         for entry in runtime_dimensions

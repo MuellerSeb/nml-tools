@@ -365,7 +365,7 @@ i4 = "int"
 
 The f2py-visible wrapper procedures avoid Fortran `optional` dummy arguments
 and assumed-shape arrays. Optional Python values are represented by generated
-`has_<name>` flags and harmless dummy values. Inside the Fortran wrapper,
+`nml_has__<name>__` flags and harmless dummy values. Inside the Fortran wrapper,
 allocated local variables are passed to the generated type-bound `set` method
 when a value is present; unallocated allocatables are passed otherwise, so the
 type-bound `set` still sees `present(arg) == .false.`. This keeps the f2py ABI
