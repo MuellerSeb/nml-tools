@@ -44,16 +44,20 @@ def _schema(name: str = "optimization") -> dict[str, Any]:
     }
 
 
-def _runtime_constant_schema(name: str = "config") -> dict[str, Any]:
+def _runtime_dimension_schema(name: str = "config") -> dict[str, Any]:
     return {
-        "title": "Runtime constants",
+        "title": "Runtime dimensions",
         "x-fortran-namelist": name,
         "type": "object",
-        "required": ["iterations", "tolerance"],
+        "required": ["iterations", "tolerance", "weights"],
         "properties": {
-            "name": {"type": "string", "x-fortran-len": "str_len"},
             "iterations": {"type": "integer", "x-fortran-kind": "i4"},
             "tolerance": {"type": "number", "x-fortran-kind": "dp"},
+            "weights": {
+                "type": "array",
+                "x-fortran-shape": "n_weights",
+                "items": {"type": "number", "x-fortran-kind": "dp"},
+            },
         },
     }
 
@@ -160,27 +164,30 @@ def test_generate_f2py_wrappers_uses_deferred_length_for_string_array_bridges(
     assert "character(len=*), dimension(:, :), allocatable :: maybe_names" not in generated
 
 
-def test_generate_f2py_wrappers_exposes_set_constants_wrapper(tmp_path: Path) -> None:
+def test_generate_f2py_wrappers_exposes_set_dims_wrapper(tmp_path: Path) -> None:
     codegen = _import_codegen_f2py()
     output = tmp_path / "f2py_config_wrappers.f90"
 
     codegen.generate_f2py_wrappers(
-        [_runtime_constant_schema()],
+        [_runtime_dimension_schema()],
         output,
         kind_module="iso_fortran_env",
         kind_map={"dp": "real64", "i4": "int32"},
         kind_allowlist={"real64", "int32"},
-        constants={"str_len": 32},
+        dimensions={"n_weights": 3},
     )
 
     generated = output.read_text()
-    assert "subroutine config_set_constants_wrapper" in generated
-    assert "integer, intent(in) :: str_len !< runtime override for str_len" in generated
-    assert "logical, intent(in) :: has_str_len !< whether str_len was provided" in generated
-    assert "integer, allocatable :: maybe_str_len" in generated
-    assert "if (has_str_len) then" in generated
-    assert "status = this%set_constants(" in generated
-    assert "str_len=maybe_str_len" in generated
+    assert "subroutine config_set_dims_wrapper" in generated
+    assert (
+        "integer, intent(in) :: n_weights !< runtime dimension override for n_weights"
+        in generated
+    )
+    assert "logical, intent(in) :: has_n_weights !< whether n_weights was provided" in generated
+    assert "integer, allocatable :: maybe_n_weights" in generated
+    assert "if (has_n_weights) then" in generated
+    assert "status = this%set_dims(" in generated
+    assert "n_weights=maybe_n_weights" in generated
 
 
 def test_generate_f2cmap_requires_explicit_kind_mappings(tmp_path: Path) -> None:
@@ -320,11 +327,11 @@ def test_generate_python_wrapper_uses_package_relative_import(tmp_path: Path) ->
     assert "expected_shape=None," in generated
 
 
-def test_generate_python_wrapper_exposes_set_constants(tmp_path: Path) -> None:
+def test_generate_python_wrapper_exposes_set_dims(tmp_path: Path) -> None:
     codegen = _import_codegen_f2py()
     spec = codegen.build_f2py_namelist_spec(
-        _runtime_constant_schema(),
-        constants={"str_len": 32},
+        _runtime_dimension_schema(),
+        dimensions={"n_weights": 3},
     )
     package_dir = tmp_path / "pkg"
     package_dir.mkdir()
@@ -334,7 +341,7 @@ def test_generate_python_wrapper_exposes_set_constants(tmp_path: Path) -> None:
 
     class FakeF2pyConfig:
         @staticmethod
-        def config_set_constants_wrapper(handle: int, **kwargs: Any) -> tuple[int, str]:
+        def config_set_dims_wrapper(handle: int, **kwargs: Any) -> tuple[int, str]:
             calls.append(kwargs)
             return 0, ""
 
@@ -354,15 +361,15 @@ def test_generate_python_wrapper_exposes_set_constants(tmp_path: Path) -> None:
         module_spec.loader.exec_module(module)
 
         cfg = module.Config(7)
-        cfg.set_constants(str_len=4)
-        cfg.set_constants()
+        cfg.set_dims(n_weights=4)
+        cfg.set_dims()
     finally:
         monkeypatch.undo()
 
-    assert calls[0]["str_len"] == 4
-    assert calls[0]["has_str_len"] is True
-    assert calls[1]["str_len"] == 0
-    assert calls[1]["has_str_len"] is False
+    assert calls[0]["n_weights"] == 4
+    assert calls[0]["has_n_weights"] is True
+    assert calls[1]["n_weights"] == 0
+    assert calls[1]["has_n_weights"] is False
 
 
 def test_generate_python_wrapper_supports_doxygen_docstrings(tmp_path: Path) -> None:

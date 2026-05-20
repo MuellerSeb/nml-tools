@@ -192,38 +192,38 @@ class {{ cls.class_name }}:
         )
         _check_status(result)
 
-{% if cls.set_constants_args %}
-    def set_constants(
+{% if cls.set_dims_args %}
+    def set_dims(
         self,
-{% for arg in cls.set_constants_args %}
+{% for arg in cls.set_dims_args %}
         {{ arg.name }}: Any = None,
 {% endfor %}
     ) -> None:
 {% if py_style == "doxygen" %}
         """!
-        Set runtime constants for the handled {{ cls.namelist_name }} instance.
+        Set runtime dimensions for the handled {{ cls.namelist_name }} instance.
 
-        Omitted or None values reset the corresponding constant to the configured
-        helper-module default. Applying constants reinitializes the handled
-        Fortran object and clears previously configured namelist values.
+        Omitted or None values reset the corresponding dimension to the configured
+        helper-module default. Applying dimensions deallocates affected arrays
+        and clears previously configured namelist values.
 
-{% for arg in cls.set_constants_args %}
-        @param {{ arg.name }} (int, optional): Runtime override for {{ arg.name }}.
+{% for arg in cls.set_dims_args %}
+        @param {{ arg.name }} (int, optional): Runtime dimension override for {{ arg.name }}.
 {% endfor %}
         @throws NmlError: If the Fortran setter returns a non-OK status.
         """
 {% else %}
-        """Set runtime constants for the handled {{ cls.namelist_name }} instance.
+        """Set runtime dimensions for the handled {{ cls.namelist_name }} instance.
 
-        Omitted or None values reset the corresponding constant to the configured
-        helper-module default. Applying constants reinitializes the handled
-        Fortran object and clears previously configured namelist values.
+        Omitted or None values reset the corresponding dimension to the configured
+        helper-module default. Applying dimensions deallocates affected arrays
+        and clears previously configured namelist values.
 
         Parameters
         ----------
-{% for arg in cls.set_constants_args %}
+{% for arg in cls.set_dims_args %}
         {{ arg.name }} : int, optional
-            Runtime override for {{ arg.name }}.
+            Runtime dimension override for {{ arg.name }}.
 {% endfor %}
 
         Raises
@@ -233,7 +233,7 @@ class {{ cls.class_name }}:
         """
 {% endif %}
         kwargs: dict[str, Any] = {}
-{% for arg in cls.set_constants_args %}
+{% for arg in cls.set_dims_args %}
         if {{ arg.name }} is not None:
             kwargs["{{ arg.name }}"] = {{ arg.name }}
         else:
@@ -242,7 +242,7 @@ class {{ cls.class_name }}:
         kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
 {% endif %}
 {% endfor %}
-        result = self._f2py.{{ cls.namelist_name }}_set_constants_wrapper(
+        result = self._f2py.{{ cls.namelist_name }}_set_dims_wrapper(
             self.handle,
             **kwargs,
         )
