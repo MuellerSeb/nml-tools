@@ -640,6 +640,13 @@ def test_generate_fortran_set_dims_validates_before_assignment(tmp_path: Path) -
     generated = output.read_text()
     assert "if (candidate_max_layers < 4) then" in generated
     assert "shape constants for 'values' must allow at least 4 default values" in generated
+    assert "namelist not configured; call set or from_file" in generated
+
+    is_set_idx = generated.index("integer function nml_test_nml_is_set")
+    is_valid_idx = generated.index("integer function nml_test_nml_is_valid")
+    generated.index("if (.not. this%is_configured) then", is_set_idx)
+    generated.index("if (.not. this%is_configured) then", is_valid_idx)
+
     validate_idx = generated.index("if (candidate_max_layers <= 0) then")
     assign_idx = generated.index("this%dim_max_layers = candidate_max_layers")
     assert assign_idx > validate_idx
