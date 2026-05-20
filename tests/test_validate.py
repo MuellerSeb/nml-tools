@@ -36,3 +36,28 @@ def test_validate_namelist_flex_array_shape() -> None:
     # f90nml-style nesting: outermost dimension is the last Fortran index.
     namelist = {"arr": [[[1, 2, 3], [4, 5, 6]]]}
     validate_namelist(schema, namelist)
+
+
+def test_validate_namelist_allows_dimensions_only_for_array_shapes() -> None:
+    schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "arr": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": ["n_values"],
+            },
+            "name": {
+                "type": "string",
+                "x-fortran-len": "n_values",
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="must not use runtime dimension"):
+        validate_namelist(
+            schema,
+            {"arr": [1, 2, 3], "name": "abc"},
+            dimensions={"n_values": 3},
+        )

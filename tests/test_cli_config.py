@@ -114,6 +114,25 @@ def test_check_minimum_version_rejects_invalid_values() -> None:
         cli_module._check_minimum_version({"minimum-version": "9999"})
 
 
+def test_load_dimensions_validates_values_and_duplicate_names() -> None:
+    constants = {"buf": 128}
+    dimensions, specs = cli_module._load_dimensions(
+        {"dimensions": {"n_cells": {"value": 3, "doc": "Number of cells."}}},
+        constants,
+    )
+
+    assert dimensions == {"n_cells": 3}
+    assert specs[0].name == "n_cells"
+    assert specs[0].value == "3"
+    assert specs[0].doc == "Number of cells."
+
+    with pytest.raises(click.ClickException, match="duplicates a constant"):
+        cli_module._load_dimensions({"dimensions": {"buf": {"value": 3}}}, constants)
+
+    with pytest.raises(click.ClickException, match="must be positive"):
+        cli_module._load_dimensions({"dimensions": {"n_cells": {"value": 0}}}, {})
+
+
 def test_load_toml_checked_reports_missing_file(tmp_path: Path) -> None:
     with pytest.raises(click.ClickException, match="missing.toml"):
         cli_module._load_toml_checked(tmp_path / "missing.toml")

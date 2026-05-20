@@ -351,6 +351,58 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
     return constants, specs
 
 
+def _load_dimensions(
+    config: dict[str, Any],
+    constants: dict[str, int | float],
+) -> tuple[dict[str, int], list[ConstantSpec]]:
+    dimensions_raw = config.get("dimensions", {})
+    if dimensions_raw is None:
+        dimensions_raw = {}
+    if not isinstance(dimensions_raw, dict):
+        raise click.ClickException("config 'dimensions' must be a table")
+
+    dimensions: dict[str, int] = {}
+    specs: list[ConstantSpec] = []
+    for name_raw, entry in dimensions_raw.items():
+        if not isinstance(name_raw, str):
+            raise click.ClickException("config dimensions must use string keys")
+        name = name_raw.strip()
+        if not name:
+            raise click.ClickException("config dimensions must have non-empty names")
+        if not _FORTRAN_IDENTIFIER.match(name):
+            raise click.ClickException(
+                f"config dimension '{name}' must be a valid Fortran identifier"
+            )
+        if name in constants:
+            raise click.ClickException(
+                f"config dimension '{name}' duplicates a constant name"
+            )
+        if not isinstance(entry, dict):
+            raise click.ClickException(f"config dimension '{name}' must be a table with 'value'")
+        if "value" not in entry:
+            raise click.ClickException(f"config dimension '{name}' must define 'value'")
+        value = entry.get("value")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise click.ClickException(f"config dimension '{name}' value must be an integer")
+        if value <= 0:
+            raise click.ClickException(f"config dimension '{name}' value must be positive")
+        doc = entry.get("doc")
+        if doc is not None:
+            if not isinstance(doc, str):
+                raise click.ClickException(f"config dimension '{name}' doc must be a string")
+            doc = " ".join(doc.splitlines()).strip() or None
+        specs.append(
+            ConstantSpec(
+                name=name,
+                type_spec="integer",
+                value=str(value),
+                doc=doc,
+            )
+        )
+        dimensions[name] = value
+    return dimensions, specs
+
+
 def _load_bool_field(section: dict[str, Any], key: str, *, label: str) -> bool:
     value = section.get(key, False)
     if isinstance(value, bool):
@@ -545,6 +597,8 @@ def _collect_generated_outputs(
         py_style,
     ) = _load_documentation_settings(config)
     constants, constant_specs = _load_constants(config)
+    dimensions, dimension_specs = _load_dimensions(config, constants)
+    shape_constants: dict[str, int | float] = {**constants, **dimensions}
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
     outputs: list[GeneratedOutput] = []
@@ -559,7 +613,7 @@ def _collect_generated_outputs(
                         file_name=helper_path.name,
                         module_name=helper_module,
                         len_buf=helper_buffer,
-                        constants=constant_specs,
+                        constants=constant_specs + dimension_specs,
                         module_doc=module_doc,
                         helper_header=helper_header,
                     ),
@@ -597,6 +651,7 @@ def _collect_generated_outputs(
                             kind_map=kind_map,
                             kind_allowlist=kind_allowlist,
                             constants=constants,
+                            dimensions=dimensions,
                             module_doc=module_doc,
                             f2py_handle_helpers=namelist_entry["f2py_path"] is not None,
                         ),
@@ -614,7 +669,7 @@ def _collect_generated_outputs(
                         doc_path,
                         render_docs(
                             schema,
-                            constants=constants,
+                            constants=shape_constants,
                             md_doxygen_id_from_name=md_doxygen_id_from_name,
                             md_add_toc_statement=md_add_toc_statement,
                         ),
@@ -632,6 +687,7 @@ def _collect_generated_outputs(
             kind_map=kind_map,
             kind_allowlist=kind_allowlist,
             constants=constants,
+            dimensions=dimensions,
             f2cmap_path=f2cmap_path,
             f2py_c_types=f2py_c_types,
             py_style=py_style,
@@ -656,7 +712,7 @@ def _collect_generated_outputs(
                         schemas,
                         doc_mode=template_entry["doc_mode"],
                         value_mode=template_entry["value_mode"],
-                        constants=constants,
+                        constants=shape_constants,
                         kind_map=kind_map,
                         kind_allowlist=kind_allowlist,
                         values=template_entry["values"],
@@ -678,6 +734,7 @@ def _collect_f2py_outputs(
     kind_map: dict[str, str],
     kind_allowlist: set[str],
     constants: dict[str, int | float],
+    dimensions: dict[str, int],
     f2cmap_path: Path | None,
     f2py_c_types: F2pyCTypeMap,
     py_style: str,
@@ -711,6 +768,7 @@ def _collect_f2py_outputs(
                         kind_map=kind_map,
                         kind_allowlist=kind_allowlist,
                         constants=constants,
+                        dimensions=dimensions,
                         errmsg_len=helper_buffer,
                     ),
                 )
@@ -721,7 +779,7 @@ def _collect_f2py_outputs(
     if f2cmap_path is not None:
         try:
             usage = merge_f2py_kind_usage(
-                collect_f2py_kind_usage(schemas, constants=constants)
+                collect_f2py_kind_usage(schemas, constants=constants, dimensions=dimensions)
                 for schemas in f2py_groups.values()
             )
             logger.debug("Rendering f2py kind map at %s", f2cmap_path)
@@ -748,6 +806,7 @@ def _collect_f2py_outputs(
                         kind_map=kind_map,
                         kind_allowlist=kind_allowlist,
                         constants=constants,
+                        dimensions=dimensions,
                         errmsg_len=helper_buffer,
                     ),
                     f2py_path.stem,
@@ -777,6 +836,7 @@ def _generate_f2py_outputs(
     kind_map: dict[str, str],
     kind_allowlist: set[str],
     constants: dict[str, int | float],
+    dimensions: dict[str, int],
     f2cmap_path: Path | None,
     f2py_c_types: F2pyCTypeMap,
     py_style: str,
@@ -791,6 +851,7 @@ def _generate_f2py_outputs(
             kind_map=kind_map,
             kind_allowlist=kind_allowlist,
             constants=constants,
+            dimensions=dimensions,
             f2cmap_path=f2cmap_path,
             f2py_c_types=f2py_c_types,
             py_style=py_style,
@@ -903,6 +964,7 @@ def gen_fortran(config_path: Path | None) -> None:
     )
     module_doc, _, _, py_style = _load_documentation_settings(config)
     constants, constant_specs = _load_constants(config)
+    dimensions, dimension_specs = _load_dimensions(config, constants)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
     if helper_path is not None:
@@ -912,7 +974,7 @@ def gen_fortran(config_path: Path | None) -> None:
                 helper_path,
                 module_name=helper_module,
                 len_buf=helper_buffer,
-                constants=constant_specs,
+                constants=constant_specs + dimension_specs,
                 module_doc=module_doc,
                 helper_header=helper_header,
             )
@@ -945,6 +1007,7 @@ def gen_fortran(config_path: Path | None) -> None:
                 kind_map=kind_map,
                 kind_allowlist=kind_allowlist,
                 constants=constants,
+                dimensions=dimensions,
                 module_doc=module_doc,
                 f2py_handle_helpers=entry["f2py_path"] is not None,
             )
@@ -959,6 +1022,7 @@ def gen_fortran(config_path: Path | None) -> None:
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         constants=constants,
+        dimensions=dimensions,
         f2cmap_path=f2cmap_path,
         f2py_c_types=f2py_c_types,
         py_style=py_style,
@@ -1009,6 +1073,7 @@ def validate(
     if input_path is None:
         raise click.ClickException("input path is required")
     constants = _parse_cli_constants(constant_args)
+    dimensions: dict[str, int] = {}
     schemas: list[dict[str, Any]] = []
 
     if schema_paths:
@@ -1016,6 +1081,7 @@ def validate(
             config, config_path = _load_config_checked(config_path)
             logger.info("Loading config from %s", config_path)
             cfg_constants, _ = _load_constants(config)
+            dimensions, _ = _load_dimensions(config, cfg_constants)
             constants = {**cfg_constants, **constants}
         for schema_file in schema_paths:
             try:
@@ -1029,6 +1095,7 @@ def validate(
         logger.info("Loading config from %s", config_path)
         base_dir = config_path.parent
         cfg_constants, _ = _load_constants(config)
+        dimensions, _ = _load_dimensions(config, cfg_constants)
         constants = {**cfg_constants, **constants}
         entries = _iter_namelists(config, base_dir)
         logger.info("Found %d schema entries", len(entries))
@@ -1088,6 +1155,7 @@ def validate(
                 schema,
                 file_entries[key][1],
                 constants=constants,
+                dimensions=dimensions,
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
@@ -1109,6 +1177,8 @@ def gen_markdown(config_path: Path | None) -> None:
     logger.info("Loading config from %s", config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
+    dimensions, _ = _load_dimensions(config, constants)
+    shape_constants: dict[str, int | float] = {**constants, **dimensions}
     _, md_doxygen_id_from_name, md_add_toc_statement, _ = _load_documentation_settings(
         config
     )
@@ -1131,7 +1201,7 @@ def gen_markdown(config_path: Path | None) -> None:
             generate_docs(
                 schema,
                 doc_path,
-                constants=constants,
+                constants=shape_constants,
                 md_doxygen_id_from_name=md_doxygen_id_from_name,
                 md_add_toc_statement=md_add_toc_statement,
             )
@@ -1153,6 +1223,8 @@ def gen_template(config_path: Path | None) -> None:
     logger.info("Loading config from %s", config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
+    dimensions, _ = _load_dimensions(config, constants)
+    shape_constants: dict[str, int | float] = {**constants, **dimensions}
     _, kind_map, kind_allowlist = _load_kind_settings(config)
     templates = _iter_templates(config, base_dir)
     if not templates:
@@ -1170,7 +1242,7 @@ def gen_template(config_path: Path | None) -> None:
                 entry["output"],
                 doc_mode=entry["doc_mode"],
                 value_mode=entry["value_mode"],
-                constants=constants,
+                constants=shape_constants,
                 kind_map=kind_map,
                 kind_allowlist=kind_allowlist,
                 values=entry["values"],
