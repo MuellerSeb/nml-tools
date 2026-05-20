@@ -270,10 +270,10 @@ Controls the generated helper module.
 Named static constants used for fixed dimensions, string lengths, and generated
 helper parameters.
 
-- Each entry is a table with `value` (int/float) and optional `doc`.
-- Values must be plain numbers (no kind suffixes).
-- String lengths from `x-fortran-len` may use integer constants only. Runtime
-  dimensions are intentionally not supported for string lengths.
+- Each entry is a table with integer `value` and optional `doc`.
+- Values must be plain integers (no kind suffixes).
+- String lengths from `x-fortran-len` may use constants. Runtime dimensions are
+  intentionally not supported for string lengths.
 
 Example:
 
