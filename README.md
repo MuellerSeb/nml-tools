@@ -490,8 +490,8 @@ overridden for a validation run:
 
 ```bash
 nml-tools validate --config nml-config.toml \
-  --constants BUF=128 \
-  --dimensions MAX_ITER=10 \
+  --constants buf=128 \
+  --dimensions max_iter=10 \
   input.nml
 ```
 
@@ -499,14 +499,15 @@ In schema-only validation, provide the same values ad hoc:
 
 ```bash
 nml-tools validate --schema demo.yml \
-  --constants BUF=128 \
-  --dimensions MAX_ITER=10 \
+  --constants buf=128 \
+  --dimensions max_iter=10 \
   input.nml
 ```
 
 `--constants` supplies static schema constants for string lengths and fixed
-array shapes. `--dimensions` supplies runtime array dimensions. Names must stay
-unique across both sets.
+array shapes. `--dimensions` supplies runtime array dimensions. Names are
+matched case-insensitively, normalized to lowercase, and must stay unique across
+both sets.
 
 Array values are validated as rectangular lists in Fortran order
 (outer list corresponds to the last Fortran index), matching `f90nml` parsing.
