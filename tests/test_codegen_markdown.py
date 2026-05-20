@@ -18,6 +18,55 @@ def _import_generate_docs():
     return module.generate_docs
 
 
+def test_generate_docs_accepts_runtime_dimensions_for_shapes(tmp_path: Path) -> None:
+    schema = {
+        "title": "Runtime dimension docs",
+        "x-fortran-namelist": "runtime_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "default": 1},
+                "x-fortran-shape": "n_values",
+            }
+        },
+    }
+
+    output = tmp_path / "runtime.md"
+    generate_docs = _import_generate_docs()
+    generate_docs(schema, output, dimensions={"n_values": 3})
+
+    rendered = output.read_text()
+    assert "integer, dimension(n_values)" in rendered
+    assert "Default: `1`" in rendered
+
+
+def test_generate_docs_rejects_runtime_dimensions_for_string_lengths(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Runtime dimension length docs",
+        "x-fortran-namelist": "runtime_nml",
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "x-fortran-len": "n_values",
+            }
+        },
+    }
+
+    output = tmp_path / "runtime.md"
+    generate_docs = _import_generate_docs()
+
+    try:
+        generate_docs(schema, output, dimensions={"n_values": 3})
+    except ValueError as exc:
+        assert "string length constant 'n_values' is not defined" in str(exc)
+    else:
+        raise AssertionError("expected runtime dimension in string length to fail")
+
+
 def test_generate_docs_shows_items_default(tmp_path: Path) -> None:
     schema = {
         "title": "Items default docs",

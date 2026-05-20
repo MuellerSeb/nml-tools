@@ -703,7 +703,8 @@ def _collect_generated_outputs(
                         doc_path,
                         render_docs(
                             schema,
-                            constants=shape_constants,
+                            constants=constants,
+                            dimensions=dimensions,
                             md_doxygen_id_from_name=md_doxygen_id_from_name,
                             md_add_toc_statement=md_add_toc_statement,
                         ),
@@ -1225,7 +1226,6 @@ def gen_markdown(config_path: Path | None) -> None:
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
     dimensions, _ = _load_dimensions(config, constants)
-    shape_constants: dict[str, int | float] = {**constants, **dimensions}
     _, md_doxygen_id_from_name, md_add_toc_statement, _ = _load_documentation_settings(
         config
     )
@@ -1248,7 +1248,8 @@ def gen_markdown(config_path: Path | None) -> None:
             generate_docs(
                 schema,
                 doc_path,
-                constants=shape_constants,
+                constants=constants,
+                dimensions=dimensions,
                 md_doxygen_id_from_name=md_doxygen_id_from_name,
                 md_add_toc_statement=md_add_toc_statement,
             )

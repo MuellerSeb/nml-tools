@@ -29,6 +29,7 @@ def generate_docs(
     output: str | Path,
     *,
     constants: dict[str, int | float] | None = None,
+    dimensions: dict[str, int] | None = None,
     md_doxygen_id_from_name: bool = False,
     md_add_toc_statement: bool = False,
 ) -> None:
@@ -36,6 +37,7 @@ def generate_docs(
     rendered = render_docs(
         schema,
         constants=constants,
+        dimensions=dimensions,
         md_doxygen_id_from_name=md_doxygen_id_from_name,
         md_add_toc_statement=md_add_toc_statement,
     )
@@ -48,6 +50,7 @@ def render_docs(
     schema: dict[str, Any],
     *,
     constants: dict[str, int | float] | None = None,
+    dimensions: dict[str, int] | None = None,
     md_doxygen_id_from_name: bool = False,
     md_add_toc_statement: bool = False,
 ) -> str:
@@ -76,6 +79,10 @@ def render_docs(
     if not isinstance(required_raw, list):
         raise ValueError("schema 'required' must be a list")
     required_set = _validate_required(required_raw)
+    shape_constants: dict[str, int | float] = {
+        **(constants or {}),
+        **(dimensions or {}),
+    }
 
     title_line = f"# {title}"
     if md_doxygen_id_from_name:
@@ -103,7 +110,7 @@ def render_docs(
             if not isinstance(prop, dict):
                 raise ValueError(f"property '{name}' must be an object")
             type_info = _field_type_info(prop, constants)
-            _collect_dimension_constants(type_info.dimensions, constants)
+            _collect_dimension_constants(type_info.dimensions, shape_constants)
             type_label = _format_table_type(type_info)
             info_label = _format_info(prop)
             required_label = "yes" if name in required_set else "no"
@@ -135,8 +142,8 @@ def render_docs(
                 raise ValueError(f"property '{name}' must be an object")
             type_info = _field_type_info(prop, constants)
             required_label = "yes" if name in required_set else "no"
-            default_label = _get_default_value(prop, type_info, constants)
-            enum_label = _get_enum_values(prop, type_info, constants)
+            default_label = _get_default_value(prop, type_info, shape_constants)
+            enum_label = _get_enum_values(prop, type_info, shape_constants)
             example_values = _get_example_values(prop, type_info)
             flex_tail_dims = _get_flex_tail_dims(prop, type_info)
             title = _get_title(prop)
@@ -194,7 +201,7 @@ def render_docs(
         [schema],
         doc_mode="plain",
         value_mode="filled",
-        constants=constants,
+        constants=shape_constants,
         kind_map=None,
         kind_allowlist=None,
     )
