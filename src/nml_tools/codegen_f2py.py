@@ -45,6 +45,7 @@ class F2pyArgumentSpec:
     requirement: str
     has_flag: str | None = None
     fixed_shape: list[int] | None = None
+    python_name: str | None = None
 
 
 @dataclass
@@ -384,6 +385,7 @@ def build_f2py_namelist_spec(
     for entry in runtime_dimension_args:
         const_name = entry["name"]
         arg_name = entry["arg_name"]
+        python_name = _python_parameter_name(const_name)
         has_flag = f"has_{const_name}"
         set_dims_args.append(
             F2pyArgumentSpec(
@@ -397,6 +399,7 @@ def build_f2py_namelist_spec(
                 requirement="optional",
                 has_flag=has_flag,
                 fixed_shape=None,
+                python_name=python_name,
             )
         )
         set_dims_argument_list.append(const_name)
@@ -517,6 +520,14 @@ def _class_name(namelist_name: str) -> str:
         name = f"Namelist{name}"
     if keyword.iskeyword(name):
         name = f"{name}Namelist"
+    return name
+
+
+def _python_parameter_name(name: str) -> str:
+    if not name.isidentifier():
+        raise ValueError(f"name '{name}' is not a valid Python identifier")
+    if keyword.iskeyword(name):
+        return f"{name}_"
     return name
 
 

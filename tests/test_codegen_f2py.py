@@ -390,6 +390,36 @@ def test_generate_python_wrapper_exposes_set_dims(tmp_path: Path) -> None:
     assert calls[1]["has_n_weights"] is False
 
 
+def test_generate_python_wrapper_set_dims_keyword_dimension_name(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "title": "Keyword dimensions",
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "required": ["values"],
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": "class",
+                "items": {"type": "number", "x-fortran-kind": "dp"},
+            },
+        },
+    }
+    spec = codegen.build_f2py_namelist_spec(
+        schema,
+        dimensions={"class": 3},
+    )
+    output = tmp_path / "config_wrappers.py"
+
+    codegen.generate_python_wrappers([(spec, "f2py_config")], output)
+
+    generated = output.read_text()
+    assert "def set_dims(" in generated
+    assert "class_: Any = None" in generated
+    assert 'kwargs["class"] = class_' in generated
+    assert 'kwargs["has_class"] = class_ is not None' in generated
+
+
 def test_generate_python_wrapper_supports_doxygen_docstrings(tmp_path: Path) -> None:
     codegen = _import_codegen_f2py()
     spec = codegen.build_f2py_namelist_spec(_schema())

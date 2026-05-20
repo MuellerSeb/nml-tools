@@ -196,7 +196,8 @@ class {{ cls.class_name }}:
     def set_dims(
         self,
 {% for arg in cls.set_dims_args %}
-        {{ arg.name }}: Any = None,
+{% set py_name = arg.python_name if arg.python_name is not none else arg.name %}
+        {{ py_name }}: Any = None,
 {% endfor %}
     ) -> None:
 {% if py_style == "doxygen" %}
@@ -208,7 +209,8 @@ class {{ cls.class_name }}:
         and clears previously configured namelist values.
 
 {% for arg in cls.set_dims_args %}
-        @param {{ arg.name }} (int, optional): Runtime dimension override for {{ arg.name }}.
+{% set py_name = arg.python_name if arg.python_name is not none else arg.name %}
+    @param {{ py_name }} (int, optional): Runtime dimension override for {{ arg.name }}.
 {% endfor %}
         @throws NmlError: If the Fortran setter returns a non-OK status.
         """
@@ -222,7 +224,8 @@ class {{ cls.class_name }}:
         Parameters
         ----------
 {% for arg in cls.set_dims_args %}
-        {{ arg.name }} : int, optional
+{% set py_name = arg.python_name if arg.python_name is not none else arg.name %}
+        {{ py_name }} : int, optional
             Runtime dimension override for {{ arg.name }}.
 {% endfor %}
 
@@ -234,12 +237,13 @@ class {{ cls.class_name }}:
 {% endif %}
         kwargs: dict[str, Any] = {}
 {% for arg in cls.set_dims_args %}
-        if {{ arg.name }} is not None:
-            kwargs["{{ arg.name }}"] = {{ arg.name }}
+{% set py_name = arg.python_name if arg.python_name is not none else arg.name %}
+        if {{ py_name }} is not None:
+            kwargs["{{ arg.name }}"] = {{ py_name }}
         else:
             kwargs["{{ arg.name }}"] = {{ arg.dummy_value }}
 {% if arg.has_flag is not none %}
-        kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
+        kwargs["{{ arg.has_flag }}"] = {{ py_name }} is not None
 {% endif %}
 {% endfor %}
         result = self._f2py.{{ cls.namelist_name }}_set_dims_wrapper(
