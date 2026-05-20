@@ -30,6 +30,7 @@ def validate_namelist(
     dimensions: dict[str, int] | None = None,
 ) -> None:
     """Validate *namelist* against *schema*."""
+    _validate_dimensions(dimensions)
     if constants is not None and dimensions is not None:
         overlap = sorted(set(constants) & set(dimensions))
         if overlap:
@@ -66,6 +67,20 @@ def validate_namelist(
             )
         elif key in required:
             raise ValueError(f"namelist '{namelist_name}' is missing required '{prop_name}'")
+
+
+def _validate_dimensions(dimensions: Mapping[str, int] | None) -> None:
+    if dimensions is None:
+        return
+    for name, value in dimensions.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("runtime dimension names must be non-empty strings")
+        if not _FORTRAN_IDENTIFIER.match(name):
+            raise ValueError(f"runtime dimension '{name}' must be a valid Fortran identifier")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"runtime dimension '{name}' must be an integer")
+        if value <= 0:
+            raise ValueError(f"runtime dimension '{name}' must be positive")
 
 
 def _normalize_properties(

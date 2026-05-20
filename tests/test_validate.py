@@ -99,3 +99,26 @@ def test_validate_namelist_rejects_constant_dimension_name_overlap() -> None:
             constants={"n_values": 3},
             dimensions={"n_values": 3},
         )
+
+
+def test_validate_namelist_rejects_invalid_dimensions() -> None:
+    schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "arr": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": "n_values",
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="valid Fortran identifier"):
+        validate_namelist(schema, {"arr": [1]}, dimensions={"1bad": 1})
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        validate_namelist(schema, {"arr": [1]}, dimensions={"n_values": True})
+
+    with pytest.raises(ValueError, match="must be positive"):
+        validate_namelist(schema, {"arr": [1]}, dimensions={"n_values": 0})

@@ -275,7 +275,7 @@ def _build_context(
     bounds_functions: list[dict[str, Any]] = []
     bounds_checks: list[dict[str, Any]] = []
     static_constants = constants or {}
-    runtime_dimension_values = dimensions or {}
+    runtime_dimension_values = _validate_runtime_dimensions(dimensions)
     duplicate_names = sorted(set(static_constants) & set(runtime_dimension_values))
     if duplicate_names:
         raise ValueError(
@@ -1459,6 +1459,23 @@ def _extract_dimensions(prop: dict[str, Any]) -> list[str]:
 
 
 _FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+
+def _validate_runtime_dimensions(dimensions: dict[str, int] | None) -> dict[str, int]:
+    if dimensions is None:
+        return {}
+    normalized: dict[str, int] = {}
+    for name, value in dimensions.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("runtime dimension names must be non-empty strings")
+        if not _FORTRAN_IDENTIFIER.match(name):
+            raise ValueError(f"runtime dimension '{name}' must be a valid Fortran identifier")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"runtime dimension '{name}' must be an integer")
+        if value <= 0:
+            raise ValueError(f"runtime dimension '{name}' must be positive")
+        normalized[name] = value
+    return normalized
 
 
 def _is_int_literal(value: str) -> bool:

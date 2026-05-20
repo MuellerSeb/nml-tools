@@ -242,6 +242,47 @@ def test_generate_fortran_accepts_runtime_dimensions(tmp_path: Path) -> None:
     assert "this%values = values_default" in generated
 
 
+def test_generate_fortran_rejects_invalid_runtime_dimensions(tmp_path: Path) -> None:
+    schema = {
+        "title": "Runtime dimensions",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4", "default": 1},
+                "x-fortran-shape": "max_layers",
+            }
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+
+    with pytest.raises(ValueError, match="valid Fortran identifier"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test_invalid_name.f90",
+            kind_module="mo_kind",
+            dimensions={"1bad": 3},
+        )
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test_bool.f90",
+            kind_module="mo_kind",
+            dimensions={"max_layers": True},
+        )
+
+    with pytest.raises(ValueError, match="must be positive"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test_zero.f90",
+            kind_module="mo_kind",
+            dimensions={"max_layers": 0},
+        )
+
+
 def test_generate_fortran_requires_array_shape(tmp_path: Path) -> None:
     schema = {
         "title": "Missing shape",
