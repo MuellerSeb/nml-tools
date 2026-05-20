@@ -183,7 +183,11 @@ def test_generate_f2py_wrappers_exposes_set_dims_wrapper(tmp_path: Path) -> None
         "integer, intent(in) :: n_weights !< runtime dimension override for n_weights"
         in generated
     )
-    assert "logical, intent(in) :: nml_has__n_weights__ !< whether n_weights was provided" in generated
+    assert (
+        "logical, intent(in) :: nml_has__n_weights__ "
+        "!< whether n_weights was provided"
+        in generated
+    )
     assert "integer, allocatable :: maybe_n_weights" in generated
     assert "if (nml_has__n_weights__) then" in generated
     assert "status = this%set_dims(" in generated
