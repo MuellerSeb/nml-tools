@@ -17,6 +17,7 @@ module config_store
   public :: reset_config
   public :: get_iterations
   public :: get_tolerance
+  public :: get_weight_count
   public :: get_weight
   public :: get_enabled
   public :: print_config
@@ -55,6 +56,13 @@ contains
 
     value = config%tolerance
   end subroutine get_tolerance
+
+  !> \brief Return the current number of configured weights
+  subroutine get_weight_count(value)
+    integer, intent(out) :: value !< current weight array extent
+
+    value = size(config%weights)
+  end subroutine get_weight_count
 
   !> \brief Return one configured weight
   subroutine get_weight(index, value)

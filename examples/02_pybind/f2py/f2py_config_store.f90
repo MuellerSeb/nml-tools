@@ -13,6 +13,7 @@ module f2py_config_store
     get_enabled, &
     get_iterations, &
     get_tolerance, &
+    get_weight_count, &
     get_weight, &
     print_config, &
     reset_config
@@ -49,6 +50,13 @@ contains
 
     call get_tolerance(value)
   end subroutine config_get_tolerance_wrapper
+
+  !> \brief Return the current number of configured weights.
+  subroutine config_get_weight_count_wrapper(value)
+    integer, intent(out) :: value !< current weight array extent
+
+    call get_weight_count(value)
+  end subroutine config_get_weight_count_wrapper
 
   !> \brief Return one configured weight value.
   subroutine config_get_weight_wrapper(index, value)
