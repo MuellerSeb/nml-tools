@@ -30,12 +30,12 @@ def validate_namelist(
     dimensions: dict[str, int] | None = None,
 ) -> None:
     """Validate *namelist* against *schema*."""
-    _validate_dimensions(dimensions)
-    if constants is not None and dimensions is not None:
-        overlap = sorted(set(constants) & set(dimensions))
-        if overlap:
-            names = ", ".join(overlap)
-            raise ValueError(f"constants and dimensions must not share names: {names}")
+    constants = _normalize_constants(constants)
+    dimensions = _normalize_dimensions(dimensions)
+    overlap = sorted(set(constants) & set(dimensions))
+    if overlap:
+        names = ", ".join(overlap)
+        raise ValueError(f"constants and dimensions must not share names: {names}")
 
     namelist_name = schema.get("x-fortran-namelist")
     if not isinstance(namelist_name, str) or not namelist_name.strip():
@@ -69,18 +69,42 @@ def validate_namelist(
             raise ValueError(f"namelist '{namelist_name}' is missing required '{prop_name}'")
 
 
-def _validate_dimensions(dimensions: Mapping[str, int] | None) -> None:
+def _normalize_constants(
+    constants: Mapping[str, int | float] | None,
+) -> dict[str, int | float]:
+    if constants is None:
+        return {}
+    normalized: dict[str, int | float] = {}
+    for name, value in constants.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("constant names must be non-empty strings")
+        if not _FORTRAN_IDENTIFIER.match(name):
+            raise ValueError(f"constant '{name}' must be a valid Fortran identifier")
+        canonical_name = name.lower()
+        if canonical_name in normalized:
+            raise ValueError(f"constant '{name}' duplicates another constant name")
+        normalized[canonical_name] = value
+    return normalized
+
+
+def _normalize_dimensions(dimensions: Mapping[str, int] | None) -> dict[str, int]:
     if dimensions is None:
-        return
+        return {}
+    normalized: dict[str, int] = {}
     for name, value in dimensions.items():
         if not isinstance(name, str) or not name.strip():
             raise ValueError("runtime dimension names must be non-empty strings")
         if not _FORTRAN_IDENTIFIER.match(name):
             raise ValueError(f"runtime dimension '{name}' must be a valid Fortran identifier")
+        canonical_name = name.lower()
+        if canonical_name in normalized:
+            raise ValueError(f"runtime dimension '{name}' duplicates another dimension name")
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"runtime dimension '{name}' must be an integer")
         if value <= 0:
             raise ValueError(f"runtime dimension '{name}' must be positive")
+        normalized[canonical_name] = value
+    return normalized
 
 
 def _normalize_properties(
@@ -263,13 +287,14 @@ def _parse_length(
             return length
         if not _FORTRAN_IDENTIFIER.match(token):
             raise ValueError(f"string property '{name}' length must be literal or identifier")
-        if dimensions is not None and token in dimensions:
+        token_key = token.lower()
+        if dimensions is not None and token_key in dimensions:
             raise ValueError(
                 f"string property '{name}' length must not use runtime dimension '{token}'"
             )
-        if constants is None or token not in constants:
+        if constants is None or token_key not in constants:
             raise ValueError(f"string property '{name}' length constant '{token}' not defined")
-        value = constants[token]
+        value = constants[token_key]
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"string property '{name}' length constant '{token}' must be int")
         if value <= 0:
@@ -483,9 +508,10 @@ def _parse_shape(
                 raise ValueError(
                     f"array property '{name}' shape entries must be ints or identifiers"
                 )
-            if constants is None or token not in constants:
+            token_key = token.lower()
+            if constants is None or token_key not in constants:
                 raise ValueError(f"array property '{name}' constant '{token}' not defined")
-            value = constants[token]
+            value = constants[token_key]
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(f"array property '{name}' constant '{token}' must be int")
             if value <= 0:

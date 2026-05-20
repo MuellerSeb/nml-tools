@@ -114,8 +114,28 @@ def test_check_minimum_version_rejects_invalid_values() -> None:
         cli_module._check_minimum_version({"minimum-version": "9999"})
 
 
+def test_load_constants_normalizes_names_case_insensitively() -> None:
+    constants, specs = cli_module._load_constants(
+        {"constants": {"BUF": {"value": 128, "doc": "Buffer length."}}}
+    )
+
+    assert constants == {"buf": 128}
+    assert specs[0].name == "buf"
+    assert specs[0].doc == "Buffer length."
+
+    with pytest.raises(click.ClickException, match="duplicates another constant"):
+        cli_module._load_constants(
+            {
+                "constants": {
+                    "buf": {"value": 128},
+                    "BUF": {"value": 256},
+                }
+            }
+        )
+
+
 def test_load_dimensions_validates_values_and_duplicate_names() -> None:
-    constants = {"buf": 128}
+    constants = {"BUF": 128}
     dimensions, specs = cli_module._load_dimensions(
         {"dimensions": {"n_cells": {"value": 3, "doc": "Number of cells."}}},
         constants,
@@ -127,14 +147,25 @@ def test_load_dimensions_validates_values_and_duplicate_names() -> None:
     assert specs[0].doc == "Number of cells."
 
     with pytest.raises(click.ClickException, match="duplicates a constant"):
-        cli_module._load_dimensions({"dimensions": {"buf": {"value": 3}}}, constants)
+        cli_module._load_dimensions({"dimensions": {"BUF": {"value": 3}}}, constants)
+
+    with pytest.raises(click.ClickException, match="duplicates another dimension"):
+        cli_module._load_dimensions(
+            {
+                "dimensions": {
+                    "n_cells": {"value": 3},
+                    "N_CELLS": {"value": 4},
+                }
+            },
+            {},
+        )
 
     with pytest.raises(click.ClickException, match="must be positive"):
         cli_module._load_dimensions({"dimensions": {"n_cells": {"value": 0}}}, {})
 
 
 def test_parse_cli_dimensions_validates_values() -> None:
-    assert cli_module._parse_cli_dimensions(("n_cells=3",)) == {"n_cells": 3}
+    assert cli_module._parse_cli_dimensions(("N_CELLS=3",)) == {"n_cells": 3}
 
     with pytest.raises(click.ClickException, match="NAME=VALUE"):
         cli_module._parse_cli_dimensions(("n_cells",))
@@ -147,6 +178,16 @@ def test_parse_cli_dimensions_validates_values() -> None:
 
     with pytest.raises(click.ClickException, match="positive"):
         cli_module._parse_cli_dimensions(("n_cells=0",))
+
+    with pytest.raises(click.ClickException, match="duplicates another dimension"):
+        cli_module._parse_cli_dimensions(("n_cells=3", "N_CELLS=4"))
+
+
+def test_parse_cli_constants_normalizes_and_rejects_duplicates() -> None:
+    assert cli_module._parse_cli_constants(("BUF=128",)) == {"buf": 128}
+
+    with pytest.raises(click.ClickException, match="duplicates another constant"):
+        cli_module._parse_cli_constants(("buf=128", "BUF=256"))
 
 
 def test_load_toml_checked_reports_missing_file(tmp_path: Path) -> None:

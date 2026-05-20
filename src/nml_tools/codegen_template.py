@@ -12,7 +12,10 @@ from .codegen_fortran import (
     _enum_values,
     _field_type_info,
     _format_scalar_default,
+    _normalize_constant_values,
     _parse_default_dimensions,
+    _reject_runtime_dimension_lengths,
+    _validate_runtime_dimensions,
 )
 
 _MISSING = object()
@@ -95,9 +98,16 @@ def _render_template(
     values_map = values or {}
     if not isinstance(values_map, dict):
         raise ValueError("template values must be a table of namelist tables")
+    constants = _normalize_constant_values(constants)
+    dimensions = _validate_runtime_dimensions(dimensions)
+    overlap = sorted(set(constants) & set(dimensions))
+    if overlap:
+        raise ValueError(
+            "constants and dimensions must not share names: " + ", ".join(overlap)
+        )
     shape_constants: dict[str, int | float] = {
-        **(constants or {}),
-        **(dimensions or {}),
+        **constants,
+        **dimensions,
     }
 
     schema_by_name: dict[str, dict[str, Any]] = {}
@@ -153,6 +163,7 @@ def _render_template(
                 current_property = name
                 if not isinstance(prop, dict):
                     raise ValueError(f"property '{name}' must be an object")
+                _reject_runtime_dimension_lengths(prop, dimensions)
                 type_info = _field_type_info(prop, constants)
                 _collect_dimension_constants(type_info.dimensions, shape_constants)
                 _validate_kind_allowlist(type_info, kind_map, kind_allowlist)

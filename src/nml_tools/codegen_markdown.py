@@ -16,8 +16,11 @@ from .codegen_fortran import (
     _enum_values,
     _field_type_info,
     _format_scalar_default,
+    _normalize_constant_values,
     _parse_default_dimensions,
     _prepare_array_default,
+    _reject_runtime_dimension_lengths,
+    _validate_runtime_dimensions,
 )
 from .codegen_template import render_template
 
@@ -79,9 +82,16 @@ def render_docs(
     if not isinstance(required_raw, list):
         raise ValueError("schema 'required' must be a list")
     required_set = _validate_required(required_raw)
+    constants = _normalize_constant_values(constants)
+    dimensions = _validate_runtime_dimensions(dimensions)
+    overlap = sorted(set(constants) & set(dimensions))
+    if overlap:
+        raise ValueError(
+            "constants and dimensions must not share names: " + ", ".join(overlap)
+        )
     shape_constants: dict[str, int | float] = {
-        **(constants or {}),
-        **(dimensions or {}),
+        **constants,
+        **dimensions,
     }
 
     title_line = f"# {title}"
@@ -109,6 +119,7 @@ def render_docs(
             current_property = name
             if not isinstance(prop, dict):
                 raise ValueError(f"property '{name}' must be an object")
+            _reject_runtime_dimension_lengths(prop, dimensions)
             type_info = _field_type_info(prop, constants)
             _collect_dimension_constants(type_info.dimensions, shape_constants)
             type_label = _format_table_type(type_info)
@@ -140,6 +151,7 @@ def render_docs(
             current_property = name
             if not isinstance(prop, dict):
                 raise ValueError(f"property '{name}' must be an object")
+            _reject_runtime_dimension_lengths(prop, dimensions)
             type_info = _field_type_info(prop, constants)
             required_label = "yes" if name in required_set else "no"
             default_label = _get_default_value(prop, type_info, shape_constants)

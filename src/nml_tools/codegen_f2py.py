@@ -17,9 +17,11 @@ from .codegen_fortran import (
     _array_default_value,
     _build_context,
     _field_type_info,
+    _normalize_constant_values,
     _parse_default_dimensions,
     _parse_flex_dim,
     _reject_runtime_dimension_lengths,
+    _validate_runtime_dimensions,
 )
 
 _TEMPLATE_ENV = Environment(
@@ -460,7 +462,13 @@ def _iter_field_type_infos(
     dimensions: dict[str, int] | None = None,
 ) -> list[tuple[str, FieldTypeInfo]]:
     properties = _normalized_properties(schema)
-    runtime_dimension_values = dimensions if dimensions is not None else {}
+    constants = _normalize_constant_values(constants)
+    runtime_dimension_values = _validate_runtime_dimensions(dimensions)
+    overlap = sorted(set(constants) & set(runtime_dimension_values))
+    if overlap:
+        raise ValueError(
+            "constants and dimensions must not share names: " + ", ".join(overlap)
+        )
     field_types: list[tuple[str, FieldTypeInfo]] = []
     for name, prop in properties.items():
         _reject_runtime_dimension_lengths(prop, runtime_dimension_values)
@@ -499,15 +507,17 @@ def _fixed_python_array_shape(
         return None
     if _parse_flex_dim(prop, type_info) > 0:
         return None
-    if dimensions is not None:
-        for dim in type_info.dimensions:
-            if dim in dimensions:
-                return None
-    shape_constants: dict[str, int | float] = {}
-    if constants is not None:
-        shape_constants.update(constants)
-    if dimensions is not None:
-        shape_constants.update(dimensions)
+    constants = _normalize_constant_values(constants)
+    dimensions = _validate_runtime_dimensions(dimensions)
+    overlap = sorted(set(constants) & set(dimensions))
+    if overlap:
+        raise ValueError(
+            "constants and dimensions must not share names: " + ", ".join(overlap)
+        )
+    for dim in type_info.dimensions:
+        if dim.lower() in dimensions:
+            return None
+    shape_constants: dict[str, int | float] = {**constants, **dimensions}
     return _parse_default_dimensions(type_info.dimensions, shape_constants)
 
 

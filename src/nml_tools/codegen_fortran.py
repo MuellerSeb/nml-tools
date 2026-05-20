@@ -274,7 +274,7 @@ def _build_context(
     bounds_parameters: list[str] = []
     bounds_functions: list[dict[str, Any]] = []
     bounds_checks: list[dict[str, Any]] = []
-    static_constants = constants or {}
+    static_constants = _normalize_constant_values(constants)
     runtime_dimension_values = _validate_runtime_dimensions(dimensions)
     duplicate_names = sorted(set(static_constants) & set(runtime_dimension_values))
     if duplicate_names:
@@ -315,7 +315,7 @@ def _build_context(
         helper_imports.append("NML_ERR_INVALID_HANDLE")
 
     def _add_helper_import(name: str) -> None:
-        if name not in helper_imports:
+        if not any(existing.lower() == name.lower() for existing in helper_imports):
             helper_imports.append(name)
 
     def _alias_runtime_default(expr: str) -> str:
@@ -349,8 +349,9 @@ def _build_context(
             _reject_runtime_dimension_lengths(prop, runtime_dimension_values)
             type_info = _field_type_info(prop, static_constants)
             for const_name in _collect_dimension_constants(type_info.dimensions, shape_constants):
-                if const_name in runtime_dimension_values:
-                    _register_runtime_dimension(const_name)
+                const_key = const_name.lower()
+                if const_key in runtime_dimension_values:
+                    _register_runtime_dimension(const_key)
                 else:
                     _add_helper_import(const_name)
             if type_info.length_expr and not _is_int_literal(type_info.length_expr):
@@ -368,18 +369,19 @@ def _build_context(
                         raise ValueError(
                             "array property 'x-fortran-shape' entries must be ints or identifiers"
                         )
-                    if dim in runtime_dimension_values:
-                        local_dim_name = _register_runtime_dimension(dim)
+                    dim_key = dim.lower()
+                    if dim_key in runtime_dimension_values:
+                        local_dim_name = _register_runtime_dimension(dim_key)
                         runtime_shape[dim_index] = f"this%{local_dim_name}"
                         dynamic_shape = True
-                    elif dim not in static_constants:
+                    elif dim_key not in static_constants:
                         raise ValueError(f"dimension constant '{dim}' is not defined in config")
 
             runtime_length_expr = type_info.length_expr
             if (
                 type_info.length_expr
                 and not _is_int_literal(type_info.length_expr)
-                and type_info.length_expr in runtime_dimension_values
+                and type_info.length_expr.lower() in runtime_dimension_values
             ):
                 raise ValueError(
                     f"dimension '{type_info.length_expr}' cannot be used as x-fortran-len"
@@ -1224,7 +1226,7 @@ def _reject_runtime_dimension_lengths(
         return
     if prop.get("type") == "string":
         length = prop.get("x-fortran-len")
-        if isinstance(length, str) and length.strip() in dimensions:
+        if isinstance(length, str) and length.strip().lower() in dimensions:
             raise ValueError(f"dimension '{length.strip()}' cannot be used as x-fortran-len")
     if prop.get("type") == "array":
         items = prop.get("items")
@@ -1362,11 +1364,12 @@ def _scalar_type_info(
                 if int(length_expr) <= 0:
                     raise ValueError("string length must be positive")
             else:
-                if constants is None or length_expr not in constants:
+                length_key = length_expr.lower()
+                if constants is None or length_key not in constants:
                     raise ValueError(
                         f"string length constant '{length_expr}' is not defined in config"
                     )
-                value = constants[length_expr]
+                value = constants[length_key]
                 if isinstance(value, bool) or not isinstance(value, int):
                     raise ValueError(f"string length constant '{length_expr}' must be an integer")
                 if value <= 0:
@@ -1460,6 +1463,24 @@ def _extract_dimensions(prop: dict[str, Any]) -> list[str]:
 _FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
+def _normalize_constant_values(
+    constants: dict[str, int | float] | None,
+) -> dict[str, int | float]:
+    if constants is None:
+        return {}
+    normalized: dict[str, int | float] = {}
+    for name, value in constants.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("constant names must be non-empty strings")
+        if not _FORTRAN_IDENTIFIER.match(name):
+            raise ValueError(f"constant '{name}' must be a valid Fortran identifier")
+        canonical_name = name.lower()
+        if canonical_name in normalized:
+            raise ValueError(f"constant '{name}' duplicates another constant name")
+        normalized[canonical_name] = value
+    return normalized
+
+
 def _validate_runtime_dimensions(dimensions: dict[str, int] | None) -> dict[str, int]:
     if dimensions is None:
         return {}
@@ -1469,11 +1490,14 @@ def _validate_runtime_dimensions(dimensions: dict[str, int] | None) -> dict[str,
             raise ValueError("runtime dimension names must be non-empty strings")
         if not _FORTRAN_IDENTIFIER.match(name):
             raise ValueError(f"runtime dimension '{name}' must be a valid Fortran identifier")
+        canonical_name = name.lower()
+        if canonical_name in normalized:
+            raise ValueError(f"runtime dimension '{name}' duplicates another dimension name")
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"runtime dimension '{name}' must be an integer")
         if value <= 0:
             raise ValueError(f"runtime dimension '{name}' must be positive")
-        normalized[name] = value
+        normalized[canonical_name] = value
     return normalized
 
 
@@ -1536,9 +1560,10 @@ def _collect_dimension_constants(
             continue
         if not _FORTRAN_IDENTIFIER.match(dim):
             raise ValueError("array property 'x-fortran-shape' entries must be ints or identifiers")
-        if constants is None or dim not in constants:
+        dim_key = dim.lower()
+        if constants is None or dim_key not in constants:
             raise ValueError(f"dimension constant '{dim}' is not defined in config")
-        value = constants[dim]
+        value = constants[dim_key]
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"dimension constant '{dim}' must be an integer")
         if dim not in used:
@@ -1994,11 +2019,12 @@ def _parse_default_dimensions(
         try:
             parsed.append(int(dim))
         except (TypeError, ValueError) as err:  # pragma: no cover - defensive
-            if constants is None or dim not in constants:
+            dim_key = dim.lower()
+            if constants is None or dim_key not in constants:
                 raise ValueError(
                     "array default dimensions must be integer literals or defined constants"
                 ) from err
-            value = constants[dim]
+            value = constants[dim_key]
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError("array default dimension constants must be integers") from err
             parsed.append(value)

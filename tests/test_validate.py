@@ -79,6 +79,31 @@ def test_validate_namelist_accepts_scalar_shape_with_dimension() -> None:
     validate_namelist(schema, {"arr": [1, 2, 3]}, dimensions={"n_values": 3})
 
 
+def test_validate_namelist_matches_constants_and_dimensions_case_insensitively() -> None:
+    schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "arr": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": "MAX_VALUES",
+            },
+            "name": {
+                "type": "string",
+                "x-fortran-len": "BUF",
+            },
+        },
+    }
+
+    validate_namelist(
+        schema,
+        {"arr": [1, 2, 3], "name": "abc"},
+        constants={"buf": 16},
+        dimensions={"max_values": 3},
+    )
+
+
 def test_validate_namelist_rejects_constant_dimension_name_overlap() -> None:
     schema = {
         "x-fortran-namelist": "config",
@@ -97,7 +122,14 @@ def test_validate_namelist_rejects_constant_dimension_name_overlap() -> None:
             schema,
             {"arr": [1, 2, 3]},
             constants={"n_values": 3},
-            dimensions={"n_values": 3},
+            dimensions={"N_VALUES": 3},
+        )
+
+    with pytest.raises(ValueError, match="duplicates another constant"):
+        validate_namelist(
+            schema,
+            {"arr": [1, 2, 3]},
+            constants={"n_values": 3, "N_VALUES": 4},
         )
 
 

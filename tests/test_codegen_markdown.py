@@ -62,7 +62,7 @@ def test_generate_docs_rejects_runtime_dimensions_for_string_lengths(
     try:
         generate_docs(schema, output, dimensions={"n_values": 3})
     except ValueError as exc:
-        assert "string length constant 'n_values' is not defined" in str(exc)
+        assert "dimension 'n_values' cannot be used as x-fortran-len" in str(exc)
     else:
         raise AssertionError("expected runtime dimension in string length to fail")
 

@@ -326,6 +326,11 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
             raise click.ClickException(
                 f"config constant '{name}' must be a valid Fortran identifier"
             )
+        canonical_name = name.lower()
+        if canonical_name in constants:
+            raise click.ClickException(
+                f"config constant '{name}' duplicates another constant name"
+            )
         if not isinstance(entry, dict):
             raise click.ClickException(f"config constant '{name}' must be a table with 'value'")
         if "value" not in entry:
@@ -341,13 +346,13 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
             doc = " ".join(doc.splitlines()).strip() or None
         specs.append(
             ConstantSpec(
-                name=name,
+                name=canonical_name,
                 type_spec=type_spec,
                 value=literal,
                 doc=doc,
             )
         )
-        constants[name] = value
+        constants[canonical_name] = value
     return constants, specs
 
 
@@ -363,6 +368,7 @@ def _load_dimensions(
 
     dimensions: dict[str, int] = {}
     specs: list[ConstantSpec] = []
+    constant_names = {name.lower() for name in constants}
     for name_raw, entry in dimensions_raw.items():
         if not isinstance(name_raw, str):
             raise click.ClickException("config dimensions must use string keys")
@@ -373,9 +379,14 @@ def _load_dimensions(
             raise click.ClickException(
                 f"config dimension '{name}' must be a valid Fortran identifier"
             )
-        if name in constants:
+        canonical_name = name.lower()
+        if canonical_name in constant_names:
             raise click.ClickException(
                 f"config dimension '{name}' duplicates a constant name"
+            )
+        if canonical_name in dimensions:
+            raise click.ClickException(
+                f"config dimension '{name}' duplicates another dimension name"
             )
         if not isinstance(entry, dict):
             raise click.ClickException(f"config dimension '{name}' must be a table with 'value'")
@@ -393,13 +404,13 @@ def _load_dimensions(
             doc = " ".join(doc.splitlines()).strip() or None
         specs.append(
             ConstantSpec(
-                name=name,
+                name=canonical_name,
                 type_spec="integer",
                 value=str(value),
                 doc=doc,
             )
         )
-        dimensions[name] = value
+        dimensions[canonical_name] = value
     return dimensions, specs
 
 
@@ -456,6 +467,9 @@ def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
             raise click.ClickException("constants must use non-empty names")
         if not _FORTRAN_IDENTIFIER.match(name):
             raise click.ClickException(f"constant '{name}' must be a valid identifier")
+        canonical_name = name.lower()
+        if canonical_name in constants:
+            raise click.ClickException(f"constant '{name}' duplicates another constant name")
         value_text = raw_value.strip()
         if not value_text:
             raise click.ClickException(f"constant '{name}' must define a value")
@@ -472,7 +486,7 @@ def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
                 ) from exc
             if math.isinf(value) or math.isnan(value):
                 raise click.ClickException(f"constant '{name}' must be finite")
-        constants[name] = value
+        constants[canonical_name] = value
     return constants
 
 
@@ -487,6 +501,9 @@ def _parse_cli_dimensions(values: tuple[str, ...]) -> dict[str, int]:
             raise click.ClickException("dimensions must use non-empty names")
         if not _FORTRAN_IDENTIFIER.match(name):
             raise click.ClickException(f"dimension '{name}' must be a valid identifier")
+        canonical_name = name.lower()
+        if canonical_name in dimensions:
+            raise click.ClickException(f"dimension '{name}' duplicates another dimension name")
         value_text = raw_value.strip()
         if not value_text:
             raise click.ClickException(f"dimension '{name}' must define a value")
@@ -495,7 +512,7 @@ def _parse_cli_dimensions(values: tuple[str, ...]) -> dict[str, int]:
         value = int(value_text)
         if value <= 0:
             raise click.ClickException(f"dimension '{name}' value must be positive")
-        dimensions[name] = value
+        dimensions[canonical_name] = value
     return dimensions
 
 
@@ -503,7 +520,9 @@ def _reject_constant_dimension_overlap(
     constants: dict[str, int | float],
     dimensions: dict[str, int],
 ) -> None:
-    duplicate_names = sorted(set(constants) & set(dimensions))
+    duplicate_names = sorted(
+        {name.lower() for name in constants} & {name.lower() for name in dimensions}
+    )
     if duplicate_names:
         raise click.ClickException(
             "constants and dimensions must not share names: " + ", ".join(duplicate_names)
