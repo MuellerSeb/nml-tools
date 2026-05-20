@@ -484,12 +484,18 @@ nml-tools validate --schema demo.yml --input demo.nml
 nml-tools validate --schema a.yml --schema b.yml combined.nml
 ```
 
-Constants are resolved from `[constants]` and `[dimensions]` in the config, or
-provided ad hoc:
+When validation is config-driven, schema constants are loaded from `[constants]`
+and runtime array dimensions are loaded from `[dimensions]`. In schema-only
+validation, `--constants NAME=VALUE` can provide ad hoc schema constants for
+string lengths and fixed array shapes:
 
 ```bash
 nml-tools validate --schema demo.yml --constants MAX_ITER=10 input.nml
 ```
+
+Runtime dimensions do not have a CLI override flag; use a config file when a
+schema depends on `[dimensions]`. A `--constants` name that collides with a
+configured runtime dimension is rejected.
 
 Array values are validated as rectangular lists in Fortran order
 (outer list corresponds to the last Fortran index), matching `f90nml` parsing.

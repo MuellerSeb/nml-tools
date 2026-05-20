@@ -30,6 +30,12 @@ def validate_namelist(
     dimensions: dict[str, int] | None = None,
 ) -> None:
     """Validate *namelist* against *schema*."""
+    if constants is not None and dimensions is not None:
+        overlap = sorted(set(constants) & set(dimensions))
+        if overlap:
+            names = ", ".join(overlap)
+            raise ValueError(f"constants and dimensions must not share names: {names}")
+
     namelist_name = schema.get("x-fortran-namelist")
     if not isinstance(namelist_name, str) or not namelist_name.strip():
         raise ValueError("schema must define non-empty 'x-fortran-namelist'")
@@ -426,10 +432,18 @@ def _parse_shape(
     constants: dict[str, int | float] | None,
     name: str,
 ) -> list[int | None]:
-    if not isinstance(raw, list) or not raw:
+    shape_entries: list[Any]
+    if isinstance(raw, bool) or raw is None:
         raise ValueError(f"array property '{name}' must define non-empty x-fortran-shape")
+    if isinstance(raw, (int, str)):
+        shape_entries = [raw]
+    elif isinstance(raw, list) and raw:
+        shape_entries = raw
+    else:
+        raise ValueError(f"array property '{name}' must define non-empty x-fortran-shape")
+
     parsed: list[int | None] = []
-    for dim in raw:
+    for dim in shape_entries:
         if isinstance(dim, bool):
             raise ValueError(f"array property '{name}' shape entries must be int or str")
         if isinstance(dim, int):
