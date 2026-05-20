@@ -476,6 +476,40 @@ def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
     return constants
 
 
+def _parse_cli_dimensions(values: tuple[str, ...]) -> dict[str, int]:
+    dimensions: dict[str, int] = {}
+    for entry in values:
+        if "=" not in entry:
+            raise click.ClickException("dimensions must be provided as NAME=VALUE")
+        raw_name, raw_value = entry.split("=", 1)
+        name = raw_name.strip()
+        if not name:
+            raise click.ClickException("dimensions must use non-empty names")
+        if not _FORTRAN_IDENTIFIER.match(name):
+            raise click.ClickException(f"dimension '{name}' must be a valid identifier")
+        value_text = raw_value.strip()
+        if not value_text:
+            raise click.ClickException(f"dimension '{name}' must define a value")
+        if not re.fullmatch(r"[+-]?\d+", value_text):
+            raise click.ClickException(f"dimension '{name}' value must be an integer")
+        value = int(value_text)
+        if value <= 0:
+            raise click.ClickException(f"dimension '{name}' value must be positive")
+        dimensions[name] = value
+    return dimensions
+
+
+def _reject_constant_dimension_overlap(
+    constants: dict[str, int | float],
+    dimensions: dict[str, int],
+) -> None:
+    duplicate_names = sorted(set(constants) & set(dimensions))
+    if duplicate_names:
+        raise click.ClickException(
+            "constants and dimensions must not share names: " + ", ".join(duplicate_names)
+        )
+
+
 def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, Any]]:
     raw_entries = config.get("namelists")
     if raw_entries is None and "nml-files" in config:
@@ -1054,6 +1088,12 @@ def gen_fortran(config_path: Path | None) -> None:
     multiple=True,
     help="Additional constants as NAME=VALUE (repeatable).",
 )
+@click.option(
+    "--dimensions",
+    "dimension_args",
+    multiple=True,
+    help="Runtime dimensions as NAME=VALUE (repeatable).",
+)
 @click.argument(
     "input_path",
     required=False,
@@ -1064,6 +1104,7 @@ def validate(
     schema_paths: tuple[Path, ...],
     input_option: Path | None,
     constant_args: tuple[str, ...],
+    dimension_args: tuple[str, ...],
     input_path: Path | None,
 ) -> None:
     """Validate a namelist file against schema definitions."""
@@ -1073,6 +1114,7 @@ def validate(
     if input_path is None:
         raise click.ClickException("input path is required")
     constants = _parse_cli_constants(constant_args)
+    dimension_overrides = _parse_cli_dimensions(dimension_args)
     dimensions: dict[str, int] = {}
     schemas: list[dict[str, Any]] = []
 
@@ -1083,6 +1125,9 @@ def validate(
             cfg_constants, _ = _load_constants(config)
             dimensions, _ = _load_dimensions(config, cfg_constants)
             constants = {**cfg_constants, **constants}
+            dimensions = {**dimensions, **dimension_overrides}
+        else:
+            dimensions = dimension_overrides
         for schema_file in schema_paths:
             try:
                 logger.info("Loading schema %s", schema_file)
@@ -1097,6 +1142,7 @@ def validate(
         cfg_constants, _ = _load_constants(config)
         dimensions, _ = _load_dimensions(config, cfg_constants)
         constants = {**cfg_constants, **constants}
+        dimensions = {**dimensions, **dimension_overrides}
         entries = _iter_namelists(config, base_dir)
         logger.info("Found %d schema entries", len(entries))
         for entry in entries:
@@ -1112,6 +1158,7 @@ def validate(
 
     if not schemas:
         raise click.ClickException("no schemas provided for validation")
+    _reject_constant_dimension_overlap(constants, dimensions)
 
     try:
         logger.info("Reading namelist %s", input_path)

@@ -133,9 +133,105 @@ def test_load_dimensions_validates_values_and_duplicate_names() -> None:
         cli_module._load_dimensions({"dimensions": {"n_cells": {"value": 0}}}, {})
 
 
+def test_parse_cli_dimensions_validates_values() -> None:
+    assert cli_module._parse_cli_dimensions(("n_cells=3",)) == {"n_cells": 3}
+
+    with pytest.raises(click.ClickException, match="NAME=VALUE"):
+        cli_module._parse_cli_dimensions(("n_cells",))
+
+    with pytest.raises(click.ClickException, match="valid identifier"):
+        cli_module._parse_cli_dimensions(("1bad=3",))
+
+    with pytest.raises(click.ClickException, match="integer"):
+        cli_module._parse_cli_dimensions(("n_cells=3.5",))
+
+    with pytest.raises(click.ClickException, match="positive"):
+        cli_module._parse_cli_dimensions(("n_cells=0",))
+
+
 def test_load_toml_checked_reports_missing_file(tmp_path: Path) -> None:
     with pytest.raises(click.ClickException, match="missing.toml"):
         cli_module._load_toml_checked(tmp_path / "missing.toml")
+
+
+def test_validate_accepts_cli_dimensions(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                title: Demo
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  values:
+                    type: array
+                    items:
+                      type: integer
+                    x-fortran-shape: n_values
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text("&demo\nvalues = 1, 2, 3\n/\n", encoding="utf-8")
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "--dimensions",
+                "n_values=3",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+
+def test_validate_cli_dimensions_override_config_dimensions(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                title: Demo
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  values:
+                    type: array
+                    items:
+                      type: integer
+                    x-fortran-shape: n_values
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text("&demo\nvalues = 1, 2, 3\n/\n", encoding="utf-8")
+        Path("pyproject.toml").write_text(
+            dedent(
+                """
+                [tool.nml-tools]
+                minimum-version = "0"
+
+                [tool.nml-tools.dimensions.n_values]
+                value = 2
+
+                [[tool.nml-tools.namelists]]
+                schema = "schema.yml"
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            ["validate", "--dimensions", "n_values=3", "input.nml"],
+        )
+
+        assert result.exit_code == 0, result.output
 
 
 def test_generate_command_uses_pyproject_config_in_process(tmp_path: Path) -> None:
@@ -271,7 +367,7 @@ def test_validate_uses_discovered_pyproject_config(
     )
     monkeypatch.chdir(tmp_path)
 
-    cli_module.validate.callback(None, (), None, (), Path("input.nml"))
+    cli_module.validate.callback(None, (), None, (), (), Path("input.nml"))
 
 
 def test_check_command_passes_and_reports_differences(tmp_path: Path) -> None:
