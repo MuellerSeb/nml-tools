@@ -49,7 +49,7 @@ _DEFAULT_CONFIG = Path("nml-config.toml")
 _PYPROJECT_CONFIG = Path("pyproject.toml")
 
 
-class NamedIntegerType(click.ParamType):
+class NamedIntegerType(click.ParamType[tuple[str, int]]):
     """Parse NAME=INT values for CLI options."""
 
     name = "NAME=INT"
