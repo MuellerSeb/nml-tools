@@ -184,11 +184,6 @@ values_pad_c:
   x-fortran-default-pad: 0
 ```
 
-## Validation keywords
-
-Only a subset of JSON Schema validation keywords is implemented.
-Validation is opt-in: call `is_valid()` on the generated type to check required values, enum and bound constraints.
-
 ## Array set semantics
 
 Generated `set(...)` methods follow Fortran namelist-buffer semantics for
@@ -204,6 +199,11 @@ required array can be partly set without an immediate setter error, but
 Generated Python wrappers use the same semantics: scalar and lower-rank array
 inputs are normalized to singleton trailing dimensions before calling the
 Fortran setter.
+
+## Validation keywords
+
+Only a subset of JSON Schema validation keywords is implemented.
+Validation is opt-in: call `is_valid()` on the generated type to check required values, enum and bound constraints.
 
 ### Enum support
 Enums are supported for strings and integers only.
