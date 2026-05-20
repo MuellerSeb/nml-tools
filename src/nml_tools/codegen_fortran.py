@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from ._utils import strip_trailing_whitespace
+from ._utils import (
+    FORTRAN_IDENTIFIER,
+    normalize_constant_values,
+    normalize_runtime_dimensions,
+    reject_constant_dimension_overlap,
+    strip_trailing_whitespace,
+)
 
 _TEMPLATE_ENV = Environment(
     loader=FileSystemLoader(Path(__file__).resolve().parent / "templates"),
@@ -274,13 +279,9 @@ def _build_context(
     bounds_parameters: list[str] = []
     bounds_functions: list[dict[str, Any]] = []
     bounds_checks: list[dict[str, Any]] = []
-    static_constants = _normalize_constant_values(constants)
-    runtime_dimension_values = _validate_runtime_dimensions(dimensions)
-    duplicate_names = sorted(set(static_constants) & set(runtime_dimension_values))
-    if duplicate_names:
-        raise ValueError(
-            "constants and dimensions must not share names: " + ", ".join(duplicate_names)
-        )
+    static_constants = normalize_constant_values(constants)
+    runtime_dimension_values = normalize_runtime_dimensions(dimensions)
+    reject_constant_dimension_overlap(static_constants, runtime_dimension_values)
     shape_constants: dict[str, int] = {**static_constants, **runtime_dimension_values}
     runtime_dimensions: list[dict[str, str]] = []
     runtime_dimension_locals: dict[str, str] = {}
@@ -357,7 +358,7 @@ def _build_context(
                 for dim_index, dim in enumerate(runtime_shape):
                     if dim == ":" or _is_int_literal(dim):
                         continue
-                    if not _FORTRAN_IDENTIFIER.match(dim):
+                    if not FORTRAN_IDENTIFIER.match(dim):
                         raise ValueError(
                             "array property 'x-fortran-shape' entries must be ints or identifiers"
                         )
@@ -1412,49 +1413,6 @@ def _extract_dimensions(prop: dict[str, Any]) -> list[str]:
     raise ValueError("array property 'x-fortran-shape' must be an int, string, or list")
 
 
-_FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
-
-
-def _normalize_constant_values(
-    constants: dict[str, int] | None,
-) -> dict[str, int]:
-    if constants is None:
-        return {}
-    normalized: dict[str, int] = {}
-    for name, value in constants.items():
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("constant names must be non-empty strings")
-        if not _FORTRAN_IDENTIFIER.match(name):
-            raise ValueError(f"constant '{name}' must be a valid Fortran identifier")
-        canonical_name = name.lower()
-        if canonical_name in normalized:
-            raise ValueError(f"constant '{name}' duplicates another constant name")
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError(f"constant '{name}' must be an integer")
-        normalized[canonical_name] = value
-    return normalized
-
-
-def _validate_runtime_dimensions(dimensions: dict[str, int] | None) -> dict[str, int]:
-    if dimensions is None:
-        return {}
-    normalized: dict[str, int] = {}
-    for name, value in dimensions.items():
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("runtime dimension names must be non-empty strings")
-        if not _FORTRAN_IDENTIFIER.match(name):
-            raise ValueError(f"runtime dimension '{name}' must be a valid Fortran identifier")
-        canonical_name = name.lower()
-        if canonical_name in normalized:
-            raise ValueError(f"runtime dimension '{name}' duplicates another dimension name")
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError(f"runtime dimension '{name}' must be an integer")
-        if value <= 0:
-            raise ValueError(f"runtime dimension '{name}' must be positive")
-        normalized[canonical_name] = value
-    return normalized
-
-
 def _is_int_literal(value: str) -> bool:
     try:
         int(value)
@@ -1468,7 +1426,7 @@ def _validate_dimension_token(dim: str) -> None:
         return
     if _is_int_literal(dim):
         return
-    if _FORTRAN_IDENTIFIER.match(dim):
+    if FORTRAN_IDENTIFIER.match(dim):
         return
     raise ValueError("array property 'x-fortran-shape' entries must be ints or identifiers")
 
@@ -1476,7 +1434,7 @@ def _validate_dimension_token(dim: str) -> None:
 def _validate_length_token(length_expr: str) -> None:
     if _is_int_literal(length_expr):
         return
-    if _FORTRAN_IDENTIFIER.match(length_expr):
+    if FORTRAN_IDENTIFIER.match(length_expr):
         return
     raise ValueError("string length must be an integer literal or identifier")
 
@@ -1512,7 +1470,7 @@ def _collect_dimension_constants(
     for dim in dimensions:
         if dim == ":" or _is_int_literal(dim):
             continue
-        if not _FORTRAN_IDENTIFIER.match(dim):
+        if not FORTRAN_IDENTIFIER.match(dim):
             raise ValueError("array property 'x-fortran-shape' entries must be ints or identifiers")
         dim_key = dim.lower()
         if constants is None or dim_key not in constants:

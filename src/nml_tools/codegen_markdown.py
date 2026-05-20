@@ -7,6 +7,11 @@ import string
 from pathlib import Path
 from typing import Any
 
+from ._utils import (
+    normalize_constant_values,
+    normalize_runtime_dimensions,
+    reject_constant_dimension_overlap,
+)
 from .codegen_fortran import (
     FieldTypeInfo,
     _array_default_value,
@@ -16,11 +21,9 @@ from .codegen_fortran import (
     _enum_values,
     _field_type_info,
     _format_scalar_default,
-    _normalize_constant_values,
     _parse_default_dimensions,
     _prepare_array_default,
     _reject_runtime_dimension_lengths,
-    _validate_runtime_dimensions,
 )
 from .codegen_template import render_template
 
@@ -82,13 +85,9 @@ def render_docs(
     if not isinstance(required_raw, list):
         raise ValueError("schema 'required' must be a list")
     required_set = _validate_required(required_raw)
-    constants = _normalize_constant_values(constants)
-    dimensions = _validate_runtime_dimensions(dimensions)
-    overlap = sorted(set(constants) & set(dimensions))
-    if overlap:
-        raise ValueError(
-            "constants and dimensions must not share names: " + ", ".join(overlap)
-        )
+    constants = normalize_constant_values(constants)
+    dimensions = normalize_runtime_dimensions(dimensions)
+    reject_constant_dimension_overlap(constants, dimensions)
     shape_constants: dict[str, int] = {
         **constants,
         **dimensions,

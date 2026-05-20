@@ -10,15 +10,18 @@ from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from ._utils import strip_trailing_whitespace
+from ._utils import (
+    normalize_constant_values,
+    normalize_runtime_dimensions,
+    reject_constant_dimension_overlap,
+    strip_trailing_whitespace,
+)
 from .codegen_fortran import (
     FieldSpec,
     FieldTypeInfo,
     _build_context,
     _field_type_info,
-    _normalize_constant_values,
     _reject_runtime_dimension_lengths,
-    _validate_runtime_dimensions,
 )
 
 _TEMPLATE_ENV = Environment(
@@ -456,13 +459,9 @@ def _iter_field_type_infos(
     dimensions: dict[str, int] | None = None,
 ) -> list[tuple[str, FieldTypeInfo]]:
     properties = _normalized_properties(schema)
-    constants = _normalize_constant_values(constants)
-    runtime_dimension_values = _validate_runtime_dimensions(dimensions)
-    overlap = sorted(set(constants) & set(runtime_dimension_values))
-    if overlap:
-        raise ValueError(
-            "constants and dimensions must not share names: " + ", ".join(overlap)
-        )
+    constants = normalize_constant_values(constants)
+    runtime_dimension_values = normalize_runtime_dimensions(dimensions)
+    reject_constant_dimension_overlap(constants, runtime_dimension_values)
     field_types: list[tuple[str, FieldTypeInfo]] = []
     for name, prop in properties.items():
         _reject_runtime_dimension_lengths(prop, runtime_dimension_values)

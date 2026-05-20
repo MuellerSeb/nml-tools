@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
-_FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+from ._utils import (
+    FORTRAN_IDENTIFIER,
+    normalize_constant_values,
+    normalize_runtime_dimensions,
+    reject_constant_dimension_overlap,
+)
 
 
 @dataclass(frozen=True)
@@ -30,12 +34,9 @@ def validate_namelist(
     dimensions: dict[str, int] | None = None,
 ) -> None:
     """Validate *namelist* against *schema*."""
-    constants = _normalize_constants(constants)
-    dimensions = _normalize_dimensions(dimensions)
-    overlap = sorted(set(constants) & set(dimensions))
-    if overlap:
-        names = ", ".join(overlap)
-        raise ValueError(f"constants and dimensions must not share names: {names}")
+    constants = normalize_constant_values(constants)
+    dimensions = normalize_runtime_dimensions(dimensions)
+    reject_constant_dimension_overlap(constants, dimensions)
 
     namelist_name = schema.get("x-fortran-namelist")
     if not isinstance(namelist_name, str) or not namelist_name.strip():
@@ -67,47 +68,6 @@ def validate_namelist(
             )
         elif key in required:
             raise ValueError(f"namelist '{namelist_name}' is missing required '{prop_name}'")
-
-
-def _normalize_constants(
-    constants: Mapping[str, int] | None,
-) -> dict[str, int]:
-    if constants is None:
-        return {}
-    normalized: dict[str, int] = {}
-    for name, value in constants.items():
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("constant names must be non-empty strings")
-        if not _FORTRAN_IDENTIFIER.match(name):
-            raise ValueError(f"constant '{name}' must be a valid Fortran identifier")
-        canonical_name = name.lower()
-        if canonical_name in normalized:
-            raise ValueError(f"constant '{name}' duplicates another constant name")
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError(f"constant '{name}' must be an integer")
-        normalized[canonical_name] = value
-    return normalized
-
-
-def _normalize_dimensions(dimensions: Mapping[str, int] | None) -> dict[str, int]:
-    if dimensions is None:
-        return {}
-    normalized: dict[str, int] = {}
-    for name, value in dimensions.items():
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError("runtime dimension names must be non-empty strings")
-        if not _FORTRAN_IDENTIFIER.match(name):
-            raise ValueError(f"runtime dimension '{name}' must be a valid Fortran identifier")
-        canonical_name = name.lower()
-        if canonical_name in normalized:
-            raise ValueError(f"runtime dimension '{name}' duplicates another dimension name")
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError(f"runtime dimension '{name}' must be an integer")
-        if value <= 0:
-            raise ValueError(f"runtime dimension '{name}' must be positive")
-        normalized[canonical_name] = value
-    return normalized
-
 
 def _normalize_properties(
     properties: Mapping[str, Any],
@@ -287,7 +247,7 @@ def _parse_length(
             if length <= 0:
                 raise ValueError(f"string property '{name}' length must be positive")
             return length
-        if not _FORTRAN_IDENTIFIER.match(token):
+        if not FORTRAN_IDENTIFIER.match(token):
             raise ValueError(f"string property '{name}' length must be literal or identifier")
         token_key = token.lower()
         if dimensions is not None and token_key in dimensions:
@@ -506,7 +466,7 @@ def _parse_shape(
                     raise ValueError(f"array property '{name}' shape values must be positive")
                 parsed.append(size)
                 continue
-            if not _FORTRAN_IDENTIFIER.match(token):
+            if not FORTRAN_IDENTIFIER.match(token):
                 raise ValueError(
                     f"array property '{name}' shape entries must be ints or identifiers"
                 )

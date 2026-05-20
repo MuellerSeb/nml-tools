@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import sys
 from dataclasses import dataclass
 from difflib import unified_diff
@@ -15,6 +14,7 @@ import f90nml  # type: ignore
 from click.exceptions import Exit
 from packaging.version import InvalidVersion, Version
 
+from ._utils import constant_dimension_overlap, is_fortran_identifier
 from ._version import __version__
 from .codegen_f2py import (
     F2pyCTypeMap,
@@ -43,7 +43,6 @@ else:  # pragma: no cover - python<3.11
     import tomli as tomllib
 
 logger = logging.getLogger(__name__)
-_FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _DEFAULT_CONFIG = Path("nml-config.toml")
 _PYPROJECT_CONFIG = Path("pyproject.toml")
@@ -73,13 +72,14 @@ class NamedIntegerType(_NamedIntegerTypeBase):  # type: ignore[valid-type, misc]
         name = raw_name.strip()
         if not name:
             self.fail("must use non-empty names", param, ctx)
-        if not _FORTRAN_IDENTIFIER.match(name):
+        if not is_fortran_identifier(name):
             self.fail(f"{self._label} '{name}' must be a valid identifier", param, ctx)
 
         value_text = raw_value.strip()
         if not value_text:
             self.fail(f"{self._label} '{name}' must define a value", param, ctx)
-        if not re.fullmatch(r"[+-]?\d+", value_text):
+        value_digits = value_text[1:] if value_text[:1] in {"+", "-"} else value_text
+        if not value_digits.isdigit():
             self.fail(f"{self._label} '{name}' value must be an integer", param, ctx)
 
         parsed_value = int(value_text)
@@ -357,7 +357,7 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int], list[Consta
         name = name_raw.strip()
         if not name:
             raise click.ClickException("config constants must have non-empty names")
-        if not _FORTRAN_IDENTIFIER.match(name):
+        if not is_fortran_identifier(name):
             raise click.ClickException(
                 f"config constant '{name}' must be a valid Fortran identifier"
             )
@@ -410,7 +410,7 @@ def _load_dimensions(
         name = name_raw.strip()
         if not name:
             raise click.ClickException("config dimensions must have non-empty names")
-        if not _FORTRAN_IDENTIFIER.match(name):
+        if not is_fortran_identifier(name):
             raise click.ClickException(
                 f"config dimension '{name}' must be a valid Fortran identifier"
             )
@@ -515,9 +515,7 @@ def _reject_constant_dimension_overlap(
     constants: dict[str, int],
     dimensions: dict[str, int],
 ) -> None:
-    duplicate_names = sorted(
-        {name.lower() for name in constants} & {name.lower() for name in dimensions}
-    )
+    duplicate_names = constant_dimension_overlap(constants, dimensions)
     if duplicate_names:
         raise click.ClickException(
             "constants and dimensions must not share names: " + ", ".join(duplicate_names)
