@@ -802,6 +802,33 @@ def test_generate_fortran_runtime_sized_array_with_default_uses_partial_set(tmp_
     assert "dimension 1 mismatch for 'values'" not in generated
 
 
+def test_generate_fortran_fixed_array_setters_use_assumed_shape(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Fixed array partial set",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": 3,
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(schema, output, kind_module="mo_kind")
+
+    generated = output.read_text()
+    assert "integer(i4), dimension(:), intent(in), optional :: values" in generated
+    assert "if (size(values, 1) > size(this%values, 1)) then" in generated
+    assert "this%values(lb_1:ub_1) = values" in generated
+    assert "dimension(3), intent(in), optional :: values" not in generated
+
+
 def test_generate_fortran_runtime_sized_string_array_uses_static_length(
     tmp_path: Path,
 ) -> None:

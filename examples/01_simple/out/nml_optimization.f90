@@ -375,8 +375,8 @@ contains
     real(dp), intent(in) :: tolerance !< Convergence tolerance
     real(dp), dimension(:, :, :), intent(in) :: mcmc_error_params !< MCMC error parameters per iteration
     character(len=*), intent(in), optional :: name !< Optimization name
-    character(len=*), dimension(3), intent(in), optional :: try_methods !< Try alternative methods
-    integer(i4), dimension(3), intent(in), optional :: complex_sizes !< Complex sizes for SCE
+    character(len=*), dimension(:), intent(in), optional :: try_methods !< Try alternative methods
+    integer(i4), dimension(:), intent(in), optional :: complex_sizes !< Complex sizes for SCE
     integer(i4), intent(in), optional :: seed !< Random seed
     real(dp), intent(in), optional :: dds_r !< DDS perturbation rate
     logical, intent(in), optional :: mcmc_opti !< MCMC optimization

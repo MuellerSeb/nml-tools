@@ -478,7 +478,7 @@ def _build_context(
             requires_sentinel = is_required or needs_sentinel
 
             arg_dimensions = type_info.dimensions
-            if type_info.category == "array" and (flex_dim > 0 or has_default or dynamic_array):
+            if type_info.category == "array":
                 arg_dimensions = [":" for _ in type_info.dimensions]
             argument_decl = _render_argument_declaration(
                 name=name,
