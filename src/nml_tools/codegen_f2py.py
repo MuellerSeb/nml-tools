@@ -131,7 +131,7 @@ def generate_f2py_wrappers(
     kind_module: str | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     errmsg_len: int = 1024,
 ) -> None:
@@ -160,7 +160,7 @@ def render_f2py_wrappers(
     kind_module: str | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     errmsg_len: int = 1024,
 ) -> str:
@@ -271,7 +271,7 @@ def render_f2cmap(
 def collect_f2py_kind_usage(
     schemas: Iterable[dict[str, Any]],
     *,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
 ) -> F2pyKindUsage:
     """Collect schema kind aliases used in f2py wrapper arguments."""
@@ -308,7 +308,7 @@ def build_f2py_namelist_spec(
     kind_module: str | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     errmsg_len: int = 1024,
 ) -> F2pyNamelistSpec:
@@ -458,7 +458,7 @@ def build_f2py_namelist_spec(
 
 def _iter_field_type_infos(
     schema: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     dimensions: dict[str, int] | None = None,
 ) -> list[tuple[str, FieldTypeInfo]]:
     properties = _normalized_properties(schema)
@@ -498,7 +498,7 @@ def _normalized_properties(schema: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def _fixed_python_array_shape(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     dimensions: dict[str, int] | None = None,
 ) -> list[int] | None:
     if type_info.category != "array":
@@ -517,7 +517,7 @@ def _fixed_python_array_shape(
     for dim in type_info.dimensions:
         if dim.lower() in dimensions:
             return None
-    shape_constants: dict[str, int | float] = {**constants, **dimensions}
+    shape_constants: dict[str, int] = {**constants, **dimensions}
     return _parse_default_dimensions(type_info.dimensions, shape_constants)
 
 

@@ -52,7 +52,7 @@ def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
     constants_raw = config.get("constants", {})
     if not isinstance(constants_raw, dict):
         raise ValueError("config constants must be a table")
-    constants: dict[str, int | float] = {}
+    constants: dict[str, int] = {}
     for name, entry in constants_raw.items():
         if not isinstance(entry, dict) or "value" not in entry:
             raise ValueError("config constant entries must define a value")

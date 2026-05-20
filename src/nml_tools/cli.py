@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 import f90nml  # type: ignore
@@ -48,8 +48,13 @@ _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _DEFAULT_CONFIG = Path("nml-config.toml")
 _PYPROJECT_CONFIG = Path("pyproject.toml")
 
+if TYPE_CHECKING:
+    _NamedIntegerTypeBase = click.ParamType[tuple[str, int]]
+else:
+    _NamedIntegerTypeBase = click.ParamType
 
-class NamedIntegerType(click.ParamType[tuple[str, int]]):
+
+class NamedIntegerType(_NamedIntegerTypeBase):
     """Parse NAME=INT values for CLI options."""
 
     name = "NAME=INT"
@@ -340,14 +345,14 @@ def _format_constant_literal(value: int) -> tuple[str, str]:
     raise click.ClickException("config constants must be integers")
 
 
-def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], list[ConstantSpec]]:
+def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int], list[ConstantSpec]]:
     constants_raw = config.get("constants", {})
     if constants_raw is None:
         constants_raw = {}
     if not isinstance(constants_raw, dict):
         raise click.ClickException("config 'constants' must be a table")
 
-    constants: dict[str, int | float] = {}
+    constants: dict[str, int] = {}
     specs: list[ConstantSpec] = []
     for name_raw, entry in constants_raw.items():
         if not isinstance(name_raw, str):
@@ -391,7 +396,7 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
 
 def _load_dimensions(
     config: dict[str, Any],
-    constants: dict[str, int | float],
+    constants: dict[str, int],
 ) -> tuple[dict[str, int], list[ConstantSpec]]:
     dimensions_raw = config.get("dimensions", {})
     if dimensions_raw is None:
@@ -489,8 +494,8 @@ def _load_documentation_settings(
     return module_doc, md_doxygen_id_from_name, md_add_toc_statement, py_style
 
 
-def _parse_cli_constants(values: tuple[tuple[str, int], ...]) -> dict[str, int | float]:
-    constants: dict[str, int | float] = {}
+def _parse_cli_constants(values: tuple[tuple[str, int], ...]) -> dict[str, int]:
+    constants: dict[str, int] = {}
     for name, value in values:
         if name in constants:
             raise click.ClickException(f"constant '{name}' duplicates another constant name")
@@ -510,7 +515,7 @@ def _parse_cli_dimensions(values: tuple[tuple[str, int], ...]) -> dict[str, int]
 
 
 def _reject_constant_dimension_overlap(
-    constants: dict[str, int | float],
+    constants: dict[str, int],
     dimensions: dict[str, int],
 ) -> None:
     duplicate_names = sorted(
@@ -780,7 +785,7 @@ def _collect_f2py_outputs(
     kind_module: str,
     kind_map: dict[str, str],
     kind_allowlist: set[str],
-    constants: dict[str, int | float],
+    constants: dict[str, int],
     dimensions: dict[str, int],
     f2cmap_path: Path | None,
     f2py_c_types: F2pyCTypeMap,
@@ -882,7 +887,7 @@ def _generate_f2py_outputs(
     kind_module: str,
     kind_map: dict[str, str],
     kind_allowlist: set[str],
-    constants: dict[str, int | float],
+    constants: dict[str, int],
     dimensions: dict[str, int],
     f2cmap_path: Path | None,
     f2py_c_types: F2pyCTypeMap,

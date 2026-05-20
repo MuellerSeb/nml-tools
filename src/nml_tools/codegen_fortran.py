@@ -10,7 +10,7 @@ from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from nml_tools._utils import strip_trailing_whitespace
+from ._utils import strip_trailing_whitespace
 
 _TEMPLATE_ENV = Environment(
     loader=FileSystemLoader(Path(__file__).resolve().parent / "templates"),
@@ -94,7 +94,7 @@ def generate_fortran(
     kind_module: str | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     module_doc: str | None = None,
     f2py_handle_helpers: bool = False,
@@ -125,7 +125,7 @@ def render_fortran(
     kind_module: str | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     module_doc: str | None = None,
     f2py_handle_helpers: bool = False,
@@ -203,7 +203,7 @@ def _build_context(
     kind_module: str | None,
     kind_map: dict[str, str] | None,
     kind_allowlist: Iterable[str] | None,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     dimensions: dict[str, int] | None = None,
     module_doc: str | None = None,
     f2py_handle_helpers: bool = False,
@@ -281,7 +281,7 @@ def _build_context(
         raise ValueError(
             "constant and dimension names must be unique: " + ", ".join(duplicate_names)
         )
-    shape_constants: dict[str, int | float] = {**static_constants, **runtime_dimension_values}
+    shape_constants: dict[str, int] = {**static_constants, **runtime_dimension_values}
     runtime_dimensions: list[dict[str, str]] = []
     runtime_dimension_locals: dict[str, str] = {}
     runtime_dimension_defaults: dict[str, str] = {}
@@ -1127,7 +1127,7 @@ def _build_context(
             if _is_int_literal(extent_dim):
                 factors.append(extent_dim)
             else:
-                factors.append(candidate_name_map.get(extent_dim, extent_dim))
+                factors.append(candidate_name_map.get(extent_dim.lower(), extent_dim))
         if not factors:
             continue
         product_expr = " * ".join(factors)
@@ -1273,7 +1273,7 @@ def _resolve_kind_imports(
 
 def _field_type_info(
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> FieldTypeInfo:
     prop_type = prop.get("type")
     if prop_type == "array":
@@ -1344,7 +1344,7 @@ def _enum_arg_type_spec(type_info: FieldTypeInfo) -> str:
 
 def _scalar_type_info(
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> ScalarTypeInfo:
     prop_type = prop.get("type")
     if prop_type == "string":
@@ -1464,11 +1464,11 @@ _FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 def _normalize_constant_values(
-    constants: dict[str, int | float] | None,
-) -> dict[str, int | float]:
+    constants: dict[str, int] | None,
+) -> dict[str, int]:
     if constants is None:
         return {}
-    normalized: dict[str, int | float] = {}
+    normalized: dict[str, int] = {}
     for name, value in constants.items():
         if not isinstance(name, str) or not name.strip():
             raise ValueError("constant names must be non-empty strings")
@@ -1554,7 +1554,7 @@ def _parse_flex_dim(prop: dict[str, Any], type_info: FieldTypeInfo) -> int:
 
 def _collect_dimension_constants(
     dimensions: list[str],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[str]:
     used: list[str] = []
     for dim in dimensions:
@@ -1943,7 +1943,7 @@ def _format_default(
     value: Any,
     type_info: FieldTypeInfo,
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
 ) -> str:
     if type_info.category == "array":
         if not isinstance(value, list):
@@ -2010,7 +2010,7 @@ def _format_scalar_default(value: Any, kind: str | None, category: str | None) -
 
 def _parse_default_dimensions(
     dimensions: list[str],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[int]:
     if not dimensions:
         raise ValueError("array property missing dimensions")
@@ -2103,7 +2103,7 @@ def _ensure_flat_scalar_list(values: list[Any], description: str) -> list[Any]:
 def _enum_values(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[Any] | None:
     if type_info.category == "array":
         enum_raw = _array_items_enum(prop)
@@ -2302,7 +2302,7 @@ def _validate_enum_defaults(
     type_info: FieldTypeInfo,
     enum_values: list[Any],
     category: str,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> None:
     if type_info.category == "array":
         default_info = _array_default_value(prop)

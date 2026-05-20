@@ -26,7 +26,7 @@ def validate_namelist(
     schema: dict[str, Any],
     namelist: dict[str, Any],
     *,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
 ) -> None:
     """Validate *namelist* against *schema*."""
@@ -70,11 +70,11 @@ def validate_namelist(
 
 
 def _normalize_constants(
-    constants: Mapping[str, int | float] | None,
-) -> dict[str, int | float]:
+    constants: Mapping[str, int] | None,
+) -> dict[str, int]:
     if constants is None:
         return {}
-    normalized: dict[str, int | float] = {}
+    normalized: dict[str, int] = {}
     for name, value in constants.items():
         if not isinstance(name, str) or not name.strip():
             raise ValueError("constant names must be non-empty strings")
@@ -172,7 +172,7 @@ def _validate_property(
     prop: Mapping[str, Any],
     value: Any,
     *,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     dimensions: dict[str, int] | None,
 ) -> None:
     prop_type = prop.get("type")
@@ -190,7 +190,7 @@ def _validate_array(
     name: str,
     prop: Mapping[str, Any],
     value: Any,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     dimensions: dict[str, int] | None,
 ) -> None:
     items = prop.get("items")
@@ -238,7 +238,7 @@ def _scalar_constraints(
     name: str,
     prop: Mapping[str, Any],
     category: str,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     dimensions: dict[str, int] | None,
 ) -> ScalarConstraints:
     length = None
@@ -267,7 +267,7 @@ def _scalar_constraints(
 
 def _parse_length(
     prop: Mapping[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     dimensions: dict[str, int] | None,
     name: str,
 ) -> int:
@@ -471,7 +471,7 @@ def _validate_value_bounds(
 
 def _parse_shape(
     raw: Any,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     name: str,
 ) -> list[int | None]:
     shape_entries: list[Any]

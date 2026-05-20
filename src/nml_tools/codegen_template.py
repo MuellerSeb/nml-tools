@@ -27,7 +27,7 @@ def generate_template(
     *,
     doc_mode: str = "plain",
     value_mode: str = "empty",
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: set[str] | None = None,
@@ -54,7 +54,7 @@ def render_template(
     *,
     doc_mode: str = "plain",
     value_mode: str = "empty",
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: set[str] | None = None,
@@ -87,7 +87,7 @@ def _render_template(
     *,
     doc_mode: str,
     value_mode: str,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     dimensions: dict[str, int] | None,
     kind_map: dict[str, str] | None,
     kind_allowlist: set[str] | None,
@@ -105,7 +105,7 @@ def _render_template(
         raise ValueError(
             "constants and dimensions must not share names: " + ", ".join(overlap)
         )
-    shape_constants: dict[str, int | float] = {
+    shape_constants: dict[str, int] = {
         **constants,
         **dimensions,
     }
@@ -224,7 +224,7 @@ def _value_entries(
     *,
     value_mode: str,
     override: Any,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[tuple[str, str | None]]:
     if value_mode in {"empty", "minimal-empty"}:
         entry_name = name
@@ -286,7 +286,7 @@ def _array_list_entries(
     values: list[Any],
     type_info: FieldTypeInfo,
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[tuple[str, str | None]]:
     rank = len(type_info.dimensions)
     if rank <= 1:
@@ -371,7 +371,7 @@ def _entries_from_value(
     value: Any,
     type_info: FieldTypeInfo,
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[tuple[str, str | None]]:
     if type_info.category == "array":
         if isinstance(value, list):

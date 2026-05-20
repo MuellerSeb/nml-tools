@@ -31,7 +31,7 @@ def generate_docs(
     schema: dict[str, Any],
     output: str | Path,
     *,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     md_doxygen_id_from_name: bool = False,
     md_add_toc_statement: bool = False,
@@ -52,7 +52,7 @@ def generate_docs(
 def render_docs(
     schema: dict[str, Any],
     *,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     md_doxygen_id_from_name: bool = False,
     md_add_toc_statement: bool = False,
@@ -89,7 +89,7 @@ def render_docs(
         raise ValueError(
             "constants and dimensions must not share names: " + ", ".join(overlap)
         )
-    shape_constants: dict[str, int | float] = {
+    shape_constants: dict[str, int] = {
         **constants,
         **dimensions,
     }
@@ -262,7 +262,7 @@ def _format_specific_type(type_info: FieldTypeInfo) -> str:
 def _get_default_value(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> str | tuple[str, str | None] | None:
     if type_info.category == "array":
         array_default = _array_default_value(prop)
@@ -309,7 +309,7 @@ def _get_description(prop: dict[str, Any]) -> str | None:
 def _get_enum_values(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> str | None:
     enum_values = _enum_values(prop, type_info, constants)
     if enum_values is None:
@@ -399,7 +399,7 @@ def _format_default_plain(
     value: Any,
     type_info: FieldTypeInfo,
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> str:
     if type_info.category == "array":
         if not isinstance(value, list):
@@ -439,7 +439,7 @@ def _format_default_plain(
 def _format_array_default_display(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     *,
     default_value: Any = _DEFAULT_MISSING,
     from_items: bool = False,
