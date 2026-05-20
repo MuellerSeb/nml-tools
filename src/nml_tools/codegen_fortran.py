@@ -1691,18 +1691,7 @@ def _render_string_sentinel_assignment(
     value_expr: str,
     comment: str,
 ) -> str:
-    return "\n".join(
-        [
-            "block",
-            "  integer :: nml_len",
-            f"  nml_len = len({target_ref})",
-            "  if (nml_len > 0) then",
-            f"    {target_ref}(1:nml_len) = repeat(\" \", nml_len)",
-            f"    {target_ref}(1:1) = {value_expr}{comment}",
-            "  end if",
-            "end block",
-        ]
-    )
+    return f"{target_ref} = {value_expr}{comment}"
 
 
 def _render_string_array_sentinel_assignment(
@@ -1712,25 +1701,8 @@ def _render_string_array_sentinel_assignment(
     value_expr: str,
     comment: str,
 ) -> str:
-    lines = ["block"]
-    index_vars = [f"nml_i{dim}" for dim in range(1, rank + 1)]
-    lines.append(f"  integer :: {', '.join([*index_vars, 'nml_len'])}")
-    for dim, index_var in enumerate(index_vars, start=1):
-        lines.append(
-            f"  do {index_var} = lbound({target_ref}, {dim}), ubound({target_ref}, {dim})"
-        )
-    indent = "  " * (rank + 1)
-    indices = ", ".join(index_vars)
-    element_ref = f"{target_ref}({indices})"
-    lines.append(f"{indent}nml_len = len({element_ref})")
-    lines.append(f"{indent}if (nml_len > 0) then")
-    lines.append(f"{indent}  {element_ref}(1:nml_len) = repeat(\" \", nml_len)")
-    lines.append(f"{indent}  {element_ref}(1:1) = {value_expr}{comment}")
-    lines.append(f"{indent}end if")
-    for _ in range(rank):
-        lines.append("  end do")
-    lines.append("end block")
-    return "\n".join(lines)
+    section_ref = _array_section_ref(target_ref, rank)
+    return f"{section_ref} = {value_expr}{comment}"
 
 
 def _sentinel_expressions(
@@ -1743,11 +1715,7 @@ def _sentinel_expressions(
     if category == "array":
         element = type_info.element_category
         if element == "string":
-            first_char_ref = _string_array_first_char_ref(
-                var_ref,
-                rank=len(type_info.dimensions),
-            )
-            return "achar(0)", f"all({first_char_ref} == achar(0))", False
+            return "achar(0)", f"all({var_ref} == achar(0))", False
         if element == "integer":
             return f"-huge({var_ref})", f"all({var_ref} == -huge({var_ref}))", False
         if element == "real":
@@ -1760,7 +1728,7 @@ def _sentinel_expressions(
             raise ValueError("boolean arrays cannot use sentinels")
         raise ValueError(f"unsupported sentinel array element '{element}'")
     if category == "string":
-        return "achar(0)", f"{var_ref}(1:1) == achar(0)", False
+        return "achar(0)", f"{var_ref} == achar(0)", False
     if category == "integer":
         return f"-huge({var_ref})", f"{var_ref} == -huge({var_ref})", False
     if category == "real":
@@ -1781,24 +1749,12 @@ def _element_missing_expression(
     len_ref: str | None = None,
 ) -> tuple[str, bool]:
     if category == "string":
-        return f"{_string_array_first_char_ref(var_ref)} == achar(0)", False
+        return f"{var_ref} == achar(0)", False
     if category == "integer":
         return f"{var_ref} == -huge({var_ref})", False
     if category == "real":
         return f"ieee_is_nan({var_ref})", True
     raise ValueError(f"unsupported missing category '{category}'")
-
-
-def _string_array_first_char_ref(var_ref: str, rank: int | None = None) -> str:
-    if _is_array_ref(var_ref):
-        return f"{var_ref}(1:1)"
-    if rank is not None:
-        return f"{_array_section_ref(var_ref, rank)}(1:1)"
-    return f"{var_ref}(:)(1:1)"
-
-
-def _is_array_ref(var_ref: str) -> bool:
-    return var_ref.endswith(")")
 
 
 def _array_missing_conditions(

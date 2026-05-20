@@ -89,7 +89,7 @@ contains
 
     if (present(allow_missing)) then
       if (allow_missing) then
-        if (val(1:1) == achar(0)) then
+        if (val == achar(0)) then
           in_enum = .true.
           return
         end if
@@ -105,7 +105,7 @@ contains
 
     if (present(allow_missing)) then
       if (allow_missing) then
-        if (val(1:1) == achar(0)) then
+        if (val == achar(0)) then
           in_enum = .true.
           return
         end if
@@ -216,32 +216,9 @@ contains
     allocate(this%mcmc_error_params(3, 2, this%dim_max_iter))
 
     ! sentinel values for required/optional parameters
-    block
-      integer :: nml_len
-      nml_len = len(this%name)
-      if (nml_len > 0) then
-        this%name(1:nml_len) = repeat(" ", nml_len)
-        this%name(1:1) = achar(0) ! sentinel for optional string
-      end if
-    end block
-    block
-      integer :: nml_len
-      nml_len = len(this%method)
-      if (nml_len > 0) then
-        this%method(1:nml_len) = repeat(" ", nml_len)
-        this%method(1:1) = achar(0) ! NULL string as sentinel for required string
-      end if
-    end block
-    block
-      integer :: nml_i1, nml_len
-      do nml_i1 = lbound(this%try_methods, 1), ubound(this%try_methods, 1)
-        nml_len = len(this%try_methods(nml_i1))
-        if (nml_len > 0) then
-          this%try_methods(nml_i1)(1:nml_len) = repeat(" ", nml_len)
-          this%try_methods(nml_i1)(1:1) = achar(0) ! sentinel for optional string array
-        end if
-      end do
-    end block
+    this%name = achar(0) ! sentinel for optional string
+    this%method = achar(0) ! NULL string as sentinel for required string
+    this%try_methods(:) = achar(0) ! sentinel for optional string array
     this%complex_sizes = -huge(this%complex_sizes) ! sentinel for optional integer array
     this%niterations = -huge(this%niterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
@@ -478,22 +455,22 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'name'"
         return
       end if
-      if (this%name(1:1) == achar(0)) status = NML_ERR_NOT_SET
+      if (this%name == achar(0)) status = NML_ERR_NOT_SET
     case ("method")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'method'"
         return
       end if
-      if (this%method(1:1) == achar(0)) status = NML_ERR_NOT_SET
+      if (this%method == achar(0)) status = NML_ERR_NOT_SET
     case ("try_methods")
       if (present(idx)) then
         status = idx_check(idx, lbound(this%try_methods), ubound(this%try_methods), &
           "try_methods", errmsg)
         if (status /= NML_OK) return
-        if (this%try_methods(idx(1))(1:1) == achar(0)) status = NML_ERR_NOT_SET
+        if (this%try_methods(idx(1)) == achar(0)) status = NML_ERR_NOT_SET
       else
-        if (all(this%try_methods(:)(1:1) == achar(0))) status = NML_ERR_NOT_SET
+        if (all(this%try_methods == achar(0))) status = NML_ERR_NOT_SET
       end if
     case ("complex_sizes")
       if (present(idx)) then

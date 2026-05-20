@@ -693,12 +693,8 @@ def test_generate_fortran_multidimensional_string_array_sentinels(
     )
 
     generated = output.read_text()
-    assert "integer :: nml_i1, nml_i2" in generated
-    assert "do nml_i1 = lbound(this%names, 1), ubound(this%names, 1)" in generated
-    assert "do nml_i2 = lbound(this%names, 2), ubound(this%names, 2)" in generated
-    assert "this%names(nml_i1, nml_i2)(1:nml_len) = repeat(\" \", nml_len)" in generated
-    assert "this%names(nml_i1, nml_i2)(1:1) = achar(0)" in generated
-    assert "this%names(:, :)(1:1) == achar(0)" in generated
+    assert "this%names(:, :) = achar(0)" in generated
+    assert "all(this%names == achar(0))" in generated
 
 
 def test_generate_fortran_array_default_pad_order(tmp_path: Path) -> None:
