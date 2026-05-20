@@ -279,7 +279,7 @@ def _build_context(
     duplicate_names = sorted(set(static_constants) & set(runtime_dimension_values))
     if duplicate_names:
         raise ValueError(
-            "constant and dimension names must be unique: " + ", ".join(duplicate_names)
+            "constants and dimensions must not share names: " + ", ".join(duplicate_names)
         )
     shape_constants: dict[str, int] = {**static_constants, **runtime_dimension_values}
     runtime_dimensions: list[dict[str, str]] = []
@@ -1604,8 +1604,6 @@ def _render_runtime_local_allocations(
     runtime_dimensions: list[str],
     runtime_length_expr: str | None,
 ) -> list[str]:
-    if type_info.category == "string":
-        return []
     return _render_runtime_allocations(
         type_info,
         name,
