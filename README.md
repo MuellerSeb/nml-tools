@@ -78,10 +78,14 @@ name:
 
 - Location: array properties.
 - Type: integer, identifier, or list of integers/identifiers.
-- Meaning: Fortran array dimensions; identifiers are resolved via `[constants]`.
+- Meaning: Fortran array dimensions; identifiers are resolved via `[constants]`
+  or `[dimensions]`.
 - Required; deferred-size dimensions are not supported.
 - Nested arrays are not supported. Use a single array with a shape list for
   multi-dimensional arrays.
+- Shape identifiers from `[constants]` produce fixed-size arrays.
+- Shape identifiers from `[dimensions]` produce allocatable arrays whose
+  dimensions can be changed at runtime with the generated `set_dims()` method.
 
 Example:
 
@@ -180,6 +184,22 @@ values_pad_c:
   x-fortran-default-pad: 0
 ```
 
+## Array set semantics
+
+Generated `set(...)` methods follow Fortran namelist-buffer semantics for
+arrays. When an array argument is provided, the setter writes the supplied values
+into the leading subsection of the target array. The provided extents must not
+exceed the configured target extents, but they do not have to fill the full
+array.
+
+Completeness is checked by `is_valid()`, not by `set(...)`. This means a
+required array can be partly set without an immediate setter error, but
+`is_valid()` will fail until the required entries are fully provided.
+
+Generated Python wrappers use the same semantics: scalar and lower-rank array
+inputs are normalized to singleton trailing dimensions before calling the
+Fortran setter.
+
 ## Validation keywords
 
 Only a subset of JSON Schema validation keywords is implemented.
@@ -263,15 +283,40 @@ Controls the generated helper module.
 
 ### [constants]
 
-Named constants used for dimensions and string lengths.
+Named static constants used for fixed dimensions, string lengths, and generated
+helper parameters.
 
-- Each entry is a table with `value` (int/float) and optional `doc`.
-- Values must be plain numbers (no kind suffixes).
+- Each entry is a table with integer `value` and optional `doc`.
+- Values must be plain integers (no kind suffixes).
+- String lengths from `x-fortran-len` may use constants. Runtime dimensions are
+  intentionally not supported for string lengths.
 
 Example:
 
 ```toml
-[constants.max_iter]
+[constants.buf]
+value = 128
+doc = "String buffer length."
+```
+
+### [dimensions]
+
+Named runtime array dimension defaults.
+
+- Each entry is a table with positive integer `value` and optional `doc`.
+- Names must be unique across `[constants]` and `[dimensions]`.
+- Entries may be used in `x-fortran-shape`, but not in `x-fortran-len`.
+- Arrays whose shape contains a `[dimensions]` name are generated as
+  allocatable runtime-sized arrays.
+- Generated Fortran and Python wrappers expose `set_dims(...)`. Omitted or
+  `None` Python values reset the dimension to its configured default.
+- Calling `set_dims(...)` deallocates affected arrays and clears configured
+  values. Call `set(...)` or `from_file(...)` afterwards.
+
+Example:
+
+```toml
+[dimensions.max_iter]
 value = 4
 doc = "Maximum number of iterations."
 ```
@@ -320,7 +365,7 @@ i4 = "int"
 
 The f2py-visible wrapper procedures avoid Fortran `optional` dummy arguments
 and assumed-shape arrays. Optional Python values are represented by generated
-`has_<name>` flags and harmless dummy values. Inside the Fortran wrapper,
+`nml_has__<name>__` flags and harmless dummy values. Inside the Fortran wrapper,
 allocated local variables are passed to the generated type-bound `set` method
 when a value is present; unallocated allocatables are passed otherwise, so the
 type-bound `set` still sees `present(arg) == .false.`. This keeps the f2py ABI
@@ -328,6 +373,10 @@ simple while preserving the normal generated Fortran setter semantics. This
 relies on the Fortran 2008 rule that an unallocated allocatable actual argument
 associated with an optional nonallocatable dummy argument is treated as not
 present.
+
+For array arguments, the generated Python shim follows the same partial-set
+semantics as the Fortran setter. Scalar inputs become shape `(1, ..., 1)`;
+lower-rank inputs get singleton trailing dimensions before being passed to f2py.
 
 The f2py wrappers use opaque integer handles for Fortran-owned namelist
 instances. nml-tools assumes that the owning Fortran library creates those
@@ -455,11 +504,30 @@ nml-tools validate --schema demo.yml --input demo.nml
 nml-tools validate --schema a.yml --schema b.yml combined.nml
 ```
 
-Constants are resolved from `[constants]` in the config, or provided ad hoc:
+When validation is config-driven, schema constants are loaded from `[constants]`
+and runtime array dimensions are loaded from `[dimensions]`. Both can be
+overridden for a validation run:
 
 ```bash
-nml-tools validate --schema demo.yml --constants MAX_ITER=10 input.nml
+nml-tools validate --config nml-config.toml \
+  --constants buf=128 \
+  --dimensions max_iter=10 \
+  input.nml
 ```
+
+In schema-only validation, provide the same values ad hoc:
+
+```bash
+nml-tools validate --schema demo.yml \
+  --constants buf=128 \
+  --dimensions max_iter=10 \
+  input.nml
+```
+
+`--constants` supplies static schema constants for string lengths and fixed
+array shapes. `--dimensions` supplies runtime array dimensions. Names are
+matched case-insensitively, normalized to lowercase, and must stay unique across
+both sets.
 
 Array values are validated as rectangular lists in Fortran order
 (outer list corresponds to the last Fortran index), matching `f90nml` parsing.

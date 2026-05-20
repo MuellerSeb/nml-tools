@@ -5,6 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
+from ._utils import (
+    normalize_constant_values,
+    normalize_runtime_dimensions,
+    reject_constant_dimension_overlap,
+)
 from .codegen_fortran import (
     FieldTypeInfo,
     _array_default_value,
@@ -13,6 +18,7 @@ from .codegen_fortran import (
     _field_type_info,
     _format_scalar_default,
     _parse_default_dimensions,
+    _reject_runtime_dimension_lengths,
 )
 
 _MISSING = object()
@@ -24,7 +30,8 @@ def generate_template(
     *,
     doc_mode: str = "plain",
     value_mode: str = "empty",
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: set[str] | None = None,
     values: dict[str, dict[str, Any]] | None = None,
@@ -35,6 +42,7 @@ def generate_template(
         doc_mode=doc_mode,
         value_mode=value_mode,
         constants=constants,
+        dimensions=dimensions,
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         values=values,
@@ -49,7 +57,8 @@ def render_template(
     *,
     doc_mode: str = "plain",
     value_mode: str = "empty",
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: set[str] | None = None,
     values: dict[str, dict[str, Any]] | None = None,
@@ -69,6 +78,7 @@ def render_template(
         doc_mode=doc_mode,
         value_mode=value_mode,
         constants=constants,
+        dimensions=dimensions,
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         values=values,
@@ -80,7 +90,8 @@ def _render_template(
     *,
     doc_mode: str,
     value_mode: str,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
     kind_map: dict[str, str] | None,
     kind_allowlist: set[str] | None,
     values: dict[str, dict[str, Any]] | None,
@@ -90,6 +101,13 @@ def _render_template(
     values_map = values or {}
     if not isinstance(values_map, dict):
         raise ValueError("template values must be a table of namelist tables")
+    constants = normalize_constant_values(constants)
+    dimensions = normalize_runtime_dimensions(dimensions)
+    reject_constant_dimension_overlap(constants, dimensions)
+    shape_constants: dict[str, int] = {
+        **constants,
+        **dimensions,
+    }
 
     schema_by_name: dict[str, dict[str, Any]] = {}
     for schema in schemas_list:
@@ -144,8 +162,9 @@ def _render_template(
                 current_property = name
                 if not isinstance(prop, dict):
                     raise ValueError(f"property '{name}' must be an object")
+                _reject_runtime_dimension_lengths(prop, dimensions)
                 type_info = _field_type_info(prop, constants)
-                _collect_dimension_constants(type_info.dimensions, constants)
+                _collect_dimension_constants(type_info.dimensions, shape_constants)
                 _validate_kind_allowlist(type_info, kind_map, kind_allowlist)
 
                 if type_info.category == "array":
@@ -170,7 +189,7 @@ def _render_template(
                     type_info,
                     value_mode=value_mode,
                     override=override_values.get(name, _MISSING),
-                    constants=constants,
+                    constants=shape_constants,
                 )
                 for entry_name, value_text in entries:
                     if value_text is None:
@@ -204,7 +223,7 @@ def _value_entries(
     *,
     value_mode: str,
     override: Any,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[tuple[str, str | None]]:
     if value_mode in {"empty", "minimal-empty"}:
         entry_name = name
@@ -266,7 +285,7 @@ def _array_list_entries(
     values: list[Any],
     type_info: FieldTypeInfo,
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[tuple[str, str | None]]:
     rank = len(type_info.dimensions)
     if rank <= 1:
@@ -351,7 +370,7 @@ def _entries_from_value(
     value: Any,
     type_info: FieldTypeInfo,
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[tuple[str, str | None]]:
     if type_info.category == "array":
         if isinstance(value, list):

@@ -10,14 +10,18 @@ from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from ._utils import (
+    normalize_constant_values,
+    normalize_runtime_dimensions,
+    reject_constant_dimension_overlap,
+    strip_trailing_whitespace,
+)
 from .codegen_fortran import (
     FieldSpec,
     FieldTypeInfo,
-    _array_default_value,
     _build_context,
     _field_type_info,
-    _parse_default_dimensions,
-    _parse_flex_dim,
+    _reject_runtime_dimension_lengths,
 )
 
 _TEMPLATE_ENV = Environment(
@@ -43,6 +47,7 @@ class F2pyArgumentSpec:
     requirement: str
     has_flag: str | None = None
     fixed_shape: list[int] | None = None
+    python_name: str | None = None
 
 
 @dataclass
@@ -75,6 +80,12 @@ class F2pyNamelistSpec:
     bridge_declarations: list[str]
     bridge_assignments: list[str]
     set_call_arguments: list[str]
+    set_dims_argument_list: list[str]
+    set_dims_argument_declarations: list[str]
+    set_dims_bridge_declarations: list[str]
+    set_dims_bridge_assignments: list[str]
+    set_dims_call_arguments: list[str]
+    set_dims_args: list[F2pyArgumentSpec]
     array_dimensions: list[F2pyArrayDimensionSpec]
     required_args: list[F2pyArgumentSpec]
     optional_args: list[F2pyArgumentSpec]
@@ -93,6 +104,7 @@ class PythonWrapperSpec:
     required_args: list[F2pyArgumentSpec]
     optional_args: list[F2pyArgumentSpec]
     all_args: list[F2pyArgumentSpec]
+    set_dims_args: list[F2pyArgumentSpec]
 
 
 @dataclass
@@ -119,7 +131,8 @@ def generate_f2py_wrappers(
     kind_module: str | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
     errmsg_len: int = 1024,
 ) -> None:
     """Generate f2py-facing Fortran wrappers for *schemas* at *output*."""
@@ -132,6 +145,7 @@ def generate_f2py_wrappers(
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         constants=constants,
+        dimensions=dimensions,
         errmsg_len=errmsg_len,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,7 +160,8 @@ def render_f2py_wrappers(
     kind_module: str | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
     errmsg_len: int = 1024,
 ) -> str:
     """Render f2py-facing Fortran wrappers for *schemas*."""
@@ -158,13 +173,15 @@ def render_f2py_wrappers(
             kind_map=kind_map,
             kind_allowlist=kind_allowlist,
             constants=constants,
+            dimensions=dimensions,
             errmsg_len=errmsg_len,
         )
         for schema in schemas
     ]
-    return _TEMPLATE_ENV.get_template("f2py_wrappers.f90.j2").render(
+    rendered = _TEMPLATE_ENV.get_template("f2py_wrappers.f90.j2").render(
         {"file_name": file_name, "specs": specs}
     )
+    return strip_trailing_whitespace(rendered)
 
 
 def generate_python_wrappers(
@@ -205,11 +222,13 @@ def render_python_wrappers(
                 required_args=spec.required_args,
                 optional_args=spec.optional_args,
                 all_args=spec.all_args,
+                set_dims_args=spec.set_dims_args,
             )
         )
-    return _TEMPLATE_ENV.get_template("python_wrappers.py.j2").render(
+    rendered = _TEMPLATE_ENV.get_template("python_wrappers.py.j2").render(
         {"imports": sorted(extension_modules), "classes": classes, "py_style": py_style}
     )
+    return strip_trailing_whitespace(rendered)
 
 
 def generate_f2cmap(
@@ -252,12 +271,13 @@ def render_f2cmap(
 def collect_f2py_kind_usage(
     schemas: Iterable[dict[str, Any]],
     *,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
 ) -> F2pyKindUsage:
     """Collect schema kind aliases used in f2py wrapper arguments."""
     usage = F2pyKindUsage(real=set(), integer=set())
     for schema in schemas:
-        for _, type_info in _iter_field_type_infos(schema, constants):
+        for _, type_info in _iter_field_type_infos(schema, constants, dimensions):
             category = (
                 type_info.element_category
                 if type_info.category == "array"
@@ -288,7 +308,8 @@ def build_f2py_namelist_spec(
     kind_module: str | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
     errmsg_len: int = 1024,
 ) -> F2pyNamelistSpec:
     """Build f2py wrapper metadata for one namelist schema."""
@@ -299,13 +320,14 @@ def build_f2py_namelist_spec(
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         constants=constants,
+        dimensions=dimensions,
         module_doc=None,
     )
     fields = cast("list[FieldSpec]", context["fields"])
     type_infos = {
-        name: type_info for name, type_info in _iter_field_type_infos(schema, constants)
+        name: type_info
+        for name, type_info in _iter_field_type_infos(schema, constants, dimensions)
     }
-    properties = _normalized_properties(schema)
     required_args: list[F2pyArgumentSpec] = []
     optional_args: list[F2pyArgumentSpec] = []
     argument_list: list[str] = []
@@ -313,12 +335,17 @@ def build_f2py_namelist_spec(
     bridge_declarations: list[str] = []
     bridge_assignments: list[str] = []
     set_call_arguments: list[str] = []
+    set_dims_argument_list: list[str] = []
+    set_dims_argument_declarations: list[str] = []
+    set_dims_bridge_declarations: list[str] = []
+    set_dims_bridge_assignments: list[str] = []
+    set_dims_call_arguments: list[str] = []
+    set_dims_args: list[F2pyArgumentSpec] = []
     array_dimensions: list[F2pyArrayDimensionSpec] = []
     for field in fields:
         type_info = type_infos[field.name]
-        prop = properties[field.name]
         rank = len(type_info.dimensions) if type_info.category == "array" else 0
-        has_flag = None if field.required else f"has_{field.name}"
+        has_flag = None if field.required else f"nml_has__{field.name}__"
         spec = F2pyArgumentSpec(
             name=field.name,
             title=_one_line(field.title),
@@ -329,7 +356,6 @@ def build_f2py_namelist_spec(
             doc_type=_python_doc_type(type_info),
             requirement="required" if field.required else "optional",
             has_flag=has_flag,
-            fixed_shape=_fixed_python_array_shape(prop, type_info, constants),
         )
         if field.required:
             required_args.append(spec)
@@ -354,6 +380,45 @@ def build_f2py_namelist_spec(
         else:
             set_call_arguments.append(f"{field.name}={field.name}")
 
+    runtime_dimension_args = cast("list[dict[str, str]]", context["set_dims_arguments"])
+    for entry in runtime_dimension_args:
+        const_name = entry["name"]
+        arg_name = entry["arg_name"]
+        python_name = _python_parameter_name(const_name)
+        has_flag = f"nml_has__{const_name}__"
+        set_dims_args.append(
+            F2pyArgumentSpec(
+                name=const_name,
+                title=f"Runtime dimension override for {const_name}",
+                required=False,
+                rank=0,
+                numpy_dtype="int",
+                dummy_value="0",
+                doc_type="int",
+                requirement="optional",
+                has_flag=has_flag,
+                fixed_shape=None,
+                python_name=python_name,
+            )
+        )
+        set_dims_argument_list.append(const_name)
+        set_dims_argument_declarations.append(
+            f"integer, intent(in) :: {const_name} !< runtime dimension override for {const_name}"
+        )
+        set_dims_argument_list.append(has_flag)
+        set_dims_argument_declarations.append(
+            f"logical, intent(in) :: {has_flag} !< whether {const_name} was provided"
+        )
+        maybe_name = f"maybe_{const_name}"
+        set_dims_bridge_declarations.append(f"integer, allocatable :: {maybe_name}")
+        set_dims_bridge_assignments.append(
+            f"if ({has_flag}) then\n"
+            f"  allocate({maybe_name})\n"
+            f"  {maybe_name} = {const_name}\n"
+            "end if"
+        )
+        set_dims_call_arguments.append(f"{arg_name}={maybe_name}")
+
     namelist_name = cast("str", context["namelist_name"])
     details = cast("str", context["details_text"])
     return F2pyNamelistSpec(
@@ -375,6 +440,12 @@ def build_f2py_namelist_spec(
         bridge_declarations=bridge_declarations,
         bridge_assignments=bridge_assignments,
         set_call_arguments=set_call_arguments,
+        set_dims_argument_list=set_dims_argument_list,
+        set_dims_argument_declarations=set_dims_argument_declarations,
+        set_dims_bridge_declarations=set_dims_bridge_declarations,
+        set_dims_bridge_assignments=set_dims_bridge_assignments,
+        set_dims_call_arguments=set_dims_call_arguments,
+        set_dims_args=set_dims_args,
         array_dimensions=array_dimensions,
         required_args=required_args,
         optional_args=optional_args,
@@ -384,13 +455,18 @@ def build_f2py_namelist_spec(
 
 def _iter_field_type_infos(
     schema: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None = None,
 ) -> list[tuple[str, FieldTypeInfo]]:
     properties = _normalized_properties(schema)
-    return [
-        (name, _field_type_info(prop, constants))
-        for name, prop in properties.items()
-    ]
+    constants = normalize_constant_values(constants)
+    runtime_dimension_values = normalize_runtime_dimensions(dimensions)
+    reject_constant_dimension_overlap(constants, runtime_dimension_values)
+    field_types: list[tuple[str, FieldTypeInfo]] = []
+    for name, prop in properties.items():
+        _reject_runtime_dimension_lengths(prop, runtime_dimension_values)
+        field_types.append((name, _field_type_info(prop, constants)))
+    return field_types
 
 
 def _normalized_properties(schema: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -412,20 +488,6 @@ def _normalized_properties(schema: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return normalized
 
 
-def _fixed_python_array_shape(
-    prop: dict[str, Any],
-    type_info: FieldTypeInfo,
-    constants: dict[str, int | float] | None,
-) -> list[int] | None:
-    if type_info.category != "array":
-        return None
-    if _array_default_value(prop) is not None:
-        return None
-    if _parse_flex_dim(prop, type_info) > 0:
-        return None
-    return _parse_default_dimensions(type_info.dimensions, constants)
-
-
 def _class_name(namelist_name: str) -> str:
     parts = [part for part in re.split(r"[^0-9A-Za-z]+", namelist_name) if part]
     if not parts:
@@ -435,6 +497,14 @@ def _class_name(namelist_name: str) -> str:
         name = f"Namelist{name}"
     if keyword.iskeyword(name):
         name = f"{name}Namelist"
+    return name
+
+
+def _python_parameter_name(name: str) -> str:
+    if not name.isidentifier():
+        raise ValueError(f"name '{name}' is not a valid Python identifier")
+    if keyword.iskeyword(name):
+        return f"{name}_"
     return name
 
 
@@ -537,7 +607,7 @@ def _optional_bridge_declaration(name: str, type_info: FieldTypeInfo) -> str:
 
 
 def _optional_bridge_assignment(name: str, type_info: FieldTypeInfo) -> str:
-    has_flag = f"has_{name}"
+    has_flag = f"nml_has__{name}__"
     maybe_name = f"maybe_{name}"
     if type_info.category == "array":
         dims = ", ".join(_array_dimension_argument_names(name, len(type_info.dimensions)))

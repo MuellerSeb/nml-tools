@@ -145,6 +145,38 @@ class Config:
         )
         _check_status(result)
 
+    def set_dims(
+        self,
+        n_weights: Any = None,
+    ) -> None:
+        """Set runtime dimensions for the handled config instance.
+
+        Omitted or None values reset the corresponding dimension to the configured
+        helper-module default. Applying dimensions deallocates affected arrays
+        and clears previously configured namelist values.
+
+        Parameters
+        ----------
+        n_weights : int, optional
+            Runtime dimension override for n_weights.
+
+        Raises
+        ------
+        NmlError
+            If the Fortran setter returns a non-OK status.
+        """
+        kwargs: dict[str, Any] = {}
+        if n_weights is not None:
+            kwargs["n_weights"] = n_weights
+        else:
+            kwargs["n_weights"] = 0
+        kwargs["nml_has__n_weights__"] = n_weights is not None
+        result = self._f2py.config_set_dims_wrapper(
+            self.handle,
+            **kwargs,
+        )
+        _check_status(result)
+
     def set(
         self,
         iterations: Any,
@@ -192,12 +224,12 @@ class Config:
             kwargs["name"] = name
         else:
             kwargs["name"] = ""
-        kwargs["has_name"] = name is not None
+        kwargs["nml_has__name__"] = name is not None
         if enabled is not None:
             kwargs["enabled"] = enabled
         else:
             kwargs["enabled"] = False
-        kwargs["has_enabled"] = enabled is not None
+        kwargs["nml_has__enabled__"] = enabled is not None
         if weights is not None:
             kwargs["weights"] = _normalize_array(
                 weights,
@@ -211,7 +243,7 @@ class Config:
                 1,
                 dtype="float",
             )
-        kwargs["has_weights"] = weights is not None
+        kwargs["nml_has__weights__"] = weights is not None
         result = self._f2py.config_set_wrapper(
             self.handle,
             **kwargs,
@@ -276,5 +308,3 @@ class Config:
             self.handle,
         )
         _check_status(result)
-
-

@@ -3,10 +3,10 @@
 
 !> \brief Python binding config
 !> \details Minimal namelist used by the pybind example.
-!! 
+!!
 !! The generated f2py wrapper configures a persistent Fortran target instance
 !! through an opaque integer handle.
-!! 
+!!
 module nml_config
   use nml_helper, only: &
     nml_file_t, &
@@ -27,7 +27,8 @@ module nml_config
     idx_check, &
     to_lower, &
     NML_ERR_INVALID_HANDLE, &
-    str_len
+    str_len, &
+    nml_default__n_weights__=>n_weights
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -49,19 +50,21 @@ module nml_config
   !> \class nml_config_t
   !> \brief Python binding config
   !> \details Minimal namelist used by the pybind example.
-  !! 
+  !!
   !! The generated f2py wrapper configures a persistent Fortran target instance
   !! through an opaque integer handle.
-  !! 
+  !!
   type, public :: nml_config_t
     logical :: is_configured = .false. !< whether the namelist has been configured
+    integer :: nml_dim__n_weights__ = nml_default__n_weights__ !< runtime dimension for n_weights
     character(len=str_len) :: name !< Config name
     integer(i4) :: iterations !< Iterations
     real(dp) :: tolerance !< Tolerance
     logical :: enabled !< Enabled
-    real(dp), dimension(3) :: weights !< Weights
+    real(dp), allocatable, dimension(:) :: weights !< Weights
   contains
     procedure :: init => nml_config_init
+    procedure :: set_dims => nml_config_set_dims
     procedure :: from_file => nml_config_from_file
     procedure :: set => nml_config_set
     procedure :: is_set => nml_config_is_set
@@ -135,6 +138,10 @@ contains
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
 
+    ! allocate runtime-sized fields
+    if (allocated(this%weights)) deallocate(this%weights)
+    allocate(this%weights(this%nml_dim__n_weights__))
+
     ! sentinel values for required/optional parameters
     this%iterations = -huge(this%iterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
@@ -143,6 +150,35 @@ contains
     this%enabled = enabled_default ! bool values always need a default
     this%weights = weights_default
   end function nml_config_init
+
+  !> \brief Reset runtime dimensions for config
+  integer function nml_config_set_dims(this, &
+    n_weights, &
+    errmsg) result(status)
+    class(nml_config_t), intent(inout) :: this !< namelist instance
+    integer, intent(in), optional :: n_weights !< runtime dimension override for n_weights
+    integer :: nml_candidate__n_weights__
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (present(n_weights)) then
+      nml_candidate__n_weights__ = n_weights
+    else
+      nml_candidate__n_weights__ = nml_default__n_weights__
+    end if
+    if (nml_candidate__n_weights__ <= 0) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "dimension 'n_weights' must be positive"
+      return
+    end if
+    this%nml_dim__n_weights__ = nml_candidate__n_weights__
+
+    ! deallocate runtime-sized fields; init/set/from_file allocate them again
+    if (allocated(this%weights)) deallocate(this%weights)
+    this%is_configured = .false.
+  end function nml_config_set_dims
+
 
   !> \brief Read config namelist from file
   integer function nml_config_from_file(this, file, errmsg) result(status)
@@ -154,7 +190,7 @@ contains
     integer(i4) :: iterations
     real(dp) :: tolerance
     logical :: enabled
-    real(dp), dimension(3) :: weights
+    real(dp), allocatable, dimension(:) :: weights
     ! locals
     type(nml_file_t) :: nml
     integer :: iostat
@@ -170,6 +206,9 @@ contains
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
+    ! allocate local namelist variables matching runtime-sized fields
+    if (allocated(weights)) deallocate(weights)
+    allocate(weights(this%nml_dim__n_weights__))
     name = this%name
     iterations = this%iterations
     tolerance = this%tolerance
@@ -265,6 +304,11 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
     select case (to_lower(trim(name)))
     case ("name")
       if (present(idx)) then
@@ -293,6 +337,10 @@ contains
         return
       end if
     case ("weights")
+      if (.not. allocated(this%weights)) then
+        status = NML_ERR_NOT_SET
+        return
+      end if
       if (present(idx)) then
         status = idx_check(idx, lbound(this%weights), ubound(this%weights), &
           "weights", errmsg)
@@ -316,6 +364,11 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
 
     ! required parameters
     istat = this%is_set("iterations", errmsg=errmsg)

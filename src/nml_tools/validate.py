@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
-_FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+from ._utils import (
+    FORTRAN_IDENTIFIER,
+    normalize_constant_values,
+    normalize_runtime_dimensions,
+    reject_constant_dimension_overlap,
+)
 
 
 @dataclass(frozen=True)
@@ -26,9 +30,14 @@ def validate_namelist(
     schema: dict[str, Any],
     namelist: dict[str, Any],
     *,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
 ) -> None:
     """Validate *namelist* against *schema*."""
+    constants = normalize_constant_values(constants)
+    dimensions = normalize_runtime_dimensions(dimensions)
+    reject_constant_dimension_overlap(constants, dimensions)
+
     namelist_name = schema.get("x-fortran-namelist")
     if not isinstance(namelist_name, str) or not namelist_name.strip():
         raise ValueError("schema must define non-empty 'x-fortran-namelist'")
@@ -55,10 +64,10 @@ def validate_namelist(
                 prop,
                 values[key][1],
                 constants=constants,
+                dimensions=dimensions,
             )
         elif key in required:
             raise ValueError(f"namelist '{namelist_name}' is missing required '{prop_name}'")
-
 
 def _normalize_properties(
     properties: Mapping[str, Any],
@@ -123,14 +132,15 @@ def _validate_property(
     prop: Mapping[str, Any],
     value: Any,
     *,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
 ) -> None:
     prop_type = prop.get("type")
     if prop_type == "array":
-        _validate_array(name, prop, value, constants)
+        _validate_array(name, prop, value, constants, dimensions)
         return
     if prop_type in {"integer", "number", "boolean", "string"}:
-        constraints = _scalar_constraints(name, prop, prop_type, constants)
+        constraints = _scalar_constraints(name, prop, prop_type, constants, dimensions)
         _validate_scalar_value(name, value, constraints)
         return
     raise ValueError(f"property '{name}' has unsupported type '{prop_type}'")
@@ -140,7 +150,8 @@ def _validate_array(
     name: str,
     prop: Mapping[str, Any],
     value: Any,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
 ) -> None:
     items = prop.get("items")
     if not isinstance(items, dict):
@@ -151,22 +162,23 @@ def _validate_array(
     if items_type not in {"integer", "number", "boolean", "string"}:
         raise ValueError(f"array property '{name}' items must define a scalar type")
 
-    dimensions = _parse_shape(prop.get("x-fortran-shape"), constants, name)
-    flex_tail_dims = _parse_flex_tail_dims(prop, len(dimensions), name, dimensions)
+    shape_constants = {**(constants or {}), **(dimensions or {})}
+    shape = _parse_shape(prop.get("x-fortran-shape"), shape_constants, name)
+    flex_tail_dims = _parse_flex_tail_dims(prop, len(shape), name, shape)
 
     array_value = _coerce_array_value(value, name)
-    shape = _nested_shape(array_value, name)
-    if len(shape) != len(dimensions):
+    provided_shape = _nested_shape(array_value, name)
+    if len(provided_shape) != len(shape):
         raise ValueError(
-            f"array '{name}' rank mismatch: expected {len(dimensions)} got {len(shape)}"
+            f"array '{name}' rank mismatch: expected {len(shape)} got {len(provided_shape)}"
         )
-    shape_fortran = list(reversed(shape))
-    for idx, (provided, expected) in enumerate(zip(shape_fortran, dimensions), start=1):
+    shape_fortran = list(reversed(provided_shape))
+    for idx, (provided, expected) in enumerate(zip(shape_fortran, shape), start=1):
         if provided <= 0:
             raise ValueError(f"array '{name}' has empty dimension {idx}")
         if expected is None:
             continue
-        if flex_tail_dims > 0 and idx <= len(dimensions) - flex_tail_dims:
+        if flex_tail_dims > 0 and idx <= len(shape) - flex_tail_dims:
             if provided != expected:
                 raise ValueError(
                     f"array '{name}' dimension {idx} must be {expected}, got {provided}"
@@ -177,7 +189,7 @@ def _validate_array(
                     f"array '{name}' dimension {idx} must be <= {expected}, got {provided}"
                 )
 
-    constraints = _scalar_constraints(name, items, items_type, constants)
+    constraints = _scalar_constraints(name, items, items_type, constants, dimensions)
     for element in _iter_scalars(array_value):
         _validate_scalar_value(name, element, constraints)
 
@@ -186,11 +198,12 @@ def _scalar_constraints(
     name: str,
     prop: Mapping[str, Any],
     category: str,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
 ) -> ScalarConstraints:
     length = None
     if category == "string":
-        length = _parse_length(prop, constants, name)
+        length = _parse_length(prop, constants, dimensions, name)
     enum_values, enum_trimmed = _parse_enum(prop, category, length, name)
     min_value, min_exclusive = _extract_bound(prop, "minimum", "exclusiveMinimum", name)
     max_value, max_exclusive = _extract_bound(prop, "maximum", "exclusiveMaximum", name)
@@ -214,7 +227,8 @@ def _scalar_constraints(
 
 def _parse_length(
     prop: Mapping[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
     name: str,
 ) -> int:
     raw = prop.get("x-fortran-len")
@@ -233,11 +247,16 @@ def _parse_length(
             if length <= 0:
                 raise ValueError(f"string property '{name}' length must be positive")
             return length
-        if not _FORTRAN_IDENTIFIER.match(token):
+        if not FORTRAN_IDENTIFIER.match(token):
             raise ValueError(f"string property '{name}' length must be literal or identifier")
-        if constants is None or token not in constants:
+        token_key = token.lower()
+        if dimensions is not None and token_key in dimensions:
+            raise ValueError(
+                f"string property '{name}' length must not use runtime dimension '{token}'"
+            )
+        if constants is None or token_key not in constants:
             raise ValueError(f"string property '{name}' length constant '{token}' not defined")
-        value = constants[token]
+        value = constants[token_key]
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"string property '{name}' length constant '{token}' must be int")
         if value <= 0:
@@ -412,13 +431,21 @@ def _validate_value_bounds(
 
 def _parse_shape(
     raw: Any,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     name: str,
 ) -> list[int | None]:
-    if not isinstance(raw, list) or not raw:
+    shape_entries: list[Any]
+    if isinstance(raw, bool) or raw is None:
         raise ValueError(f"array property '{name}' must define non-empty x-fortran-shape")
+    if isinstance(raw, (int, str)):
+        shape_entries = [raw]
+    elif isinstance(raw, list) and raw:
+        shape_entries = raw
+    else:
+        raise ValueError(f"array property '{name}' must define non-empty x-fortran-shape")
+
     parsed: list[int | None] = []
-    for dim in raw:
+    for dim in shape_entries:
         if isinstance(dim, bool):
             raise ValueError(f"array property '{name}' shape entries must be int or str")
         if isinstance(dim, int):
@@ -439,13 +466,14 @@ def _parse_shape(
                     raise ValueError(f"array property '{name}' shape values must be positive")
                 parsed.append(size)
                 continue
-            if not _FORTRAN_IDENTIFIER.match(token):
+            if not FORTRAN_IDENTIFIER.match(token):
                 raise ValueError(
                     f"array property '{name}' shape entries must be ints or identifiers"
                 )
-            if constants is None or token not in constants:
+            token_key = token.lower()
+            if constants is None or token_key not in constants:
                 raise ValueError(f"array property '{name}' constant '{token}' not defined")
-            value = constants[token]
+            value = constants[token_key]
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(f"array property '{name}' constant '{token}' must be int")
             if value <= 0:

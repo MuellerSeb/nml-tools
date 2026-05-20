@@ -49,11 +49,19 @@ module {{ module_name }}
   !> \details {{ details_text | replace('\n', '\n  !! ') }}
   type, public :: {{ type_name }}
     logical :: is_configured = .false. !< whether the namelist has been configured
+{% if runtime_dimensions %}
+{% for entry in runtime_dimensions %}
+    integer :: {{ entry.local_name }} = {{ entry.default_name }} !< runtime dimension for {{ entry.name }}
+{% endfor %}
+{% endif %}
 {% for field in fields %}
 {{ field.declaration | indent(4, True) }}
 {% endfor %}
   contains
     procedure :: init => {{ type_prefix }}_init
+{% if runtime_dimensions %}
+    procedure :: set_dims => {{ type_prefix }}_set_dims
+{% endif %}
     procedure :: from_file => {{ type_prefix }}_from_file
     procedure :: set => {{ type_prefix }}_set
     procedure :: is_set => {{ type_prefix }}_is_set
@@ -147,6 +155,13 @@ contains
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
 
+{% if runtime_allocations %}
+    ! allocate runtime-sized fields
+{% for stmt in runtime_allocations %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+
 {% if sentinel_assignments %}
     ! sentinel values for required/optional parameters
 {% for stmt in sentinel_assignments %}
@@ -160,6 +175,67 @@ contains
 {% endfor %}
 {% endif %}
   end function {{ type_prefix }}_init
+
+{% if runtime_dimensions %}
+  !> \brief Reset runtime dimensions for {{ namelist_name }}
+{% if set_dims_arguments %}
+  integer function {{ type_prefix }}_set_dims(this, &
+    {{ set_dims_arguments | map(attribute='arg_name') | join(', &\n    ') }}, &
+    errmsg) result(status)
+{% else %}
+  integer function {{ type_prefix }}_set_dims(this, errmsg) result(status)
+{% endif %}
+    class({{ type_name }}), intent(inout) :: this !< namelist instance
+{% for entry in set_dims_arguments %}
+    integer, intent(in), optional :: {{ entry.arg_name }} !< runtime dimension override for {{ entry.name }}
+{% endfor %}
+{% for entry in set_dims_arguments %}
+    integer :: {{ entry.candidate_name }}
+{% endfor %}
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+{% for entry in set_dims_arguments %}
+    if (present({{ entry.arg_name }})) then
+      {{ entry.candidate_name }} = {{ entry.arg_name }}
+    else
+      {{ entry.candidate_name }} = {{ entry.default_name }}
+    end if
+    if ({{ entry.candidate_name }} <= 0) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "dimension '{{ entry.name }}' must be positive"
+      return
+    end if
+{% if entry.min_required > 1 %}
+    if ({{ entry.candidate_name }} < {{ entry.min_required }}) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "dimension '{{ entry.name }}' must be >= {{ entry.min_required }}"
+      return
+    end if
+{% endif %}
+{% endfor %}
+{% for check in set_dims_extent_checks %}
+    if ({{ check.condition }}) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "{{ check.message }}"
+      return
+    end if
+{% endfor %}
+{% for entry in set_dims_arguments %}
+    this%{{ entry.local_name }} = {{ entry.candidate_name }}
+{% endfor %}
+{% if runtime_deallocations %}
+
+    ! deallocate runtime-sized fields; init/set/from_file allocate them again
+{% for stmt in runtime_deallocations %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
+    this%is_configured = .false.
+  end function {{ type_prefix }}_set_dims
+
+{% endif %}
 
   !> \brief Read {{ namelist_name }} namelist from file
   integer function {{ type_prefix }}_from_file(this, file, errmsg) result(status)
@@ -181,6 +257,12 @@ contains
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
+{% if runtime_local_allocations %}
+    ! allocate local namelist variables matching runtime-sized fields
+{% for stmt in runtime_local_allocations %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+{% endif %}
 {% for stmt in local_init_assignments %}
 {{ stmt | indent(4, True) }}
 {% endfor %}
@@ -268,10 +350,21 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
     select case (to_lower(trim(name)))
 {% for case in presence_cases %}
     case ("{{ case.name }}")
 {% if case.is_array %}
+{% if case.runtime_array %}
+      if (.not. allocated(this%{{ case.name }})) then
+        status = NML_ERR_NOT_SET
+        return
+      end if
+{% endif %}
       if (present(idx)) then
         status = idx_check(idx, lbound(this%{{ case.name }}), ubound(this%{{ case.name }}), &
           "{{ case.display_name }}", errmsg)
@@ -328,6 +421,12 @@ contains
         if (present(errmsg)) errmsg = "shape rank mismatch for '{{ flex.display_name }}'"
         return
       end if
+{% if flex.runtime_array %}
+      if (.not. allocated(this%{{ flex.name }})) then
+        filled = 0
+        return
+      end if
+{% endif %}
       do dim = 1, {{ flex.rank }}
         filled(dim) = size(this%{{ flex.name }}, dim)
       end do
@@ -371,6 +470,11 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
 
 {% if required_scalar_validations %}
     ! required parameters
@@ -395,6 +499,13 @@ contains
 {% if required_array_validations %}
     ! required arrays
 {% for entry in required_array_validations %}
+{% if entry.runtime_array %}
+    if (.not. allocated(this%{{ entry.attr_name }})) then
+      status = NML_ERR_REQUIRED
+      if (present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
+      return
+    end if
+{% endif %}
     if ({{ entry.all_missing_condition }}) then
       status = NML_ERR_REQUIRED
       if (present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
@@ -437,11 +548,17 @@ contains
     ! enum constraints
 {% for check in enum_checks %}
 {% if check.is_array %}
+{% if check.runtime_array %}
+    if (allocated({{ check.array_ref }})) then
+{% endif %}
     if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
       status = NML_ERR_ENUM
       if (present(errmsg)) errmsg = "enum constraint failed: {{ check.display_name }}"
       return
     end if
+{% if check.runtime_array %}
+    end if
+{% endif %}
 {% else %}
     istat = this%is_set("{{ check.display_name }}", errmsg=errmsg)
     if (istat == NML_OK) then
@@ -461,11 +578,17 @@ contains
     ! bounds constraints
 {% for check in bounds_checks %}
 {% if check.is_array %}
+{% if check.runtime_array %}
+    if (allocated({{ check.array_ref }})) then
+{% endif %}
     if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
       status = NML_ERR_BOUNDS
       if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.display_name }}"
       return
     end if
+{% if check.runtime_array %}
+    end if
+{% endif %}
 {% else %}
     istat = this%is_set("{{ check.display_name }}", errmsg=errmsg)
     if (istat == NML_OK) then

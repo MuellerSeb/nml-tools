@@ -45,7 +45,7 @@ module {{ module_name }}
   integer, parameter, public :: NML_ERR_INVALID_HANDLE = 22
 
 {% if constants %}
-  !> \brief Shared constants for namelist dimensions
+  !> \brief Shared constants for generated namelist modules
 {% for constant in constants %}
   {{ constant.type_spec }}, parameter, public :: {{ constant.name }} = {{ constant.value }}{% if constant.doc %} !< {{ constant.doc }}{% endif %}
 

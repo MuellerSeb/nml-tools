@@ -44,6 +44,24 @@ def _schema(name: str = "optimization") -> dict[str, Any]:
     }
 
 
+def _runtime_dimension_schema(name: str = "config") -> dict[str, Any]:
+    return {
+        "title": "Runtime dimensions",
+        "x-fortran-namelist": name,
+        "type": "object",
+        "required": ["iterations", "tolerance", "weights"],
+        "properties": {
+            "iterations": {"type": "integer", "x-fortran-kind": "i4"},
+            "tolerance": {"type": "number", "x-fortran-kind": "dp"},
+            "weights": {
+                "type": "array",
+                "x-fortran-shape": "n_weights",
+                "items": {"type": "number", "x-fortran-kind": "dp"},
+            },
+        },
+    }
+
+
 def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     codegen = _import_codegen_f2py()
     output = tmp_path / "f2py_config_wrappers.f90"
@@ -83,14 +101,14 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     assert "integer, intent(in) :: values_n2 !< extent for values" in generated
     assert "real(dp), dimension(values_n1, values_n2), intent(in) :: values" in generated
     assert "integer(i4), intent(in) :: seed !< seed (optional)" in generated
-    assert "logical, intent(in) :: has_seed !< whether seed was provided" in generated
+    assert "logical, intent(in) :: nml_has__seed__ !< whether seed was provided" in generated
     assert "integer, intent(in) :: weights_n1 !< extent for weights" in generated
     assert "integer(i4), dimension(weights_n1), intent(in) :: weights" in generated
-    assert "logical, intent(in) :: has_weights !< whether weights was provided" in generated
+    assert "logical, intent(in) :: nml_has__weights__ !< whether weights was provided" in generated
     assert "integer(i4), allocatable :: maybe_seed" in generated
     assert "integer(i4), dimension(:), allocatable :: maybe_weights" in generated
-    assert "if (has_seed) then" in generated
-    assert "if (has_weights) then" in generated
+    assert "if (nml_has__seed__) then" in generated
+    assert "if (nml_has__weights__) then" in generated
     assert "status = this%set(" in generated
     assert "seed=maybe_seed" in generated
     assert "weights=maybe_weights" in generated
@@ -144,6 +162,54 @@ def test_generate_f2py_wrappers_uses_deferred_length_for_string_array_bridges(
         in generated
     )
     assert "character(len=*), dimension(:, :), allocatable :: maybe_names" not in generated
+
+
+def test_generate_f2py_wrappers_exposes_set_dims_wrapper(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    output = tmp_path / "f2py_config_wrappers.f90"
+
+    codegen.generate_f2py_wrappers(
+        [_runtime_dimension_schema()],
+        output,
+        kind_module="iso_fortran_env",
+        kind_map={"dp": "real64", "i4": "int32"},
+        kind_allowlist={"real64", "int32"},
+        dimensions={"n_weights": 3},
+    )
+
+    generated = output.read_text()
+    assert "subroutine config_set_dims_wrapper" in generated
+    assert (
+        "integer, intent(in) :: n_weights !< runtime dimension override for n_weights"
+        in generated
+    )
+    assert (
+        "logical, intent(in) :: nml_has__n_weights__ "
+        "!< whether n_weights was provided"
+        in generated
+    )
+    assert "integer, allocatable :: maybe_n_weights" in generated
+    assert "if (nml_has__n_weights__) then" in generated
+    assert "status = this%set_dims(" in generated
+    assert "n_weights=maybe_n_weights" in generated
+
+
+def test_collect_f2py_kind_usage_rejects_dimension_as_string_length() -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "title": "Invalid runtime string length",
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "x-fortran-len": "n_weights",
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="cannot be used as x-fortran-len"):
+        codegen.collect_f2py_kind_usage([schema], dimensions={"n_weights": 3})
 
 
 def test_generate_f2cmap_requires_explicit_kind_mappings(tmp_path: Path) -> None:
@@ -229,18 +295,18 @@ def test_generate_python_wrapper_normalizes_arrays_and_handles_status(
         "method",
         "values",
         "seed",
-        "has_seed",
+        "nml_has__seed__",
         "weights",
-        "has_weights",
+        "nml_has__weights__",
     }
-    assert kwargs["values"].shape == (3, 2)
+    assert kwargs["values"].shape == (1, 1)
     assert (kwargs["values"] == 0.1).all()
     assert kwargs["values"].flags.f_contiguous
     assert kwargs["seed"] == 0
-    assert kwargs["has_seed"] is False
+    assert kwargs["nml_has__seed__"] is False
     assert kwargs["weights"].shape == (1,)
     assert kwargs["weights"].flags.f_contiguous
-    assert kwargs["has_weights"] is False
+    assert kwargs["nml_has__weights__"] is False
     assert cfg.is_set("seed") is False
     assert calls[-1][1]["idx"].shape == (1,)
     assert calls[-1][1]["has_idx"] is False
@@ -255,9 +321,7 @@ def test_generate_python_wrapper_normalizes_arrays_and_handles_status(
 
     with pytest.raises(ValueError, match="required argument 'method'"):
         cfg.set(method=None, values=[1.0])
-    with pytest.raises(ValueError, match=r"shape \(3,\), expected \(3, 2\)"):
-        cfg.set(method="DDS", values=[1.0, 2.0, 3.0])
-    with pytest.raises(ValueError, match="expected 2"):
+    with pytest.raises(ValueError, match="expected at most 2"):
         cfg.set(method="DDS", values=[[[1.0]]])
 
 
@@ -279,8 +343,83 @@ def test_generate_python_wrapper_uses_package_relative_import(tmp_path: Path) ->
     assert "Raises\n        ------" in generated
     assert "method : str" in generated
     assert "values : array_like of float" in generated
-    assert "expected_shape=(3, 2)," in generated
+    assert "expected_shape=(3, 2)," not in generated
     assert "expected_shape=None," in generated
+
+
+def test_generate_python_wrapper_exposes_set_dims(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    spec = codegen.build_f2py_namelist_spec(
+        _runtime_dimension_schema(),
+        dimensions={"n_weights": 3},
+    )
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    output = package_dir / "config_wrappers.py"
+    calls: list[dict[str, Any]] = []
+
+    class FakeF2pyConfig:
+        @staticmethod
+        def config_set_dims_wrapper(handle: int, **kwargs: Any) -> tuple[int, str]:
+            calls.append(kwargs)
+            return 0, ""
+
+    class FakeExtension:
+        f2py_config = FakeF2pyConfig
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setitem(sys.modules, "pkg.f2py_config", FakeExtension)
+    try:
+        codegen.generate_python_wrappers([(spec, "f2py_config")], output)
+
+        module_spec = importlib.util.spec_from_file_location("pkg.config_wrappers", output)
+        assert module_spec is not None
+        assert module_spec.loader is not None
+        module = importlib.util.module_from_spec(module_spec)
+        module_spec.loader.exec_module(module)
+
+        cfg = module.Config(7)
+        cfg.set_dims(n_weights=4)
+        cfg.set_dims()
+    finally:
+        monkeypatch.undo()
+
+    assert calls[0]["n_weights"] == 4
+    assert calls[0]["nml_has__n_weights__"] is True
+    assert calls[1]["n_weights"] == 0
+    assert calls[1]["nml_has__n_weights__"] is False
+
+
+def test_generate_python_wrapper_set_dims_keyword_dimension_name(tmp_path: Path) -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "title": "Keyword dimensions",
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "required": ["values"],
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": "class",
+                "items": {"type": "number", "x-fortran-kind": "dp"},
+            },
+        },
+    }
+    spec = codegen.build_f2py_namelist_spec(
+        schema,
+        dimensions={"class": 3},
+    )
+    output = tmp_path / "config_wrappers.py"
+
+    codegen.generate_python_wrappers([(spec, "f2py_config")], output)
+
+    generated = output.read_text()
+    assert "def set_dims(" in generated
+    assert "class_: Any = None" in generated
+    assert 'kwargs["class"] = class_' in generated
+    assert 'kwargs["nml_has__class__"] = class_ is not None' in generated
 
 
 def test_generate_python_wrapper_supports_doxygen_docstrings(tmp_path: Path) -> None:

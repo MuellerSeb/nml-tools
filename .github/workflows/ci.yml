@@ -7,6 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -35,12 +38,18 @@ jobs:
         include:
           - compiler: gfortran
             experimental: false
+            debug_flags: -g -O0 -fbacktrace -fcheck=all
           - compiler: ifx
             experimental: false
+            debug_flags: -g -O0 -traceback -check all
           - compiler: flang-new
             experimental: false
+            debug_flags: -g -O0
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -52,11 +61,22 @@ jobs:
           extra-packages: pip
       - name: Install Python build tools
         run: python -m pip install -U pip build pytest
+      - name: Install nml-tools
+        run: python -m pip install -e .
+      - name: Check generated 01_simple files
+        run: nml-tools check --config examples/01_simple/nml-config.toml --diff
+      - name: Check generated 02_pybind files
+        run: nml-tools check --config examples/02_pybind/pyproject.toml --diff
       - name: Build 01_simple
-        run: cmake -S examples/01_simple -B build/01_simple -G Ninja
+        run: >
+          cmake -S examples/01_simple -B build/01_simple -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_Fortran_FLAGS_DEBUG="${{ matrix.debug_flags }}"
       - name: Compile 01_simple
         run: cmake --build build/01_simple --parallel
       - name: Run 01_simple
+        env:
+          GFORTRAN_ERROR_BACKTRACE: "1"
         run: ./build/01_simple/nml_optimization_example examples/01_simple/out/optimization.nml
       - name: Build 02_pybind package
         run: python -m pip install -e "examples/02_pybind[test]"

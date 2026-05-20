@@ -17,6 +17,7 @@ module config_store
   public :: reset_config
   public :: get_iterations
   public :: get_tolerance
+  public :: get_weight_count
   public :: get_weight
   public :: get_enabled
   public :: print_config
@@ -56,6 +57,17 @@ contains
     value = config%tolerance
   end subroutine get_tolerance
 
+  !> \brief Return the current number of configured weights
+  subroutine get_weight_count(value)
+    integer, intent(out) :: value !< current weight array extent
+
+    if (allocated(config%weights)) then
+      value = size(config%weights)
+    else
+      value = 0
+    end if
+  end subroutine get_weight_count
+
   !> \brief Return one configured weight
   subroutine get_weight(index, value)
     integer, intent(in) :: index !< one-based weight index
@@ -73,10 +85,24 @@ contains
 
   !> \brief Print the persistent config instance
   subroutine print_config()
+    integer :: i
+
     write(*, '(a, i0)') 'iterations = ', config%iterations
     write(*, '(a, es12.5)') 'tolerance = ', config%tolerance
     write(*, '(a, l1)') 'enabled = ', config%enabled
-    write(*, '(a, 3(es12.5, 1x))') 'weights = ', config%weights
+    if (.not. allocated(config%weights)) then
+      write(*, '(a)') 'weights = <unallocated>'
+      return
+    end if
+    if (size(config%weights) == 0) then
+      write(*, '(a)') 'weights = <empty>'
+      return
+    end if
+    write(*, '(a)', advance='no') 'weights = '
+    do i = 1, size(config%weights)
+      write(*, '(es12.5, 1x)', advance='no') config%weights(i)
+    end do
+    write(*, *)
   end subroutine print_config
 
 end module config_store

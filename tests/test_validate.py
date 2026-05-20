@@ -36,3 +36,128 @@ def test_validate_namelist_flex_array_shape() -> None:
     # f90nml-style nesting: outermost dimension is the last Fortran index.
     namelist = {"arr": [[[1, 2, 3], [4, 5, 6]]]}
     validate_namelist(schema, namelist)
+
+
+def test_validate_namelist_allows_dimensions_only_for_array_shapes() -> None:
+    schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "arr": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": ["n_values"],
+            },
+            "name": {
+                "type": "string",
+                "x-fortran-len": "n_values",
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="must not use runtime dimension"):
+        validate_namelist(
+            schema,
+            {"arr": [1, 2, 3], "name": "abc"},
+            dimensions={"n_values": 3},
+        )
+
+
+def test_validate_namelist_accepts_scalar_shape_with_dimension() -> None:
+    schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "arr": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": "n_values",
+            },
+        },
+    }
+
+    validate_namelist(schema, {"arr": [1, 2, 3]}, dimensions={"n_values": 3})
+
+
+def test_validate_namelist_matches_constants_and_dimensions_case_insensitively() -> None:
+    schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "arr": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": "MAX_VALUES",
+            },
+            "name": {
+                "type": "string",
+                "x-fortran-len": "BUF",
+            },
+        },
+    }
+
+    validate_namelist(
+        schema,
+        {"arr": [1, 2, 3], "name": "abc"},
+        constants={"buf": 16},
+        dimensions={"max_values": 3},
+    )
+
+
+def test_validate_namelist_rejects_constant_dimension_name_overlap() -> None:
+    schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "arr": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": "n_values",
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="constants and dimensions"):
+        validate_namelist(
+            schema,
+            {"arr": [1, 2, 3]},
+            constants={"n_values": 3},
+            dimensions={"N_VALUES": 3},
+        )
+
+    with pytest.raises(ValueError, match="duplicates another constant"):
+        validate_namelist(
+            schema,
+            {"arr": [1, 2, 3]},
+            constants={"n_values": 3, "N_VALUES": 4},
+        )
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        validate_namelist(
+            schema,
+            {"arr": [1, 2, 3]},
+            constants={"n_values": 3.5},
+        )
+
+
+def test_validate_namelist_rejects_invalid_dimensions() -> None:
+    schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "arr": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": "n_values",
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="valid Fortran identifier"):
+        validate_namelist(schema, {"arr": [1]}, dimensions={"1bad": 1})
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        validate_namelist(schema, {"arr": [1]}, dimensions={"n_values": True})
+
+    with pytest.raises(ValueError, match="must be positive"):
+        validate_namelist(schema, {"arr": [1]}, dimensions={"n_values": 0})

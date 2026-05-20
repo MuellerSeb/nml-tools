@@ -114,9 +114,180 @@ def test_check_minimum_version_rejects_invalid_values() -> None:
         cli_module._check_minimum_version({"minimum-version": "9999"})
 
 
+def test_load_constants_normalizes_names_case_insensitively() -> None:
+    constants, specs = cli_module._load_constants(
+        {"constants": {"BUF": {"value": 128, "doc": "Buffer length."}}}
+    )
+
+    assert constants == {"buf": 128}
+    assert specs[0].name == "buf"
+    assert specs[0].doc == "Buffer length."
+
+    with pytest.raises(click.ClickException, match="duplicates another constant"):
+        cli_module._load_constants(
+            {
+                "constants": {
+                    "buf": {"value": 128},
+                    "BUF": {"value": 256},
+                }
+            }
+        )
+
+    with pytest.raises(click.ClickException, match="must be integers"):
+        cli_module._load_constants({"constants": {"ratio": {"value": 1.5}}})
+
+
+def test_load_dimensions_validates_values_and_duplicate_names() -> None:
+    constants = {"BUF": 128}
+    dimensions, specs = cli_module._load_dimensions(
+        {"dimensions": {"n_cells": {"value": 3, "doc": "Number of cells."}}},
+        constants,
+    )
+
+    assert dimensions == {"n_cells": 3}
+    assert specs[0].name == "n_cells"
+    assert specs[0].value == "3"
+    assert specs[0].doc == "Number of cells."
+
+    with pytest.raises(click.ClickException, match="duplicates a constant"):
+        cli_module._load_dimensions({"dimensions": {"BUF": {"value": 3}}}, constants)
+
+    with pytest.raises(click.ClickException, match="duplicates another dimension"):
+        cli_module._load_dimensions(
+            {
+                "dimensions": {
+                    "n_cells": {"value": 3},
+                    "N_CELLS": {"value": 4},
+                }
+            },
+            {},
+        )
+
+    with pytest.raises(click.ClickException, match="must be positive"):
+        cli_module._load_dimensions({"dimensions": {"n_cells": {"value": 0}}}, {})
+
+
+def test_named_integer_type_validates_dimension_values() -> None:
+    dimension_type = cli_module.NamedIntegerType(label="dimension", positive=True)
+
+    assert dimension_type.convert("N_CELLS=3", None, None) == ("n_cells", 3)
+
+    with pytest.raises(click.BadParameter, match="NAME=INT"):
+        dimension_type.convert("n_cells", None, None)
+
+    with pytest.raises(click.BadParameter, match="valid identifier"):
+        dimension_type.convert("1bad=3", None, None)
+
+    with pytest.raises(click.BadParameter, match="integer"):
+        dimension_type.convert("n_cells=3.5", None, None)
+
+    with pytest.raises(click.BadParameter, match="positive"):
+        dimension_type.convert("n_cells=0", None, None)
+
+
+def test_parse_cli_dimensions_rejects_duplicates() -> None:
+    assert cli_module._parse_cli_dimensions((("n_cells", 3),)) == {"n_cells": 3}
+
+    with pytest.raises(click.ClickException, match="duplicates another dimension"):
+        cli_module._parse_cli_dimensions((("n_cells", 3), ("n_cells", 4)))
+
+
+def test_parse_cli_constants_rejects_duplicates() -> None:
+    constant_type = cli_module.NamedIntegerType(label="constant")
+    assert constant_type.convert("BUF=128", None, None) == ("buf", 128)
+
+    assert cli_module._parse_cli_constants((("buf", 128),)) == {"buf": 128}
+
+    with pytest.raises(click.ClickException, match="duplicates another constant"):
+        cli_module._parse_cli_constants((("buf", 128), ("buf", 256)))
+
+    with pytest.raises(click.BadParameter, match="must be an integer"):
+        constant_type.convert("ratio=1.5", None, None)
+
+
 def test_load_toml_checked_reports_missing_file(tmp_path: Path) -> None:
     with pytest.raises(click.ClickException, match="missing.toml"):
         cli_module._load_toml_checked(tmp_path / "missing.toml")
+
+
+def test_validate_accepts_cli_dimensions(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                title: Demo
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  values:
+                    type: array
+                    items:
+                      type: integer
+                    x-fortran-shape: n_values
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text("&demo\nvalues = 1, 2, 3\n/\n", encoding="utf-8")
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "--dimensions",
+                "n_values=3",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+
+def test_validate_cli_dimensions_override_config_dimensions(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                title: Demo
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  values:
+                    type: array
+                    items:
+                      type: integer
+                    x-fortran-shape: n_values
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text("&demo\nvalues = 1, 2, 3\n/\n", encoding="utf-8")
+        Path("pyproject.toml").write_text(
+            dedent(
+                """
+                [tool.nml-tools]
+                minimum-version = "0"
+
+                [tool.nml-tools.dimensions.n_values]
+                value = 2
+
+                [[tool.nml-tools.namelists]]
+                schema = "schema.yml"
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            ["validate", "--dimensions", "n_values=3", "input.nml"],
+        )
+
+        assert result.exit_code == 0, result.output
 
 
 def test_generate_command_uses_pyproject_config_in_process(tmp_path: Path) -> None:
@@ -252,7 +423,7 @@ def test_validate_uses_discovered_pyproject_config(
     )
     monkeypatch.chdir(tmp_path)
 
-    cli_module.validate.callback(None, (), None, (), Path("input.nml"))
+    cli_module.validate.callback(None, (), None, (), (), Path("input.nml"))
 
 
 def test_check_command_passes_and_reports_differences(tmp_path: Path) -> None:

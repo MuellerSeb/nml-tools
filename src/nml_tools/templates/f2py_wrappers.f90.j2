@@ -72,6 +72,38 @@ contains
 {% endif %}
   end subroutine {{ spec.namelist_name }}_set_wrapper
 
+{% if spec.set_dims_argument_list %}
+  !> \brief Set runtime dimensions on the handled {{ spec.namelist_name }} instance
+  subroutine {{ spec.namelist_name }}_set_dims_wrapper(handle, &
+    {{ spec.set_dims_argument_list | join(', &\n    ') }}, &
+    status, errmsg)
+    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a {{ spec.type_name }} instance
+{% for decl in spec.set_dims_argument_declarations %}
+{{ decl | indent(4, True) }}
+{% endfor %}
+    integer, intent(out) :: status !< nml-tools status code
+    character(len={{ spec.errmsg_len }}), intent(out) :: errmsg !< error message for non-OK status values
+    type({{ spec.type_name }}), pointer :: this
+{% for decl in spec.set_dims_bridge_declarations %}
+{{ decl | indent(4, True) }}
+{% endfor %}
+
+    call {{ spec.resolve_handle_name }}(handle, this, status, errmsg)
+    if (.not. associated(this)) then
+      return
+    end if
+{% for stmt in spec.set_dims_bridge_assignments %}
+{{ stmt | indent(4, True) }}
+{% endfor %}
+    status = this%set_dims( &
+{% for arg in spec.set_dims_call_arguments %}
+      {{ arg }}, &
+{% endfor %}
+      errmsg=errmsg)
+  end subroutine {{ spec.namelist_name }}_set_dims_wrapper
+
+{% endif %}
+
   !> \brief Check whether a {{ spec.namelist_name }} field is set
   subroutine {{ spec.namelist_name }}_is_set_wrapper(handle, name, idx_n1, idx, has_idx, status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a {{ spec.type_name }} instance

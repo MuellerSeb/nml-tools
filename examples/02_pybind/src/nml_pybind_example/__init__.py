@@ -12,6 +12,7 @@ __all__ = [
     "get_enabled",
     "get_iterations",
     "get_tolerance",
+    "get_weight_count",
     "get_weights",
     "print_config",
     "reset_config",
@@ -38,11 +39,31 @@ def get_tolerance() -> float:
     return float(_f2py_config.f2py_config_store.config_get_tolerance_wrapper())
 
 
-def get_weights() -> tuple[float, float, float]:
-    """Return the configured weights from Fortran."""
+def get_weight_count() -> int:
+    """Return the current number of configured weights from Fortran."""
+    return int(_f2py_config.f2py_config_store.config_get_weight_count_wrapper())
+
+
+def get_weights(count: int | None = None) -> tuple[float, ...]:
+    """Return configured weights from Fortran.
+
+    When *count* is omitted, all currently allocated weights are returned.
+    If no weights are currently allocated, this returns an empty tuple.
+    """
+    available = get_weight_count()
+    if count is None:
+        if available == 0:
+            return ()
+        count = available
+    if isinstance(count, bool) or not isinstance(count, int):
+        raise TypeError("count must be an integer")
+    if count <= 0:
+        raise ValueError("count must be positive")
+    if count > available:
+        raise ValueError(f"count must not exceed current weight count ({available})")
     return tuple(
         float(_f2py_config.f2py_config_store.config_get_weight_wrapper(idx))
-        for idx in range(1, 4)
+        for idx in range(1, count + 1)
     )
 
 

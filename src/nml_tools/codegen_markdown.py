@@ -7,6 +7,11 @@ import string
 from pathlib import Path
 from typing import Any
 
+from ._utils import (
+    normalize_constant_values,
+    normalize_runtime_dimensions,
+    reject_constant_dimension_overlap,
+)
 from .codegen_fortran import (
     FieldTypeInfo,
     _array_default_value,
@@ -18,6 +23,7 @@ from .codegen_fortran import (
     _format_scalar_default,
     _parse_default_dimensions,
     _prepare_array_default,
+    _reject_runtime_dimension_lengths,
 )
 from .codegen_template import render_template
 
@@ -28,7 +34,8 @@ def generate_docs(
     schema: dict[str, Any],
     output: str | Path,
     *,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
     md_doxygen_id_from_name: bool = False,
     md_add_toc_statement: bool = False,
 ) -> None:
@@ -36,6 +43,7 @@ def generate_docs(
     rendered = render_docs(
         schema,
         constants=constants,
+        dimensions=dimensions,
         md_doxygen_id_from_name=md_doxygen_id_from_name,
         md_add_toc_statement=md_add_toc_statement,
     )
@@ -47,7 +55,8 @@ def generate_docs(
 def render_docs(
     schema: dict[str, Any],
     *,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
     md_doxygen_id_from_name: bool = False,
     md_add_toc_statement: bool = False,
 ) -> str:
@@ -76,6 +85,13 @@ def render_docs(
     if not isinstance(required_raw, list):
         raise ValueError("schema 'required' must be a list")
     required_set = _validate_required(required_raw)
+    constants = normalize_constant_values(constants)
+    dimensions = normalize_runtime_dimensions(dimensions)
+    reject_constant_dimension_overlap(constants, dimensions)
+    shape_constants: dict[str, int] = {
+        **constants,
+        **dimensions,
+    }
 
     title_line = f"# {title}"
     if md_doxygen_id_from_name:
@@ -102,8 +118,9 @@ def render_docs(
             current_property = name
             if not isinstance(prop, dict):
                 raise ValueError(f"property '{name}' must be an object")
+            _reject_runtime_dimension_lengths(prop, dimensions)
             type_info = _field_type_info(prop, constants)
-            _collect_dimension_constants(type_info.dimensions, constants)
+            _collect_dimension_constants(type_info.dimensions, shape_constants)
             type_label = _format_table_type(type_info)
             info_label = _format_info(prop)
             required_label = "yes" if name in required_set else "no"
@@ -133,10 +150,11 @@ def render_docs(
             current_property = name
             if not isinstance(prop, dict):
                 raise ValueError(f"property '{name}' must be an object")
+            _reject_runtime_dimension_lengths(prop, dimensions)
             type_info = _field_type_info(prop, constants)
             required_label = "yes" if name in required_set else "no"
-            default_label = _get_default_value(prop, type_info, constants)
-            enum_label = _get_enum_values(prop, type_info, constants)
+            default_label = _get_default_value(prop, type_info, shape_constants)
+            enum_label = _get_enum_values(prop, type_info, shape_constants)
             example_values = _get_example_values(prop, type_info)
             flex_tail_dims = _get_flex_tail_dims(prop, type_info)
             title = _get_title(prop)
@@ -194,7 +212,7 @@ def render_docs(
         [schema],
         doc_mode="plain",
         value_mode="filled",
-        constants=constants,
+        constants=shape_constants,
         kind_map=None,
         kind_allowlist=None,
     )
@@ -243,7 +261,7 @@ def _format_specific_type(type_info: FieldTypeInfo) -> str:
 def _get_default_value(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> str | tuple[str, str | None] | None:
     if type_info.category == "array":
         array_default = _array_default_value(prop)
@@ -290,7 +308,7 @@ def _get_description(prop: dict[str, Any]) -> str | None:
 def _get_enum_values(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> str | None:
     enum_values = _enum_values(prop, type_info, constants)
     if enum_values is None:
@@ -380,7 +398,7 @@ def _format_default_plain(
     value: Any,
     type_info: FieldTypeInfo,
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> str:
     if type_info.category == "array":
         if not isinstance(value, list):
@@ -420,7 +438,7 @@ def _format_default_plain(
 def _format_array_default_display(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
     *,
     default_value: Any = _DEFAULT_MISSING,
     from_items: bool = False,

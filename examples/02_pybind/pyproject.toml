@@ -24,7 +24,6 @@ minimum-version = "3.26"
 build-type = "Release"
 
 [tool.nml-tools]
-minimum-version = "0.2.2.dev0"
 
 [tool.nml-tools.helper]
 path = "fortran/generated/nml_helper.f90"
@@ -34,6 +33,10 @@ buffer = 512
 [tool.nml-tools.constants.str_len]
 value = 128
 doc = "String buffer length for the pybind example."
+
+[tool.nml-tools.dimensions.n_weights]
+value = 3
+doc = "Default number of weights."
 
 [tool.nml-tools.kinds]
 module = "iso_fortran_env"

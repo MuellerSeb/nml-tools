@@ -25,7 +25,7 @@ module nml_optimization
     idx_check, &
     to_lower, &
     buf, &
-    max_iter
+    nml_default__max_iter__=>max_iter
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -46,15 +46,17 @@ module nml_optimization
   !! This namelist corresponds to the `optimization` section in the MHM configuration.
   type, public :: nml_optimization_t
     logical :: is_configured = .false. !< whether the namelist has been configured
+    integer :: nml_dim__max_iter__ = nml_default__max_iter__ !< runtime dimension for max_iter
     character(len=buf) :: name !< Optimization name
     integer :: niterations !< Number of iterations
     real :: tolerance !< Convergence tolerance
     integer(i4) :: seed !< Random seed
     real(dp) :: dds_r !< DDS perturbation rate
     logical :: mcmc_opti !< MCMC optimization
-    real(dp), dimension(3, 2, max_iter) :: mcmc_error_params !< MCMC error parameters per domain
+    real(dp), allocatable, dimension(:, :, :) :: mcmc_error_params !< MCMC error parameters per domain
   contains
     procedure :: init => nml_optimization_init
+    procedure :: set_dims => nml_optimization_set_dims
     procedure :: from_file => nml_optimization_from_file
     procedure :: set => nml_optimization_set
     procedure :: is_set => nml_optimization_is_set
@@ -72,8 +74,12 @@ contains
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
 
+    ! allocate runtime-sized fields
+    if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
+    allocate(this%mcmc_error_params(3, 2, this%nml_dim__max_iter__))
+
     ! sentinel values for required/optional parameters
-    this%name = repeat(achar(0), len(this%name)) ! sentinel for optional string
+    this%name = achar(0) ! sentinel for optional string
     this%niterations = -huge(this%niterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
     ! default values
@@ -82,10 +88,44 @@ contains
     this%mcmc_opti = mcmc_opti_default ! bool values always need a default
     this%mcmc_error_params = reshape( &
       mcmc_error_params_default, &
-      shape=[3, 2, max_iter], &
+      shape=[3, 2, this%nml_dim__max_iter__], &
       order=[3, 2, 1], &
       pad=mcmc_error_params_default)
   end function nml_optimization_init
+
+  !> \brief Reset runtime dimensions for optimization
+  integer function nml_optimization_set_dims(this, &
+    max_iter, &
+    errmsg) result(status)
+    class(nml_optimization_t), intent(inout) :: this !< namelist instance
+    integer, intent(in), optional :: max_iter !< runtime dimension override for max_iter
+    integer :: nml_candidate__max_iter__
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (present(max_iter)) then
+      nml_candidate__max_iter__ = max_iter
+    else
+      nml_candidate__max_iter__ = nml_default__max_iter__
+    end if
+    if (nml_candidate__max_iter__ <= 0) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "dimension 'max_iter' must be positive"
+      return
+    end if
+    if ((3 * 2 * nml_candidate__max_iter__) < 4) then
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "shape constants for 'mcmc_error_params' must allow at least 4 default values"
+      return
+    end if
+    this%nml_dim__max_iter__ = nml_candidate__max_iter__
+
+    ! deallocate runtime-sized fields; init/set/from_file allocate them again
+    if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
+    this%is_configured = .false.
+  end function nml_optimization_set_dims
+
 
   !> \brief Read optimization namelist from file
   integer function nml_optimization_from_file(this, file, errmsg) result(status)
@@ -99,7 +139,7 @@ contains
     integer(i4) :: seed
     real(dp) :: dds_r
     logical :: mcmc_opti
-    real(dp), dimension(3, 2, max_iter) :: mcmc_error_params
+    real(dp), allocatable, dimension(:, :, :) :: mcmc_error_params
     ! locals
     type(nml_file_t) :: nml
     integer :: iostat
@@ -117,6 +157,9 @@ contains
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
+    ! allocate local namelist variables matching runtime-sized fields
+    if (allocated(mcmc_error_params)) deallocate(mcmc_error_params)
+    allocate(mcmc_error_params(3, 2, this%nml_dim__max_iter__))
     name = this%name
     niterations = this%niterations
     tolerance = this%tolerance
@@ -240,6 +283,11 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
     select case (to_lower(trim(name)))
     case ("name")
       if (present(idx)) then
@@ -247,7 +295,7 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'name'"
         return
       end if
-      if (this%name == repeat(achar(0), len(this%name))) status = NML_ERR_NOT_SET
+      if (this%name == achar(0)) status = NML_ERR_NOT_SET
     case ("niterations")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
@@ -281,6 +329,10 @@ contains
         return
       end if
     case ("mcmc_error_params")
+      if (.not. allocated(this%mcmc_error_params)) then
+        status = NML_ERR_NOT_SET
+        return
+      end if
       if (present(idx)) then
         status = idx_check(idx, lbound(this%mcmc_error_params), ubound(this%mcmc_error_params), &
           "mcmc_error_params", errmsg)
@@ -304,6 +356,11 @@ contains
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
 
     ! required parameters
     istat = this%is_set("niterations", errmsg=errmsg)

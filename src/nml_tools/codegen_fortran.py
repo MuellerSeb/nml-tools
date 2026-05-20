@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+from ._utils import (
+    FORTRAN_IDENTIFIER,
+    normalize_constant_values,
+    normalize_runtime_dimensions,
+    reject_constant_dimension_overlap,
+    strip_trailing_whitespace,
+)
 
 _TEMPLATE_ENV = Environment(
     loader=FileSystemLoader(Path(__file__).resolve().parent / "templates"),
@@ -61,6 +68,8 @@ class FieldSpec:
     set_present_assignment: str | None
     argument_declaration: str
     type_category: str
+    runtime_sized_array: bool = False
+    rank: int = 0
 
 
 @dataclass
@@ -90,7 +99,8 @@ def generate_fortran(
     kind_module: str | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
     module_doc: str | None = None,
     f2py_handle_helpers: bool = False,
 ) -> None:
@@ -104,6 +114,7 @@ def generate_fortran(
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         constants=constants,
+        dimensions=dimensions,
         module_doc=module_doc,
         f2py_handle_helpers=f2py_handle_helpers,
     )
@@ -119,7 +130,8 @@ def render_fortran(
     kind_module: str | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: Iterable[str] | None = None,
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
     module_doc: str | None = None,
     f2py_handle_helpers: bool = False,
 ) -> str:
@@ -131,11 +143,13 @@ def render_fortran(
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         constants=constants,
+        dimensions=dimensions,
         module_doc=module_doc,
         f2py_handle_helpers=f2py_handle_helpers,
     )
     context["file_name"] = file_name
-    return _TEMPLATE_ENV.get_template("fortran_module.f90.j2").render(context)
+    rendered = _TEMPLATE_ENV.get_template("fortran_module.f90.j2").render(context)
+    return strip_trailing_whitespace(rendered)
 
 
 def generate_helper(
@@ -194,8 +208,9 @@ def _build_context(
     kind_module: str | None,
     kind_map: dict[str, str] | None,
     kind_allowlist: Iterable[str] | None,
-    constants: dict[str, int | float] | None,
-    module_doc: str | None,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None = None,
+    module_doc: str | None = None,
     f2py_handle_helpers: bool = False,
 ) -> dict[str, Any]:
     if not helper_module:
@@ -264,6 +279,16 @@ def _build_context(
     bounds_parameters: list[str] = []
     bounds_functions: list[dict[str, Any]] = []
     bounds_checks: list[dict[str, Any]] = []
+    static_constants = normalize_constant_values(constants)
+    runtime_dimension_values = normalize_runtime_dimensions(dimensions)
+    reject_constant_dimension_overlap(static_constants, runtime_dimension_values)
+    shape_constants: dict[str, int] = {**static_constants, **runtime_dimension_values}
+    runtime_dimensions: list[dict[str, str]] = []
+    runtime_dimension_locals: dict[str, str] = {}
+    runtime_default_extent_requirements: list[dict[str, Any]] = []
+    runtime_allocations: list[str] = []
+    runtime_deallocations: list[str] = []
+    runtime_local_allocations: list[str] = []
     kind_ids: list[str] = []
     requires_ieee = False
     uses_partly_set = False
@@ -289,20 +314,101 @@ def _build_context(
     if f2py_handle_helpers:
         helper_imports.append("NML_ERR_INVALID_HANDLE")
 
+    def _helper_import_local_name(import_spec: str) -> str:
+        if "=>" in import_spec:
+            return import_spec.split("=>", 1)[0].strip()
+        return import_spec.strip()
+
+    def _helper_import_local_names() -> set[str]:
+        return {_helper_import_local_name(existing).lower() for existing in helper_imports}
+
+    def _add_helper_import(name: str) -> None:
+        if not any(existing.lower() == name.lower() for existing in helper_imports):
+            helper_imports.append(name)
+
+    def _unique_helper_import_alias(base_name: str) -> str:
+        local_names = _helper_import_local_names() | set(static_constants)
+        if base_name.lower() not in local_names:
+            return base_name
+        index = 1
+        while True:
+            if base_name.endswith("__"):
+                candidate = f"{base_name}{index}__"
+            elif base_name.endswith("_"):
+                candidate = f"{base_name}{index}_"
+            else:
+                candidate = f"{base_name}_{index}"
+            if candidate.lower() not in local_names:
+                return candidate
+            index += 1
+
+    def _register_runtime_dimension(dim_name: str) -> str:
+        local_name = runtime_dimension_locals.get(dim_name)
+        if local_name is None:
+            local_name = f"nml_dim__{dim_name}__"
+            if local_name.lower() in property_name_map:
+                raise ValueError(
+                    f"property '{property_name_map[local_name.lower()]}' conflicts with "
+                    f"runtime dimension field '{local_name}'"
+                )
+            runtime_dimension_locals[dim_name] = local_name
+            default_name = _unique_helper_import_alias(f"nml_default__{dim_name}__")
+            _add_helper_import(f"{default_name}=>{dim_name}")
+            runtime_dimensions.append(
+                {
+                    "name": dim_name,
+                    "default_name": default_name,
+                    "local_name": local_name,
+                }
+            )
+        return local_name
+
     current_property: str | None = None
     try:
         for index, (display_name, attr_name, prop) in enumerate(property_items):
             current_property = display_name
             name = attr_name
-            type_info = _field_type_info(prop, constants)
-            for const_name in _collect_dimension_constants(type_info.dimensions, constants):
-                if const_name not in helper_imports:
-                    helper_imports.append(const_name)
+            _reject_runtime_dimension_lengths(prop, runtime_dimension_values)
+            type_info = _field_type_info(prop, static_constants)
+            for const_name in _collect_dimension_constants(type_info.dimensions, shape_constants):
+                const_key = const_name.lower()
+                if const_key in runtime_dimension_values:
+                    _register_runtime_dimension(const_key)
+                else:
+                    _add_helper_import(const_name)
             if type_info.length_expr and not _is_int_literal(type_info.length_expr):
-                if type_info.length_expr not in helper_imports:
-                    helper_imports.append(type_info.length_expr)
+                _add_helper_import(type_info.length_expr)
             if type_info.kind:
                 kind_ids.append(type_info.kind)
+
+            runtime_shape = list(type_info.dimensions)
+            dynamic_shape = False
+            if type_info.category == "array":
+                for dim_index, dim in enumerate(runtime_shape):
+                    if dim == ":" or _is_int_literal(dim):
+                        continue
+                    if not FORTRAN_IDENTIFIER.match(dim):
+                        raise ValueError(
+                            "array property 'x-fortran-shape' entries must be ints or identifiers"
+                        )
+                    dim_key = dim.lower()
+                    if dim_key in runtime_dimension_values:
+                        local_dim_name = _register_runtime_dimension(dim_key)
+                        runtime_shape[dim_index] = f"this%{local_dim_name}"
+                        dynamic_shape = True
+                    elif dim_key not in static_constants:
+                        raise ValueError(f"dimension constant '{dim}' is not defined in config")
+
+            runtime_length_expr = type_info.length_expr
+            if (
+                type_info.length_expr
+                and not _is_int_literal(type_info.length_expr)
+                and type_info.length_expr.lower() in runtime_dimension_values
+            ):
+                raise ValueError(
+                    f"dimension '{type_info.length_expr}' cannot be used as x-fortran-len"
+                )
+            type_spec_with_defaults = type_info.type_spec
 
             array_default_info: tuple[Any, bool] | None = None
             if type_info.category == "array":
@@ -322,7 +428,44 @@ def _build_context(
                 ):
                     raise ValueError("flex arrays cannot define defaults")
 
-            declaration = _render_declaration(type_info.type_spec, type_info.dimensions, name)
+            is_runtime_sized = (
+                type_info.category == "array" and dynamic_shape
+            )
+
+            if is_runtime_sized:
+                declaration = _render_runtime_declaration(
+                    type_info,
+                    name,
+                )
+                local_decl = _render_runtime_local_declaration(
+                    type_info,
+                    name,
+                    runtime_dimensions=runtime_shape,
+                )
+                runtime_allocations.extend(
+                    _render_runtime_allocations(
+                        type_info,
+                        name,
+                        runtime_dimensions=runtime_shape,
+                        runtime_length_expr=runtime_length_expr,
+                        target_prefix="this%",
+                    )
+                )
+                runtime_deallocations.extend(
+                    _render_runtime_deallocations(name, target_prefix="this%")
+                )
+                runtime_local_allocations.extend(
+                    _render_runtime_local_allocations(
+                        type_info,
+                        name,
+                        runtime_dimensions=runtime_shape,
+                        runtime_length_expr=runtime_length_expr,
+                    )
+                )
+            else:
+                declaration = _render_declaration(type_info.type_spec, type_info.dimensions, name)
+                local_decl = _render_declaration(type_info.type_spec, type_info.dimensions, name)
+
             title_raw = prop.get("title")
             if title_raw is None:
                 title = display_name
@@ -333,7 +476,7 @@ def _build_context(
             description = prop.get("description")
             declaration_with_doc = f"{declaration} !< {title}"
 
-            local_decl = _render_declaration(type_info.type_spec, type_info.dimensions, name)
+            dynamic_array = type_info.category == "array" and is_runtime_sized
 
             is_required = name in required_set
             if type_info.category == "array":
@@ -358,14 +501,14 @@ def _build_context(
                     if not isinstance(default_raw, list):
                         raise ValueError("array default must be a list")
                     default_values = default_raw
-                    parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
+                    parsed_dims = _parse_default_dimensions(type_info.dimensions, shape_constants)
                     array_default_spec = _prepare_array_default(default_values, parsed_dims, prop)
 
             needs_sentinel = (not is_required) and (not has_default)
             requires_sentinel = is_required or needs_sentinel
 
             arg_dimensions = type_info.dimensions
-            if type_info.category == "array" and (flex_dim > 0 or has_default):
+            if type_info.category == "array":
                 arg_dimensions = [":" for _ in type_info.dimensions]
             argument_decl = _render_argument_declaration(
                 name=name,
@@ -396,9 +539,11 @@ def _build_context(
                     type_info,
                     var_ref=f"this%{name}",
                 )
-                sentinel_assignment = (
-                    f"this%{name} = {value_expr}"
-                    f"{_sentinel_comment(type_info, required=is_required)}"
+                sentinel_assignment = _render_sentinel_assignment(
+                    type_info,
+                    target_ref=f"this%{name}",
+                    value_expr=value_expr,
+                    comment=_sentinel_comment(type_info, required=is_required),
                 )
                 sentinel_condition = condition_expr
                 sentinel_assignments.append(sentinel_assignment)
@@ -414,7 +559,14 @@ def _build_context(
                     set_sentinel_condition = set_condition_expr
                     if needs_sentinel:
                         sent_com = _sentinel_comment(type_info, required=False)
-                        set_optional_defaults.append(f"this%{name} = {set_value_expr}{sent_com}")
+                        set_optional_defaults.append(
+                            _render_sentinel_assignment(
+                                type_info,
+                                target_ref=f"this%{name}",
+                                value_expr=set_value_expr,
+                                comment=sent_com,
+                            )
+                        )
 
             if is_required and type_info.category != "array":
                 required_scalar_names.add(name)
@@ -425,12 +577,13 @@ def _build_context(
                     raise ValueError("array field missing element category")
                 all_missing, any_missing, uses_ieee = _array_missing_conditions(
                     element_category,
-                    var_ref=f"this%{name}",
+                    var_ref=_array_section_ref(f"this%{name}", len(type_info.dimensions)),
                     len_ref=f"this%{name}",
                 )
                 required_array_by_name[name] = {
                     "name": display_name,
                     "attr_name": name,
+                    "runtime_array": dynamic_array,
                     "all_missing_condition": all_missing,
                     "any_missing_condition": any_missing,
                 }
@@ -438,27 +591,39 @@ def _build_context(
                 if uses_ieee:
                     requires_ieee = True
 
-            flex_bounds: list[dict[str, Any]] | None = None
             partial_bounds: list[dict[str, Any]] | None = None
+            if type_info.category == "array":
+                rank = len(type_info.dimensions)
+                all_bounds = []
+                for array_dim_index in range(1, rank + 1):
+                    lb_var, ub_var = _flex_bound_vars(array_dim_index)
+                    all_bounds.append(
+                        {"dim": array_dim_index, "lb_var": lb_var, "ub_var": ub_var}
+                    )
+                    flex_bound_vars.add(lb_var)
+                    flex_bound_vars.add(ub_var)
+                partial_bounds = all_bounds
             if flex_dim > 0:
                 rank = len(type_info.dimensions)
                 element_category = type_info.element_category
                 if element_category is None:
                     raise ValueError("array field missing element category")
-                flex_dims = list(range(rank - flex_dim + 1, rank + 1))
+                flex_dims: list[int] = list(range(rank - flex_dim + 1, rank + 1))
                 slice_missing_conditions: list[str] = []
                 slice_uses_ieee = False
-                bounds: list[dict[str, Any]] = []
+                flex_dim_bounds: list[dict[str, Any]] = []
                 lb_vars: dict[int, str] = {}
                 ub_vars: dict[int, str] = {}
-                for dim in flex_dims:
-                    lb_var, ub_var = _flex_bound_vars(dim)
-                    lb_vars[dim] = lb_var
-                    ub_vars[dim] = ub_var
-                    bounds.append({"dim": dim, "lb_var": lb_var, "ub_var": ub_var})
+                for flex_dim_index in flex_dims:
+                    lb_var, ub_var = _flex_bound_vars(flex_dim_index)
+                    lb_vars[flex_dim_index] = lb_var
+                    ub_vars[flex_dim_index] = ub_var
+                    flex_dim_bounds.append(
+                        {"dim": flex_dim_index, "lb_var": lb_var, "ub_var": ub_var}
+                    )
                     flex_bound_vars.add(lb_var)
                     flex_bound_vars.add(ub_var)
-                    slice_ref = _slice_ref(name, rank, dim, "idx")
+                    slice_ref = _slice_ref(name, rank, flex_dim_index, "idx")
                     slice_missing_expr, uses_ieee = _element_missing_expression(
                         element_category,
                         var_ref=slice_ref,
@@ -475,7 +640,6 @@ def _build_context(
                     len_ref=f"this%{name}",
                 )
                 prefix_any_missing_condition = f"any({prefix_missing_expr})"
-                flex_bounds = bounds
                 flex_arrays.append(
                     {
                         "name": name,
@@ -483,7 +647,8 @@ def _build_context(
                         "rank": rank,
                         "flex_dims": flex_dims,
                         "required": is_required,
-                        "bounds": bounds,
+                        "runtime_array": dynamic_array,
+                        "bounds": flex_dim_bounds,
                         "slice_missing_conditions": slice_missing_conditions,
                         "prefix_any_missing_condition": prefix_any_missing_condition,
                     }
@@ -491,15 +656,6 @@ def _build_context(
                 uses_partly_set = True
                 if slice_uses_ieee or uses_ieee_prefix:
                     requires_ieee = True
-            elif type_info.category == "array" and has_default:
-                rank = len(type_info.dimensions)
-                bounds = []
-                for dim in range(1, rank + 1):
-                    lb_var, ub_var = _flex_bound_vars(dim)
-                    bounds.append({"dim": dim, "lb_var": lb_var, "ub_var": ub_var})
-                    flex_bound_vars.add(lb_var)
-                    flex_bound_vars.add(ub_var)
-                partial_bounds = bounds
 
             default_assignment: str | None = None
             set_default_assignment: str | None = None
@@ -539,18 +695,20 @@ def _build_context(
                                     pad_raw, type_info.kind, type_info.element_category
                                 )
                                 default_parameters.append(
-                                    f"{type_info.type_spec}, parameter, public :: "
+                                    f"{type_spec_with_defaults}, parameter, public :: "
                                     f"{pad_const_name} = {pad_literal}"
                                 )
                             else:
                                 default_parameters.append(
-                                    f"{type_info.type_spec}, parameter, public :: "
+                                    f"{type_spec_with_defaults}, parameter, public :: "
                                     f"{pad_const_name}({len(pad_elements)}) = "
                                     f"[{', '.join(pad_elements)}]"
                                 )
 
                         if parsed_dims is None:
-                            parsed_dims = _parse_default_dimensions(type_info.dimensions, constants)
+                            parsed_dims = _parse_default_dimensions(
+                                type_info.dimensions, shape_constants
+                            )
                         if array_default_spec is None:
                             array_default_spec = _prepare_array_default(
                                 default_values, parsed_dims, prop
@@ -561,7 +719,7 @@ def _build_context(
                             default_values[0], type_info.kind, type_info.element_category
                         )
                         default_parameters.append(
-                            f"{type_info.type_spec}, parameter, public :: "
+                            f"{type_spec_with_defaults}, parameter, public :: "
                             f"{default_const_name} = {default_literal}"
                         )
                     else:
@@ -576,7 +734,7 @@ def _build_context(
                             for element in array_default_spec.source_values
                         ]
                         default_parameters.append(
-                            f"{type_info.type_spec}, parameter, public :: "
+                            f"{type_spec_with_defaults}, parameter, public :: "
                             f"{default_const_name}({len(default_elements)}) = "
                             f"[{', '.join(default_elements)}]"
                         )
@@ -592,7 +750,7 @@ def _build_context(
                         default_assignment = f"this%{name} = {default_const_name}"
                     else:
                         source_expr = default_const_name
-                        shape_expr = ", ".join(type_info.dimensions)
+                        shape_expr = ", ".join(runtime_shape)
                         arguments = [source_expr, f"shape=[{shape_expr}]"]
                         if array_default_spec is not None:
                             if array_default_spec.order_values is not None:
@@ -619,7 +777,7 @@ def _build_context(
                 else:
                     default_literal = _format_default(prop["default"], type_info, prop, constants)
                     default_parameters.append(
-                        f"{type_info.type_spec}, parameter, public :: "
+                        f"{type_spec_with_defaults}, parameter, public :: "
                         f"{default_const_name} = {default_literal}"
                     )
                     if type_info.category == "boolean":
@@ -636,6 +794,26 @@ def _build_context(
                 default_assignments.append(default_assignment)
                 set_optional_defaults.append(set_default_assignment)
 
+            if type_info.category == "array" and any(
+                (dim != ":") and (not _is_int_literal(dim)) for dim in type_info.dimensions
+            ):
+                required_default_elements: int | None = None
+                if has_default and default_values is not None:
+                    if default_from_items:
+                        required_default_elements = 1
+                    elif array_default_spec is not None:
+                        required_default_elements = len(array_default_spec.source_values)
+                    else:
+                        required_default_elements = len(default_values)
+                if required_default_elements is not None and required_default_elements > 1:
+                    runtime_default_extent_requirements.append(
+                        {
+                            "field": display_name,
+                            "dimensions": list(type_info.dimensions),
+                            "required_elements": required_default_elements,
+                        }
+                    )
+
             enum_values = _enum_values(prop, type_info, constants)
             if enum_values is not None:
                 enum_category = _enum_category(type_info)
@@ -646,18 +824,18 @@ def _build_context(
                 ]
                 if enum_category == "string":
                     enum_array_literal = (
-                        f"[{type_info.type_spec} :: {', '.join(enum_literals)}]"
+                        f"[{type_spec_with_defaults} :: {', '.join(enum_literals)}]"
                     )
                 else:
                     enum_array_literal = f"[{', '.join(enum_literals)}]"
                 if enum_category == "string":
                     enum_parameters.append(
-                        f"{type_info.type_spec}, parameter, public :: &\n"
+                        f"{type_spec_with_defaults}, parameter, public :: &\n"
                         f"    {enum_const_name}({len(enum_literals)}) = {enum_array_literal}"
                     )
                 else:
                     enum_parameters.append(
-                        f"{type_info.type_spec}, parameter, public :: "
+                        f"{type_spec_with_defaults}, parameter, public :: "
                         f"{enum_const_name}({len(enum_literals)}) = {enum_array_literal}"
                     )
                 enum_type_info = (
@@ -685,6 +863,7 @@ def _build_context(
                             "display_name": display_name,
                             "func_name": f"{name}_in_enum",
                             "is_array": True,
+                            "runtime_array": dynamic_array,
                             "array_ref": f"this%{name}",
                         }
                     )
@@ -757,6 +936,7 @@ def _build_context(
                             "display_name": display_name,
                             "func_name": f"{name}_in_bounds",
                             "is_array": True,
+                            "runtime_array": dynamic_array,
                             "array_ref": f"this%{name}",
                         }
                     )
@@ -773,16 +953,9 @@ def _build_context(
 
             is_array = type_info.category == "array"
             if is_required:
-                if is_array and flex_dim > 0:
-                    set_required_assignments.append(
-                        _render_flex_set_block(
-                            name,
-                            len(type_info.dimensions),
-                            flex_dim,
-                            flex_bounds or [],
-                        )
-                    )
-                elif is_array and has_default:
+                if is_array:
+                    # Match namelist-buffer semantics: set assigns the provided
+                    # leading subsection and leaves completeness checks to is_valid.
                     set_required_assignments.append(
                         _render_partial_set_block(
                             name,
@@ -794,18 +967,9 @@ def _build_context(
                     set_required_assignments.append(f"this%{name} = {name}")
 
             if not is_required:
-                if is_array and flex_dim > 0:
-                    block = _render_flex_set_block(
-                        name,
-                        len(type_info.dimensions),
-                        flex_dim,
-                        flex_bounds or [],
-                    )
-                    indented_block = "\n".join(f"  {line}" for line in block.splitlines())
-                    set_present_assignment = (
-                        f"if (present({name})) then\n{indented_block}\nend if"
-                    )
-                elif is_array and has_default:
+                if is_array:
+                    # Match namelist-buffer semantics: set assigns the provided
+                    # leading subsection and leaves completeness checks to is_valid.
                     block = _render_partial_set_block(
                         name,
                         len(type_info.dimensions),
@@ -843,6 +1007,7 @@ def _build_context(
                         "always_true": True,
                         "sentinel_condition": None,
                         "is_array": is_array,
+                        "runtime_array": dynamic_array,
                         "rank": array_rank,
                         "element_condition": element_condition,
                     }
@@ -857,6 +1022,7 @@ def _build_context(
                         "always_true": False,
                         "sentinel_condition": set_sentinel_condition,
                         "is_array": is_array,
+                        "runtime_array": dynamic_array,
                         "rank": array_rank,
                         "element_condition": element_condition,
                     }
@@ -883,6 +1049,8 @@ def _build_context(
                     set_present_assignment=set_present_assignment,
                     argument_declaration=argument_decl,
                     type_category=type_info.category,
+                    runtime_sized_array=dynamic_array,
+                    rank=len(type_info.dimensions),
                 )
             )
 
@@ -915,6 +1083,51 @@ def _build_context(
     if not isinstance(resolved_kind_module, str) or not resolved_kind_module:
         raise ValueError("kind module must be a non-empty string")
 
+    set_dims_arguments = [
+        {
+            "name": entry["name"],
+            "default_name": entry["default_name"],
+            "local_name": entry["local_name"],
+            "arg_name": entry["name"],
+            "candidate_name": f"nml_candidate__{entry['name']}__",
+            "min_required": 1,
+        }
+        for entry in runtime_dimensions
+    ]
+
+    candidate_name_map: dict[str, str] = {
+        str(entry["name"]): str(entry["candidate_name"]) for entry in set_dims_arguments
+    }
+    set_dims_extent_checks: list[dict[str, str]] = []
+    seen_extent_checks: set[tuple[str, str]] = set()
+    for requirement in runtime_default_extent_requirements:
+        factors: list[str] = []
+        requirement_dimensions = cast("list[str]", requirement["dimensions"])
+        for extent_dim in requirement_dimensions:
+            if extent_dim == ":":
+                continue
+            if _is_int_literal(extent_dim):
+                factors.append(extent_dim)
+            else:
+                factors.append(candidate_name_map.get(extent_dim.lower(), extent_dim))
+        if not factors:
+            continue
+        product_expr = " * ".join(factors)
+        if len(factors) > 1:
+            product_expr = f"({product_expr})"
+        required_elements = cast("int", requirement["required_elements"])
+        condition = f"{product_expr} < {required_elements}"
+        field_name = cast("str", requirement["field"])
+        extent_message = (
+            f"shape constants for '{field_name}' must allow at least "
+            f"{required_elements} default values"
+        )
+        extent_key = (condition, extent_message)
+        if extent_key in seen_extent_checks:
+            continue
+        seen_extent_checks.add(extent_key)
+        set_dims_extent_checks.append({"condition": condition, "message": extent_message})
+
     context = {
         "module_name": module_name,
         "type_name": type_name,
@@ -925,6 +1138,10 @@ def _build_context(
         "module_doc": module_doc,
         "namelist_name": namelist_name,
         "fields": fields,
+        "runtime_dimensions": runtime_dimensions,
+        "runtime_allocations": runtime_allocations,
+        "runtime_deallocations": runtime_deallocations,
+        "runtime_local_allocations": runtime_local_allocations,
         "namelist_vars": namelist_vars,
         "sentinel_assignments": sentinel_assignments,
         "default_assignments": default_assignments,
@@ -943,6 +1160,8 @@ def _build_context(
         "optional_argument_declarations": [
             field.argument_declaration for field in optional_fields_specs
         ],
+        "set_dims_arguments": set_dims_arguments,
+        "set_dims_extent_checks": set_dims_extent_checks,
         "set_required_assignments": set_required_assignments,
         "set_optional_defaults": set_optional_defaults,
         "set_optional_present": [
@@ -979,6 +1198,22 @@ def _ordered_unique(values: Iterable[Any]) -> list[Any]:
             seen.add(value)
             ordered.append(value)
     return ordered
+
+
+def _reject_runtime_dimension_lengths(
+    prop: dict[str, Any],
+    dimensions: dict[str, int],
+) -> None:
+    if not dimensions:
+        return
+    if prop.get("type") == "string":
+        length = prop.get("x-fortran-len")
+        if isinstance(length, str) and length.strip().lower() in dimensions:
+            raise ValueError(f"dimension '{length.strip()}' cannot be used as x-fortran-len")
+    if prop.get("type") == "array":
+        items = prop.get("items")
+        if isinstance(items, dict):
+            _reject_runtime_dimension_lengths(items, dimensions)
 
 
 def _resolve_kind_imports(
@@ -1020,7 +1255,7 @@ def _resolve_kind_imports(
 
 def _field_type_info(
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> FieldTypeInfo:
     prop_type = prop.get("type")
     if prop_type == "array":
@@ -1091,7 +1326,7 @@ def _enum_arg_type_spec(type_info: FieldTypeInfo) -> str:
 
 def _scalar_type_info(
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> ScalarTypeInfo:
     prop_type = prop.get("type")
     if prop_type == "string":
@@ -1111,11 +1346,12 @@ def _scalar_type_info(
                 if int(length_expr) <= 0:
                     raise ValueError("string length must be positive")
             else:
-                if constants is None or length_expr not in constants:
+                length_key = length_expr.lower()
+                if constants is None or length_key not in constants:
                     raise ValueError(
                         f"string length constant '{length_expr}' is not defined in config"
                     )
-                value = constants[length_expr]
+                value = constants[length_key]
                 if isinstance(value, bool) or not isinstance(value, int):
                     raise ValueError(f"string length constant '{length_expr}' must be an integer")
                 if value <= 0:
@@ -1206,9 +1442,6 @@ def _extract_dimensions(prop: dict[str, Any]) -> list[str]:
     raise ValueError("array property 'x-fortran-shape' must be an int, string, or list")
 
 
-_FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
-
-
 def _is_int_literal(value: str) -> bool:
     try:
         int(value)
@@ -1222,7 +1455,7 @@ def _validate_dimension_token(dim: str) -> None:
         return
     if _is_int_literal(dim):
         return
-    if _FORTRAN_IDENTIFIER.match(dim):
+    if FORTRAN_IDENTIFIER.match(dim):
         return
     raise ValueError("array property 'x-fortran-shape' entries must be ints or identifiers")
 
@@ -1230,7 +1463,7 @@ def _validate_dimension_token(dim: str) -> None:
 def _validate_length_token(length_expr: str) -> None:
     if _is_int_literal(length_expr):
         return
-    if _FORTRAN_IDENTIFIER.match(length_expr):
+    if FORTRAN_IDENTIFIER.match(length_expr):
         return
     raise ValueError("string length must be an integer literal or identifier")
 
@@ -1260,17 +1493,18 @@ def _parse_flex_dim(prop: dict[str, Any], type_info: FieldTypeInfo) -> int:
 
 def _collect_dimension_constants(
     dimensions: list[str],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[str]:
     used: list[str] = []
     for dim in dimensions:
         if dim == ":" or _is_int_literal(dim):
             continue
-        if not _FORTRAN_IDENTIFIER.match(dim):
+        if not FORTRAN_IDENTIFIER.match(dim):
             raise ValueError("array property 'x-fortran-shape' entries must be ints or identifiers")
-        if constants is None or dim not in constants:
+        dim_key = dim.lower()
+        if constants is None or dim_key not in constants:
             raise ValueError(f"dimension constant '{dim}' is not defined in config")
-        value = constants[dim]
+        value = constants[dim_key]
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"dimension constant '{dim}' must be an integer")
         if dim not in used:
@@ -1284,6 +1518,90 @@ def _render_declaration(type_spec: str, dimensions: list[str], name: str) -> str
         dims = ", ".join(dimensions)
         parts.append(f"dimension({dims})")
     return f"{', '.join(parts)} :: {name}"
+
+
+def _render_runtime_declaration(
+    type_info: FieldTypeInfo,
+    name: str,
+) -> str:
+    if type_info.category == "string":
+        raise ValueError("runtime scalar strings are not supported; only runtime arrays")
+    if type_info.category != "array":
+        raise ValueError(
+            "runtime declaration is only supported for arrays, "
+            f"got category '{type_info.category}'"
+        )
+
+    dims = ", ".join(":" for _ in type_info.dimensions)
+    return f"{type_info.type_spec}, allocatable, dimension({dims}) :: {name}"
+
+
+def _render_runtime_local_declaration(
+    type_info: FieldTypeInfo,
+    name: str,
+    *,
+    runtime_dimensions: list[str],
+) -> str:
+    if type_info.category == "string":
+        raise ValueError("runtime scalar strings are not supported; only runtime arrays")
+    if type_info.category != "array":
+        raise ValueError(
+            "runtime local declaration is only supported for arrays, "
+            f"got category '{type_info.category}'"
+        )
+
+    type_spec = type_info.type_spec
+    dims = ", ".join(":" for _ in runtime_dimensions)
+    return f"{type_spec}, allocatable, dimension({dims}) :: {name}"
+
+
+def _render_runtime_allocations(
+    type_info: FieldTypeInfo,
+    name: str,
+    *,
+    runtime_dimensions: list[str],
+    runtime_length_expr: str | None,
+    target_prefix: str = "",
+) -> list[str]:
+    lines: list[str] = []
+    target_ref = f"{target_prefix}{name}"
+    if type_info.category != "array":
+        raise ValueError("runtime allocation is only supported for arrays")
+    if any(dim == ":" for dim in runtime_dimensions):
+        raise ValueError("runtime-sized arrays do not support deferred-size dimensions")
+
+    lines.append(f"if (allocated({target_ref})) deallocate({target_ref})")
+    dims_expr = ", ".join(runtime_dimensions)
+    if type_info.element_category == "string" and runtime_length_expr is not None:
+        lines.append(f"allocate(character(len={runtime_length_expr}) :: {target_ref}({dims_expr}))")
+    else:
+        lines.append(f"allocate({target_ref}({dims_expr}))")
+    return lines
+
+
+def _render_runtime_deallocations(name: str, *, target_prefix: str = "") -> list[str]:
+    target_ref = f"{target_prefix}{name}"
+    return [f"if (allocated({target_ref})) deallocate({target_ref})"]
+
+
+def _render_runtime_local_allocations(
+    type_info: FieldTypeInfo,
+    name: str,
+    *,
+    runtime_dimensions: list[str],
+    runtime_length_expr: str | None,
+) -> list[str]:
+    return _render_runtime_allocations(
+        type_info,
+        name,
+        runtime_dimensions=runtime_dimensions,
+        runtime_length_expr=runtime_length_expr,
+    )
+
+
+def _array_section_ref(base_ref: str, rank: int) -> str:
+    dims = ", ".join(":" for _ in range(rank))
+    return f"{base_ref}({dims})"
 
 
 def _render_argument_declaration(
@@ -1329,6 +1647,46 @@ def _sentinel_comment(type_info: FieldTypeInfo, *, required: bool) -> str:
     return ""
 
 
+def _render_sentinel_assignment(
+    type_info: FieldTypeInfo,
+    *,
+    target_ref: str,
+    value_expr: str,
+    comment: str,
+) -> str:
+    if type_info.category == "string":
+        return _render_string_sentinel_assignment(
+            target_ref=target_ref,
+            value_expr=value_expr,
+            comment=comment,
+        )
+    if type_info.category == "array" and type_info.element_category == "string":
+        return _render_string_array_sentinel_assignment(
+            target_ref=target_ref,
+            value_expr=value_expr,
+            comment=comment,
+        )
+    return f"{target_ref} = {value_expr}{comment}"
+
+
+def _render_string_sentinel_assignment(
+    *,
+    target_ref: str,
+    value_expr: str,
+    comment: str,
+) -> str:
+    return f"{target_ref} = {value_expr}{comment}"
+
+
+def _render_string_array_sentinel_assignment(
+    *,
+    target_ref: str,
+    value_expr: str,
+    comment: str,
+) -> str:
+    return f"{target_ref} = {value_expr}{comment}"
+
+
 def _sentinel_expressions(
     type_info: FieldTypeInfo,
     *,
@@ -1339,9 +1697,7 @@ def _sentinel_expressions(
     if category == "array":
         element = type_info.element_category
         if element == "string":
-            length_ref = len_ref or var_ref
-            value_expr = f"repeat(achar(0), len({length_ref}))"
-            return value_expr, f"all({var_ref} == {value_expr})", False
+            return "achar(0)", f"all({var_ref} == achar(0))", False
         if element == "integer":
             return f"-huge({var_ref})", f"all({var_ref} == -huge({var_ref}))", False
         if element == "real":
@@ -1354,9 +1710,7 @@ def _sentinel_expressions(
             raise ValueError("boolean arrays cannot use sentinels")
         raise ValueError(f"unsupported sentinel array element '{element}'")
     if category == "string":
-        length_ref = len_ref or var_ref
-        value_expr = f"repeat(achar(0), len({length_ref}))"
-        return value_expr, f"{var_ref} == {value_expr}", False
+        return "achar(0)", f"{var_ref} == achar(0)", False
     if category == "integer":
         return f"-huge({var_ref})", f"{var_ref} == -huge({var_ref})", False
     if category == "real":
@@ -1377,8 +1731,7 @@ def _element_missing_expression(
     len_ref: str | None = None,
 ) -> tuple[str, bool]:
     if category == "string":
-        length_ref = len_ref or var_ref
-        return f"{var_ref} == repeat(achar(0), len({length_ref}))", False
+        return f"{var_ref} == achar(0)", False
     if category == "integer":
         return f"{var_ref} == -huge({var_ref})", False
     if category == "real":
@@ -1424,42 +1777,11 @@ def _slice_ref_bounds(
     return f"this%{name}({', '.join(dims)})"
 
 
-def _render_flex_set_block(
+def _render_partial_set_block(
     name: str,
     rank: int,
-    flex_dim_count: int,
     bounds: list[dict[str, Any]],
 ) -> str:
-    flex_dims = list(range(rank - flex_dim_count + 1, rank + 1))
-    lb_vars = {entry["dim"]: entry["lb_var"] for entry in bounds}
-    ub_vars = {entry["dim"]: entry["ub_var"] for entry in bounds}
-    lines: list[str] = []
-    for dim in range(1, rank - flex_dim_count + 1):
-        lines.append(f"if (size({name}, {dim}) /= size(this%{name}, {dim})) then")
-        lines.append("  status = NML_ERR_INVALID_INDEX")
-        lines.append(
-            f"  if (present(errmsg)) errmsg = \"dimension {dim} mismatch for '{name}'\""
-        )
-        lines.append("  return")
-        lines.append("end if")
-    for entry in bounds:
-        dim = entry["dim"]
-        lb_var = entry["lb_var"]
-        ub_var = entry["ub_var"]
-        lines.append(f"if (size({name}, {dim}) > size(this%{name}, {dim})) then")
-        lines.append("  status = NML_ERR_INVALID_INDEX")
-        lines.append(
-            f"  if (present(errmsg)) errmsg = \"dimension {dim} exceeds bounds for '{name}'\""
-        )
-        lines.append("  return")
-        lines.append("end if")
-        lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
-        lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
-    lines.append(f"{_slice_ref_bounds(name, rank, flex_dims, lb_vars, ub_vars)} = {name}")
-    return "\n".join(lines)
-
-
-def _render_partial_set_block(name: str, rank: int, bounds: list[dict[str, Any]]) -> str:
     lb_vars = {entry["dim"]: entry["lb_var"] for entry in bounds}
     ub_vars = {entry["dim"]: entry["ub_var"] for entry in bounds}
     dims_all = [entry["dim"] for entry in bounds]
@@ -1477,7 +1799,8 @@ def _render_partial_set_block(name: str, rank: int, bounds: list[dict[str, Any]]
         lines.append("end if")
         lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
         lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
-    lines.append(f"{_slice_ref_bounds(name, rank, dims_all, lb_vars, ub_vars)} = {name}")
+    target_ref = _slice_ref_bounds(name, rank, dims_all, lb_vars, ub_vars)
+    lines.append(f"{target_ref} = {name}")
     return "\n".join(lines)
 
 
@@ -1504,7 +1827,7 @@ def _format_default(
     value: Any,
     type_info: FieldTypeInfo,
     prop: dict[str, Any],
-    constants: dict[str, int | float] | None = None,
+    constants: dict[str, int] | None = None,
 ) -> str:
     if type_info.category == "array":
         if not isinstance(value, list):
@@ -1571,7 +1894,7 @@ def _format_scalar_default(value: Any, kind: str | None, category: str | None) -
 
 def _parse_default_dimensions(
     dimensions: list[str],
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[int]:
     if not dimensions:
         raise ValueError("array property missing dimensions")
@@ -1582,11 +1905,12 @@ def _parse_default_dimensions(
         try:
             parsed.append(int(dim))
         except (TypeError, ValueError) as err:  # pragma: no cover - defensive
-            if constants is None or dim not in constants:
+            dim_key = dim.lower()
+            if constants is None or dim_key not in constants:
                 raise ValueError(
                     "array default dimensions must be integer literals or defined constants"
                 ) from err
-            value = constants[dim]
+            value = constants[dim_key]
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError("array default dimension constants must be integers") from err
             parsed.append(value)
@@ -1663,7 +1987,7 @@ def _ensure_flat_scalar_list(values: list[Any], description: str) -> list[Any]:
 def _enum_values(
     prop: dict[str, Any],
     type_info: FieldTypeInfo,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> list[Any] | None:
     if type_info.category == "array":
         enum_raw = _array_items_enum(prop)
@@ -1862,22 +2186,18 @@ def _validate_enum_defaults(
     type_info: FieldTypeInfo,
     enum_values: list[Any],
     category: str,
-    constants: dict[str, int | float] | None,
+    constants: dict[str, int] | None,
 ) -> None:
     if type_info.category == "array":
-        array_default = _array_default_value(prop)
-        if array_default is None:
-            return
-        default_value, default_from_items = array_default
-        if default_from_items and isinstance(default_value, list):
-            raise ValueError("array items default must be a scalar")
-        if isinstance(default_value, list):
-            values = _ensure_flat_scalar_list(default_value, "array default")
-            _parse_default_dimensions(type_info.dimensions, constants)
-            for value in values:
-                _ensure_enum_member(value, enum_values, category, "default")
-        else:
-            _ensure_enum_member(default_value, enum_values, category, "default")
+        default_info = _array_default_value(prop)
+        if default_info is not None:
+            default_value, default_from_items = default_info
+            if default_from_items:
+                _ensure_enum_member(default_value, enum_values, category, "default")
+            else:
+                default_values = _ensure_flat_scalar_list(default_value, "array default")
+                for value in default_values:
+                    _ensure_enum_member(value, enum_values, category, "default")
         pad_raw = prop.get("x-fortran-default-pad")
         if pad_raw is not None:
             pad_values = pad_raw if isinstance(pad_raw, list) else [pad_raw]

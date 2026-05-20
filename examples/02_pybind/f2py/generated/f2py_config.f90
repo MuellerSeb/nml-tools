@@ -4,7 +4,7 @@
 
 !> \brief Python binding config
 !> \details Minimal namelist used by the pybind example.
-!! 
+!!
 !! The generated f2py wrapper configures a persistent Fortran target instance
 !! through an opaque integer handle.
 module f2py_config
@@ -36,25 +36,25 @@ contains
   !> \brief Set config values on the handled instance
   subroutine config_set_wrapper(handle, &
     name, &
-    has_name, &
+    nml_has__name__, &
     iterations, &
     tolerance, &
     enabled, &
-    has_enabled, &
+    nml_has__enabled__, &
     weights_n1, &
     weights, &
-    has_weights, &
+    nml_has__weights__, &
     status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
     character(len=*), intent(in) :: name !< Config name (optional)
-    logical, intent(in) :: has_name !< whether name was provided
+    logical, intent(in) :: nml_has__name__ !< whether name was provided
     integer(i4), intent(in) :: iterations !< Iterations (required)
     real(dp), intent(in) :: tolerance !< Tolerance (required)
     logical, intent(in) :: enabled !< Enabled (optional)
-    logical, intent(in) :: has_enabled !< whether enabled was provided
+    logical, intent(in) :: nml_has__enabled__ !< whether enabled was provided
     integer, intent(in) :: weights_n1 !< extent for weights
     real(dp), dimension(weights_n1), intent(in) :: weights !< Weights (optional)
-    logical, intent(in) :: has_weights !< whether weights was provided
+    logical, intent(in) :: nml_has__weights__ !< whether weights was provided
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_config_t), pointer :: this
@@ -66,14 +66,14 @@ contains
     if (.not. associated(this)) then
       return
     end if
-    if (has_name) then
+    if (nml_has__name__) then
       maybe_name = name
     end if
-    if (has_enabled) then
+    if (nml_has__enabled__) then
       allocate(maybe_enabled)
       maybe_enabled = enabled
     end if
-    if (has_weights) then
+    if (nml_has__weights__) then
       allocate(maybe_weights(weights_n1))
       maybe_weights = weights
     end if
@@ -85,6 +85,33 @@ contains
       weights=maybe_weights, &
       errmsg=errmsg)
   end subroutine config_set_wrapper
+
+  !> \brief Set runtime dimensions on the handled config instance
+  subroutine config_set_dims_wrapper(handle, &
+    n_weights, &
+    nml_has__n_weights__, &
+    status, errmsg)
+    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
+    integer, intent(in) :: n_weights !< runtime dimension override for n_weights
+    logical, intent(in) :: nml_has__n_weights__ !< whether n_weights was provided
+    integer, intent(out) :: status !< nml-tools status code
+    character(len=512), intent(out) :: errmsg !< error message for non-OK status values
+    type(nml_config_t), pointer :: this
+    integer, allocatable :: maybe_n_weights
+
+    call nml_config_resolve_handle(handle, this, status, errmsg)
+    if (.not. associated(this)) then
+      return
+    end if
+    if (nml_has__n_weights__) then
+      allocate(maybe_n_weights)
+      maybe_n_weights = n_weights
+    end if
+    status = this%set_dims( &
+      n_weights=maybe_n_weights, &
+      errmsg=errmsg)
+  end subroutine config_set_dims_wrapper
+
 
   !> \brief Check whether a config field is set
   subroutine config_is_set_wrapper(handle, name, idx_n1, idx, has_idx, status, errmsg)

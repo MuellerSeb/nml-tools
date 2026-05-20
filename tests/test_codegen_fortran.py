@@ -52,14 +52,25 @@ def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
     constants_raw = config.get("constants", {})
     if not isinstance(constants_raw, dict):
         raise ValueError("config constants must be a table")
-    constants: dict[str, int | float] = {}
+    constants: dict[str, int] = {}
     for name, entry in constants_raw.items():
         if not isinstance(entry, dict) or "value" not in entry:
             raise ValueError("config constant entries must define a value")
         value = entry.get("value")
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError("config constants must be integers or reals")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("config constants must be integers")
         constants[name] = value
+    dimensions_raw = config.get("dimensions", {})
+    if not isinstance(dimensions_raw, dict):
+        raise ValueError("config dimensions must be a table")
+    dimensions: dict[str, int] = {}
+    for name, entry in dimensions_raw.items():
+        if not isinstance(entry, dict) or "value" not in entry:
+            raise ValueError("config dimension entries must define a value")
+        value = entry.get("value")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("config dimensions must be integers")
+        dimensions[name] = value
     doc_raw = config.get("documentation")
     if doc_raw is None:
         module_doc = None
@@ -83,6 +94,7 @@ def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         constants=constants,
+        dimensions=dimensions,
         module_doc=module_doc,
     )
 
@@ -162,7 +174,7 @@ def test_generate_fortran_allows_items_default(tmp_path: Path) -> None:
     assert "this%values = values_default" in generated
 
 
-def test_generate_fortran_accepts_dimension_constants(tmp_path: Path) -> None:
+def test_generate_fortran_accepts_static_shape_constants(tmp_path: Path) -> None:
     schema = {
         "title": "Constant shapes",
         "x-fortran-namelist": "test_nml",
@@ -186,11 +198,272 @@ def test_generate_fortran_accepts_dimension_constants(tmp_path: Path) -> None:
     )
 
     generated = output.read_text()
-    assert "dimension(max_layers)" in generated
+    assert "integer :: dim_max_layers" not in generated
+    assert "integer(i4), dimension(max_layers) :: values" in generated
+    assert "procedure :: set_dims" not in generated
+    assert "allocate(this%values" not in generated
     assert "use nml_helper, only:" in generated
     assert "max_layers" in generated
     assert "integer(i4), parameter, public :: values_default = 1_i4" in generated
     assert "this%values = values_default" in generated
+
+
+def test_generate_fortran_matches_constants_case_insensitively(tmp_path: Path) -> None:
+    schema = {
+        "title": "Constant shapes",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4", "default": 1},
+                "x-fortran-shape": "MAX_LAYERS",
+            },
+            "name": {
+                "type": "string",
+                "x-fortran-len": "BUF",
+            },
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"max_layers": 3, "buf": 32},
+    )
+
+    generated = output.read_text()
+    assert "integer(i4), dimension(MAX_LAYERS) :: values" in generated
+    assert "character(len=BUF) :: name" in generated
+
+
+def test_generate_fortran_rejects_non_integer_constants(tmp_path: Path) -> None:
+    schema = {
+        "title": "Constant shapes",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": "max_layers",
+            },
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match="must be an integer"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test.f90",
+            kind_module="mo_kind",
+            constants={"max_layers": 3.5},
+        )
+
+
+def test_generate_fortran_accepts_runtime_dimensions(tmp_path: Path) -> None:
+    schema = {
+        "title": "Runtime dimensions",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4", "default": 1},
+                "x-fortran-shape": "max_layers",
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"max_layers": 3},
+    )
+
+    generated = output.read_text()
+    assert "integer :: nml_dim__max_layers__ = nml_default__max_layers__" in generated
+    assert "integer(i4), allocatable, dimension(:) :: values" in generated
+    assert "procedure :: set_dims => nml_test_nml_set_dims" in generated
+    assert "allocate(this%values(this%nml_dim__max_layers__))" in generated
+    assert "use nml_helper, only:" in generated
+    assert "nml_default__max_layers__=>max_layers" in generated
+    assert "integer(i4), parameter, public :: values_default = 1_i4" in generated
+    assert "this%values = values_default" in generated
+
+
+def test_generate_fortran_normalizes_runtime_dimension_names(tmp_path: Path) -> None:
+    schema = {
+        "title": "Runtime dimensions",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4", "default": 1},
+                "x-fortran-shape": "MAX_LAYERS",
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"max_layers": 3},
+    )
+
+    generated = output.read_text()
+    assert "integer :: nml_dim__max_layers__ = nml_default__max_layers__" in generated
+    assert "nml_default__max_layers__=>max_layers" in generated
+
+
+def test_generate_fortran_rejects_runtime_dimension_field_collisions(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Runtime dimension field collision",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "nml_dim__max_layers__": {"type": "integer", "x-fortran-kind": "i4"},
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": "max_layers",
+            },
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match="conflicts with runtime dimension field"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test.f90",
+            kind_module="mo_kind",
+            dimensions={"max_layers": 3},
+        )
+
+
+def test_generate_fortran_renames_runtime_dimension_default_aliases(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Runtime dimension alias collision",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "x-fortran-len": "nml_default__max_layers__",
+            },
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": "max_layers",
+            },
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"nml_default__max_layers__": 32},
+        dimensions={"max_layers": 3},
+    )
+
+    generated = output.read_text()
+    assert "nml_default__max_layers__, &" in generated
+    assert "nml_default__max_layers__1__=>max_layers" in generated
+    assert "integer :: nml_dim__max_layers__ = nml_default__max_layers__1__" in generated
+
+
+def test_generate_fortran_does_not_alias_runtime_dimension_names_in_type_specs(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Runtime dimension kind collision",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "number", "x-fortran-kind": "dp", "default": 1.0},
+                "x-fortran-shape": "dp",
+            },
+            "limit": {
+                "type": "number",
+                "x-fortran-kind": "dp",
+                "minimum": 0.0,
+            },
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"dp": 3},
+    )
+
+    generated = output.read_text()
+    assert "real(dp), parameter, public :: values_default = 1.0_dp" in generated
+    assert "real(dp), parameter, public :: limit_min = 0.0_dp" in generated
+    assert "real(dp_default)" not in generated
+
+
+def test_generate_fortran_rejects_invalid_runtime_dimensions(tmp_path: Path) -> None:
+    schema = {
+        "title": "Runtime dimensions",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4", "default": 1},
+                "x-fortran-shape": "max_layers",
+            }
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+
+    with pytest.raises(ValueError, match="valid Fortran identifier"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test_invalid_name.f90",
+            kind_module="mo_kind",
+            dimensions={"1bad": 3},
+        )
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test_bool.f90",
+            kind_module="mo_kind",
+            dimensions={"max_layers": True},
+        )
+
+    with pytest.raises(ValueError, match="must be positive"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test_zero.f90",
+            kind_module="mo_kind",
+            dimensions={"max_layers": 0},
+        )
 
 
 def test_generate_fortran_requires_array_shape(tmp_path: Path) -> None:
@@ -490,9 +763,196 @@ def test_generate_fortran_accepts_string_length_constants(tmp_path: Path) -> Non
     )
 
     generated = output.read_text()
+    assert "integer :: dim_name_len" not in generated
     assert "character(len=name_len) :: name" in generated
+    assert "procedure :: set_dims" not in generated
+    assert "allocate(character" not in generated
     assert "use nml_helper, only:" in generated
     assert "name_len" in generated
+
+
+def test_generate_fortran_rejects_runtime_dimensions_as_string_lengths(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "String length dimensions",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "x-fortran-len": "name_len",
+            }
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match="dimension 'name_len' cannot be used as x-fortran-len"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test.f90",
+            kind_module="mo_kind",
+            dimensions={"name_len": 32},
+        )
+
+
+def test_generate_fortran_set_dims_validates_before_assignment(tmp_path: Path) -> None:
+    schema = {
+        "title": "Transactional constants",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": "max_layers",
+                "default": [1, 2, 3, 4],
+            },
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"max_layers": 4},
+    )
+
+    generated = output.read_text()
+    assert "if (nml_candidate__max_layers__ < 4) then" in generated
+    assert "shape constants for 'values' must allow at least 4 default values" in generated
+    assert "namelist not configured; call set or from_file" in generated
+
+    is_set_idx = generated.index("integer function nml_test_nml_is_set")
+    is_valid_idx = generated.index("integer function nml_test_nml_is_valid")
+    generated.index("if (.not. this%is_configured) then", is_set_idx)
+    generated.index("if (.not. this%is_configured) then", is_valid_idx)
+
+    validate_idx = generated.index("if (nml_candidate__max_layers__ <= 0) then")
+    assign_idx = generated.index("this%nml_dim__max_layers__ = nml_candidate__max_layers__")
+    assert assign_idx > validate_idx
+
+
+def test_generate_fortran_runtime_sized_array_with_default_uses_partial_set(tmp_path: Path) -> None:
+    schema = {
+        "title": "Dynamic array partial set",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": "max_layers",
+                "default": [1, 2, 3, 4],
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"max_layers": 4},
+    )
+
+    generated = output.read_text()
+    assert "if (size(values, 1) > size(this%values, 1)) then" in generated
+    assert "this%values(lb_1:ub_1) = values" in generated
+    assert "dimension 1 mismatch for 'values'" not in generated
+
+
+def test_generate_fortran_fixed_array_setters_use_assumed_shape(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Fixed array partial set",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": 3,
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(schema, output, kind_module="mo_kind")
+
+    generated = output.read_text()
+    assert "integer(i4), dimension(:), intent(in), optional :: values" in generated
+    assert "if (size(values, 1) > size(this%values, 1)) then" in generated
+    assert "this%values(lb_1:ub_1) = values" in generated
+    assert "dimension(3), intent(in), optional :: values" not in generated
+
+
+def test_generate_fortran_runtime_sized_string_array_uses_static_length(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Dynamic string array",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "names": {
+                "type": "array",
+                "items": {"type": "string", "x-fortran-len": "name_len"},
+                "x-fortran-shape": "max_names",
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"name_len": 16},
+        dimensions={"max_names": 2},
+    )
+
+    generated = output.read_text()
+    assert "character(len=name_len), allocatable, dimension(:) :: names" in generated
+    assert "allocate(character(len=name_len) :: this%names(this%nml_dim__max_names__))" in generated
+    assert "character(len=:), allocatable" not in generated
+    assert "this%names = names" in generated
+
+
+def test_generate_fortran_multidimensional_string_array_sentinels(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Two dimensional string array",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "names": {
+                "type": "array",
+                "items": {"type": "string", "x-fortran-len": "name_len"},
+                "x-fortran-shape": ["nrow", "ncol"],
+            }
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        constants={"name_len": 16, "nrow": 2, "ncol": 3},
+    )
+
+    generated = output.read_text()
+    assert "this%names = achar(0)" in generated
+    assert "all(this%names == achar(0))" in generated
 
 
 def test_generate_fortran_array_default_pad_order(tmp_path: Path) -> None:

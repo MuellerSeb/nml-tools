@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import logging
-import math
-import re
 import sys
 from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import click
 import f90nml  # type: ignore
 from click.exceptions import Exit
 from packaging.version import InvalidVersion, Version
 
+from ._utils import constant_dimension_overlap, is_fortran_identifier
 from ._version import __version__
 from .codegen_f2py import (
     F2pyCTypeMap,
@@ -44,10 +43,53 @@ else:  # pragma: no cover - python<3.11
     import tomli as tomllib
 
 logger = logging.getLogger(__name__)
-_FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _DEFAULT_CONFIG = Path("nml-config.toml")
 _PYPROJECT_CONFIG = Path("pyproject.toml")
+
+_NamedIntegerTypeBase = cast(Any, click.ParamType)
+
+
+class NamedIntegerType(_NamedIntegerTypeBase):  # type: ignore[valid-type, misc]
+    """Parse NAME=INT values for CLI options."""
+
+    name = "NAME=INT"
+
+    def __init__(self, *, label: str, positive: bool = False) -> None:
+        self._label = label
+        self._positive = positive
+
+    def convert(
+        self,
+        value: Any,
+        param: click.Parameter | None,
+        ctx: click.Context | None,
+    ) -> tuple[str, int]:
+        if not isinstance(value, str) or "=" not in value:
+            self.fail("must be NAME=INT", param, ctx)
+
+        raw_name, raw_value = value.split("=", 1)
+        name = raw_name.strip()
+        if not name:
+            self.fail("must use non-empty names", param, ctx)
+        if not is_fortran_identifier(name):
+            self.fail(f"{self._label} '{name}' must be a valid identifier", param, ctx)
+
+        value_text = raw_value.strip()
+        if not value_text:
+            self.fail(f"{self._label} '{name}' must define a value", param, ctx)
+        value_digits = value_text[1:] if value_text[:1] in {"+", "-"} else value_text
+        if not value_digits.isdigit():
+            self.fail(f"{self._label} '{name}' value must be an integer", param, ctx)
+
+        parsed_value = int(value_text)
+        if self._positive and parsed_value <= 0:
+            self.fail(f"{self._label} '{name}' value must be positive", param, ctx)
+        return name.lower(), parsed_value
+
+
+_CONSTANT_TYPE = NamedIntegerType(label="constant")
+_DIMENSION_TYPE = NamedIntegerType(label="dimension", positive=True)
 
 
 @dataclass(frozen=True)
@@ -292,29 +334,22 @@ def _load_f2py_ctype_table(c_types: dict[str, Any], key: str) -> dict[str, str]:
     return values
 
 
-def _format_constant_literal(value: int | float) -> tuple[str, str]:
+def _format_constant_literal(value: int) -> tuple[str, str]:
     if isinstance(value, bool):
         raise click.ClickException("config constants must not be boolean")
     if isinstance(value, int):
         return "integer", str(value)
-    if isinstance(value, float):
-        literal = repr(float(value))
-        if literal.lower() == "nan":
-            raise click.ClickException("config constants must not be NaN")
-        if "." not in literal and "e" not in literal and "E" not in literal:
-            literal = f"{literal}.0"
-        return "real", literal
-    raise click.ClickException("config constants must be integers or reals")
+    raise click.ClickException("config constants must be integers")
 
 
-def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], list[ConstantSpec]]:
+def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int], list[ConstantSpec]]:
     constants_raw = config.get("constants", {})
     if constants_raw is None:
         constants_raw = {}
     if not isinstance(constants_raw, dict):
         raise click.ClickException("config 'constants' must be a table")
 
-    constants: dict[str, int | float] = {}
+    constants: dict[str, int] = {}
     specs: list[ConstantSpec] = []
     for name_raw, entry in constants_raw.items():
         if not isinstance(name_raw, str):
@@ -322,17 +357,22 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
         name = name_raw.strip()
         if not name:
             raise click.ClickException("config constants must have non-empty names")
-        if not _FORTRAN_IDENTIFIER.match(name):
+        if not is_fortran_identifier(name):
             raise click.ClickException(
                 f"config constant '{name}' must be a valid Fortran identifier"
+            )
+        canonical_name = name.lower()
+        if canonical_name in constants:
+            raise click.ClickException(
+                f"config constant '{name}' duplicates another constant name"
             )
         if not isinstance(entry, dict):
             raise click.ClickException(f"config constant '{name}' must be a table with 'value'")
         if "value" not in entry:
             raise click.ClickException(f"config constant '{name}' must define 'value'")
         value = entry.get("value")
-        if not isinstance(value, (int, float)):
-            raise click.ClickException("config constants must be integers or reals")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise click.ClickException("config constants must be integers")
         type_spec, literal = _format_constant_literal(value)
         doc = entry.get("doc")
         if doc is not None:
@@ -341,14 +381,72 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int | float], lis
             doc = " ".join(doc.splitlines()).strip() or None
         specs.append(
             ConstantSpec(
-                name=name,
+                name=canonical_name,
                 type_spec=type_spec,
                 value=literal,
                 doc=doc,
             )
         )
-        constants[name] = value
+        constants[canonical_name] = value
     return constants, specs
+
+
+def _load_dimensions(
+    config: dict[str, Any],
+    constants: dict[str, int],
+) -> tuple[dict[str, int], list[ConstantSpec]]:
+    dimensions_raw = config.get("dimensions", {})
+    if dimensions_raw is None:
+        dimensions_raw = {}
+    if not isinstance(dimensions_raw, dict):
+        raise click.ClickException("config 'dimensions' must be a table")
+
+    dimensions: dict[str, int] = {}
+    specs: list[ConstantSpec] = []
+    constant_names = {name.lower() for name in constants}
+    for name_raw, entry in dimensions_raw.items():
+        if not isinstance(name_raw, str):
+            raise click.ClickException("config dimensions must use string keys")
+        name = name_raw.strip()
+        if not name:
+            raise click.ClickException("config dimensions must have non-empty names")
+        if not is_fortran_identifier(name):
+            raise click.ClickException(
+                f"config dimension '{name}' must be a valid Fortran identifier"
+            )
+        canonical_name = name.lower()
+        if canonical_name in constant_names:
+            raise click.ClickException(
+                f"config dimension '{name}' duplicates a constant name"
+            )
+        if canonical_name in dimensions:
+            raise click.ClickException(
+                f"config dimension '{name}' duplicates another dimension name"
+            )
+        if not isinstance(entry, dict):
+            raise click.ClickException(f"config dimension '{name}' must be a table with 'value'")
+        if "value" not in entry:
+            raise click.ClickException(f"config dimension '{name}' must define 'value'")
+        value = entry.get("value")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise click.ClickException(f"config dimension '{name}' value must be an integer")
+        if value <= 0:
+            raise click.ClickException(f"config dimension '{name}' value must be positive")
+        doc = entry.get("doc")
+        if doc is not None:
+            if not isinstance(doc, str):
+                raise click.ClickException(f"config dimension '{name}' doc must be a string")
+            doc = " ".join(doc.splitlines()).strip() or None
+        specs.append(
+            ConstantSpec(
+                name=canonical_name,
+                type_spec="integer",
+                value=str(value),
+                doc=doc,
+            )
+        )
+        dimensions[canonical_name] = value
+    return dimensions, specs
 
 
 def _load_bool_field(section: dict[str, Any], key: str, *, label: str) -> bool:
@@ -393,35 +491,35 @@ def _load_documentation_settings(
     return module_doc, md_doxygen_id_from_name, md_add_toc_statement, py_style
 
 
-def _parse_cli_constants(values: tuple[str, ...]) -> dict[str, int | float]:
-    constants: dict[str, int | float] = {}
-    for entry in values:
-        if "=" not in entry:
-            raise click.ClickException("constants must be provided as NAME=VALUE")
-        raw_name, raw_value = entry.split("=", 1)
-        name = raw_name.strip()
-        if not name:
-            raise click.ClickException("constants must use non-empty names")
-        if not _FORTRAN_IDENTIFIER.match(name):
-            raise click.ClickException(f"constant '{name}' must be a valid identifier")
-        value_text = raw_value.strip()
-        if not value_text:
-            raise click.ClickException(f"constant '{name}' must define a value")
-        if value_text.lower() in {"nan", "+nan", "-nan", "inf", "+inf", "-inf"}:
-            raise click.ClickException(f"constant '{name}' must be finite")
-        if re.fullmatch(r"[+-]?\d+", value_text):
-            value: int | float = int(value_text)
-        else:
-            try:
-                value = float(value_text)
-            except ValueError as exc:
-                raise click.ClickException(
-                    f"constant '{name}' value '{value_text}' must be numeric"
-                ) from exc
-            if math.isinf(value) or math.isnan(value):
-                raise click.ClickException(f"constant '{name}' must be finite")
+def _parse_cli_constants(values: tuple[tuple[str, int], ...]) -> dict[str, int]:
+    constants: dict[str, int] = {}
+    for name, value in values:
+        if name in constants:
+            raise click.ClickException(f"constant '{name}' duplicates another constant name")
         constants[name] = value
     return constants
+
+
+def _parse_cli_dimensions(values: tuple[tuple[str, int], ...]) -> dict[str, int]:
+    dimensions: dict[str, int] = {}
+    for name, value in values:
+        if name in dimensions:
+            raise click.ClickException(f"dimension '{name}' duplicates another dimension name")
+        if value <= 0:
+            raise click.ClickException(f"dimension '{name}' value must be positive")
+        dimensions[name] = value
+    return dimensions
+
+
+def _reject_constant_dimension_overlap(
+    constants: dict[str, int],
+    dimensions: dict[str, int],
+) -> None:
+    duplicate_names = constant_dimension_overlap(constants, dimensions)
+    if duplicate_names:
+        raise click.ClickException(
+            "constants and dimensions must not share names: " + ", ".join(duplicate_names)
+        )
 
 
 def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, Any]]:
@@ -545,6 +643,7 @@ def _collect_generated_outputs(
         py_style,
     ) = _load_documentation_settings(config)
     constants, constant_specs = _load_constants(config)
+    dimensions, dimension_specs = _load_dimensions(config, constants)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
     outputs: list[GeneratedOutput] = []
@@ -559,7 +658,7 @@ def _collect_generated_outputs(
                         file_name=helper_path.name,
                         module_name=helper_module,
                         len_buf=helper_buffer,
-                        constants=constant_specs,
+                        constants=constant_specs + dimension_specs,
                         module_doc=module_doc,
                         helper_header=helper_header,
                     ),
@@ -597,6 +696,7 @@ def _collect_generated_outputs(
                             kind_map=kind_map,
                             kind_allowlist=kind_allowlist,
                             constants=constants,
+                            dimensions=dimensions,
                             module_doc=module_doc,
                             f2py_handle_helpers=namelist_entry["f2py_path"] is not None,
                         ),
@@ -615,6 +715,7 @@ def _collect_generated_outputs(
                         render_docs(
                             schema,
                             constants=constants,
+                            dimensions=dimensions,
                             md_doxygen_id_from_name=md_doxygen_id_from_name,
                             md_add_toc_statement=md_add_toc_statement,
                         ),
@@ -632,6 +733,7 @@ def _collect_generated_outputs(
             kind_map=kind_map,
             kind_allowlist=kind_allowlist,
             constants=constants,
+            dimensions=dimensions,
             f2cmap_path=f2cmap_path,
             f2py_c_types=f2py_c_types,
             py_style=py_style,
@@ -657,6 +759,7 @@ def _collect_generated_outputs(
                         doc_mode=template_entry["doc_mode"],
                         value_mode=template_entry["value_mode"],
                         constants=constants,
+                        dimensions=dimensions,
                         kind_map=kind_map,
                         kind_allowlist=kind_allowlist,
                         values=template_entry["values"],
@@ -677,7 +780,8 @@ def _collect_f2py_outputs(
     kind_module: str,
     kind_map: dict[str, str],
     kind_allowlist: set[str],
-    constants: dict[str, int | float],
+    constants: dict[str, int],
+    dimensions: dict[str, int],
     f2cmap_path: Path | None,
     f2py_c_types: F2pyCTypeMap,
     py_style: str,
@@ -711,6 +815,7 @@ def _collect_f2py_outputs(
                         kind_map=kind_map,
                         kind_allowlist=kind_allowlist,
                         constants=constants,
+                        dimensions=dimensions,
                         errmsg_len=helper_buffer,
                     ),
                 )
@@ -721,7 +826,7 @@ def _collect_f2py_outputs(
     if f2cmap_path is not None:
         try:
             usage = merge_f2py_kind_usage(
-                collect_f2py_kind_usage(schemas, constants=constants)
+                collect_f2py_kind_usage(schemas, constants=constants, dimensions=dimensions)
                 for schemas in f2py_groups.values()
             )
             logger.debug("Rendering f2py kind map at %s", f2cmap_path)
@@ -748,6 +853,7 @@ def _collect_f2py_outputs(
                         kind_map=kind_map,
                         kind_allowlist=kind_allowlist,
                         constants=constants,
+                        dimensions=dimensions,
                         errmsg_len=helper_buffer,
                     ),
                     f2py_path.stem,
@@ -776,7 +882,8 @@ def _generate_f2py_outputs(
     kind_module: str,
     kind_map: dict[str, str],
     kind_allowlist: set[str],
-    constants: dict[str, int | float],
+    constants: dict[str, int],
+    dimensions: dict[str, int],
     f2cmap_path: Path | None,
     f2py_c_types: F2pyCTypeMap,
     py_style: str,
@@ -791,6 +898,7 @@ def _generate_f2py_outputs(
             kind_map=kind_map,
             kind_allowlist=kind_allowlist,
             constants=constants,
+            dimensions=dimensions,
             f2cmap_path=f2cmap_path,
             f2py_c_types=f2py_c_types,
             py_style=py_style,
@@ -903,6 +1011,7 @@ def gen_fortran(config_path: Path | None) -> None:
     )
     module_doc, _, _, py_style = _load_documentation_settings(config)
     constants, constant_specs = _load_constants(config)
+    dimensions, dimension_specs = _load_dimensions(config, constants)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
     if helper_path is not None:
@@ -912,7 +1021,7 @@ def gen_fortran(config_path: Path | None) -> None:
                 helper_path,
                 module_name=helper_module,
                 len_buf=helper_buffer,
-                constants=constant_specs,
+                constants=constant_specs + dimension_specs,
                 module_doc=module_doc,
                 helper_header=helper_header,
             )
@@ -945,6 +1054,7 @@ def gen_fortran(config_path: Path | None) -> None:
                 kind_map=kind_map,
                 kind_allowlist=kind_allowlist,
                 constants=constants,
+                dimensions=dimensions,
                 module_doc=module_doc,
                 f2py_handle_helpers=entry["f2py_path"] is not None,
             )
@@ -959,6 +1069,7 @@ def gen_fortran(config_path: Path | None) -> None:
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         constants=constants,
+        dimensions=dimensions,
         f2cmap_path=f2cmap_path,
         f2py_c_types=f2py_c_types,
         py_style=py_style,
@@ -987,8 +1098,18 @@ def gen_fortran(config_path: Path | None) -> None:
 @click.option(
     "--constants",
     "constant_args",
+    metavar="NAME=INT",
+    type=_CONSTANT_TYPE,
     multiple=True,
-    help="Additional constants as NAME=VALUE (repeatable).",
+    help="Additional integer constants as NAME=INT (repeatable).",
+)
+@click.option(
+    "--dimensions",
+    "dimension_args",
+    metavar="NAME=INT",
+    type=_DIMENSION_TYPE,
+    multiple=True,
+    help="Runtime dimensions as NAME=INT (repeatable).",
 )
 @click.argument(
     "input_path",
@@ -999,7 +1120,8 @@ def validate(
     config_path: Path | None,
     schema_paths: tuple[Path, ...],
     input_option: Path | None,
-    constant_args: tuple[str, ...],
+    constant_args: tuple[tuple[str, int], ...],
+    dimension_args: tuple[tuple[str, int], ...],
     input_path: Path | None,
 ) -> None:
     """Validate a namelist file against schema definitions."""
@@ -1009,6 +1131,8 @@ def validate(
     if input_path is None:
         raise click.ClickException("input path is required")
     constants = _parse_cli_constants(constant_args)
+    dimension_overrides = _parse_cli_dimensions(dimension_args)
+    dimensions: dict[str, int] = {}
     schemas: list[dict[str, Any]] = []
 
     if schema_paths:
@@ -1016,7 +1140,11 @@ def validate(
             config, config_path = _load_config_checked(config_path)
             logger.info("Loading config from %s", config_path)
             cfg_constants, _ = _load_constants(config)
+            dimensions, _ = _load_dimensions(config, cfg_constants)
             constants = {**cfg_constants, **constants}
+            dimensions = {**dimensions, **dimension_overrides}
+        else:
+            dimensions = dimension_overrides
         for schema_file in schema_paths:
             try:
                 logger.info("Loading schema %s", schema_file)
@@ -1029,7 +1157,9 @@ def validate(
         logger.info("Loading config from %s", config_path)
         base_dir = config_path.parent
         cfg_constants, _ = _load_constants(config)
+        dimensions, _ = _load_dimensions(config, cfg_constants)
         constants = {**cfg_constants, **constants}
+        dimensions = {**dimensions, **dimension_overrides}
         entries = _iter_namelists(config, base_dir)
         logger.info("Found %d schema entries", len(entries))
         for entry in entries:
@@ -1045,6 +1175,7 @@ def validate(
 
     if not schemas:
         raise click.ClickException("no schemas provided for validation")
+    _reject_constant_dimension_overlap(constants, dimensions)
 
     try:
         logger.info("Reading namelist %s", input_path)
@@ -1088,6 +1219,7 @@ def validate(
                 schema,
                 file_entries[key][1],
                 constants=constants,
+                dimensions=dimensions,
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
@@ -1109,6 +1241,7 @@ def gen_markdown(config_path: Path | None) -> None:
     logger.info("Loading config from %s", config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
+    dimensions, _ = _load_dimensions(config, constants)
     _, md_doxygen_id_from_name, md_add_toc_statement, _ = _load_documentation_settings(
         config
     )
@@ -1132,6 +1265,7 @@ def gen_markdown(config_path: Path | None) -> None:
                 schema,
                 doc_path,
                 constants=constants,
+                dimensions=dimensions,
                 md_doxygen_id_from_name=md_doxygen_id_from_name,
                 md_add_toc_statement=md_add_toc_statement,
             )
@@ -1153,6 +1287,7 @@ def gen_template(config_path: Path | None) -> None:
     logger.info("Loading config from %s", config_path)
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
+    dimensions, _ = _load_dimensions(config, constants)
     _, kind_map, kind_allowlist = _load_kind_settings(config)
     templates = _iter_templates(config, base_dir)
     if not templates:
@@ -1171,6 +1306,7 @@ def gen_template(config_path: Path | None) -> None:
                 doc_mode=entry["doc_mode"],
                 value_mode=entry["value_mode"],
                 constants=constants,
+                dimensions=dimensions,
                 kind_map=kind_map,
                 kind_allowlist=kind_allowlist,
                 values=entry["values"],

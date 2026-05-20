@@ -192,6 +192,67 @@ class {{ cls.class_name }}:
         )
         _check_status(result)
 
+{% if cls.set_dims_args %}
+    def set_dims(
+        self,
+{% for arg in cls.set_dims_args %}
+{% set py_name = arg.python_name if arg.python_name is not none else arg.name %}
+        {{ py_name }}: Any = None,
+{% endfor %}
+    ) -> None:
+{% if py_style == "doxygen" %}
+        """!
+        Set runtime dimensions for the handled {{ cls.namelist_name }} instance.
+
+        Omitted or None values reset the corresponding dimension to the configured
+        helper-module default. Applying dimensions deallocates affected arrays
+        and clears previously configured namelist values.
+
+{% for arg in cls.set_dims_args %}
+{% set py_name = arg.python_name if arg.python_name is not none else arg.name %}
+    @param {{ py_name }} (int, optional): Runtime dimension override for {{ arg.name }}.
+{% endfor %}
+        @throws NmlError: If the Fortran setter returns a non-OK status.
+        """
+{% else %}
+        """Set runtime dimensions for the handled {{ cls.namelist_name }} instance.
+
+        Omitted or None values reset the corresponding dimension to the configured
+        helper-module default. Applying dimensions deallocates affected arrays
+        and clears previously configured namelist values.
+
+        Parameters
+        ----------
+{% for arg in cls.set_dims_args %}
+{% set py_name = arg.python_name if arg.python_name is not none else arg.name %}
+        {{ py_name }} : int, optional
+            Runtime dimension override for {{ arg.name }}.
+{% endfor %}
+
+        Raises
+        ------
+        NmlError
+            If the Fortran setter returns a non-OK status.
+        """
+{% endif %}
+        kwargs: dict[str, Any] = {}
+{% for arg in cls.set_dims_args %}
+{% set py_name = arg.python_name if arg.python_name is not none else arg.name %}
+        if {{ py_name }} is not None:
+            kwargs["{{ arg.name }}"] = {{ py_name }}
+        else:
+            kwargs["{{ arg.name }}"] = {{ arg.dummy_value }}
+{% if arg.has_flag is not none %}
+        kwargs["{{ arg.has_flag }}"] = {{ py_name }} is not None
+{% endif %}
+{% endfor %}
+        result = self._f2py.{{ cls.namelist_name }}_set_dims_wrapper(
+            self.handle,
+            **kwargs,
+        )
+        _check_status(result)
+{% endif %}
+
     def set(
         self,
 {% for arg in cls.required_args %}
@@ -348,6 +409,4 @@ class {{ cls.class_name }}:
             self.handle,
         )
         _check_status(result)
-
-
 {% endfor %}

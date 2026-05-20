@@ -53,26 +53,37 @@ python -m pytest tests
 ## Usage
 
 ```python
-from nml_pybind_example import get_config, get_iterations, get_weights
+from nml_pybind_example import (
+  get_config,
+  get_iterations,
+  get_weights,
+)
 
 cfg = get_config()
+cfg.set_dims(n_weights=5)
 cfg.set(iterations=20, tolerance=1.0e-4, weights=1.0)
 cfg.is_valid()
 
 print(get_iterations())
-print(get_weights())
+print(get_weights(5))
 ```
 
 Scalar array values are normalized by the generated Python shim before calling f2py.
 For `weights=1.0`, only the first array entry is overwritten, matching the generated
-Fortran `set` method's partial-array behavior; the remaining entries keep their
-defaults.
+Fortran `set` method's partial-array behavior for arrays with defaults; the remaining
+entries keep their defaults.
 
 The f2py-facing Fortran wrappers deliberately avoid `optional` dummy arguments
-and assumed-shape arrays. The Python shim passes `has_<name>` flags plus dummy
+and assumed-shape arrays. The Python shim passes `nml_has__<name>__` flags plus dummy
 values for omitted optional fields. The Fortran wrapper converts those flags to
 allocated or unallocated local allocatables before calling the generated
 type-bound `set` method, so omitted values still behave like absent optional
 arguments in normal Fortran. This uses the Fortran 2008 behavior where an
 unallocated allocatable actual argument associated with an optional
 nonallocatable dummy argument is considered not present.
+
+Runtime array dimensions are configured through the generated Python wrapper
+method `cfg.set_dims(...)`, for example `cfg.set_dims(n_weights=5)`. Omitted
+or `None` values reset a dimension to the default from `[tool.nml-tools.dimensions]`.
+Changing dimensions clears previously configured values; call `set(...)` or
+`from_file(...)` afterwards.
