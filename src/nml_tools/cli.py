@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import click
 import f90nml  # type: ignore
@@ -48,13 +48,7 @@ _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _DEFAULT_CONFIG = Path("nml-config.toml")
 _PYPROJECT_CONFIG = Path("pyproject.toml")
 
-if TYPE_CHECKING:
-    _NamedIntegerTypeBase = click.ParamType[tuple[str, int]]
-else:
-    _NamedIntegerTypeBase = click.ParamType
-
-
-class NamedIntegerType(_NamedIntegerTypeBase):
+class NamedIntegerType(click.ParamType):
     """Parse NAME=INT values for CLI options."""
 
     name = "NAME=INT"

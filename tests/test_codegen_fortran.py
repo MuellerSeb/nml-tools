@@ -326,6 +326,42 @@ def test_generate_fortran_normalizes_runtime_dimension_names(tmp_path: Path) -> 
     assert "max_layers_default=>max_layers" in generated
 
 
+def test_generate_fortran_does_not_alias_runtime_dimension_names_in_type_specs(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Runtime dimension kind collision",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "number", "x-fortran-kind": "dp", "default": 1.0},
+                "x-fortran-shape": "dp",
+            },
+            "limit": {
+                "type": "number",
+                "x-fortran-kind": "dp",
+                "minimum": 0.0,
+            },
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"dp": 3},
+    )
+
+    generated = output.read_text()
+    assert "real(dp), parameter, public :: values_default = 1.0_dp" in generated
+    assert "real(dp), parameter, public :: limit_min = 0.0_dp" in generated
+    assert "real(dp_default)" not in generated
+
+
 def test_generate_fortran_rejects_invalid_runtime_dimensions(tmp_path: Path) -> None:
     schema = {
         "title": "Runtime dimensions",

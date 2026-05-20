@@ -295,7 +295,7 @@ def test_generate_python_wrapper_normalizes_arrays_and_handles_status(
         "weights",
         "has_weights",
     }
-    assert kwargs["values"].shape == (3, 2)
+    assert kwargs["values"].shape == (1, 1)
     assert (kwargs["values"] == 0.1).all()
     assert kwargs["values"].flags.f_contiguous
     assert kwargs["seed"] == 0
@@ -317,9 +317,7 @@ def test_generate_python_wrapper_normalizes_arrays_and_handles_status(
 
     with pytest.raises(ValueError, match="required argument 'method'"):
         cfg.set(method=None, values=[1.0])
-    with pytest.raises(ValueError, match=r"shape \(3,\), expected \(3, 2\)"):
-        cfg.set(method="DDS", values=[1.0, 2.0, 3.0])
-    with pytest.raises(ValueError, match="expected 2"):
+    with pytest.raises(ValueError, match="expected at most 2"):
         cfg.set(method="DDS", values=[[[1.0]]])
 
 
@@ -341,7 +339,7 @@ def test_generate_python_wrapper_uses_package_relative_import(tmp_path: Path) ->
     assert "Raises\n        ------" in generated
     assert "method : str" in generated
     assert "values : array_like of float" in generated
-    assert "expected_shape=(3, 2)," in generated
+    assert "expected_shape=(3, 2)," not in generated
     assert "expected_shape=None," in generated
 
 

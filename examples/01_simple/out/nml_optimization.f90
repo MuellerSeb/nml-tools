@@ -396,11 +396,13 @@ contains
     this%method = method
     this%niterations = niterations
     this%tolerance = tolerance
-    if (size(mcmc_error_params, 1) /= size(this%mcmc_error_params, 1)) then
+    if (size(mcmc_error_params, 1) > size(this%mcmc_error_params, 1)) then
       status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "dimension 1 mismatch for 'mcmc_error_params'"
+      if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'mcmc_error_params'"
       return
     end if
+    lb_1 = lbound(this%mcmc_error_params, 1)
+    ub_1 = lb_1 + size(mcmc_error_params, 1) - 1
     if (size(mcmc_error_params, 2) > size(this%mcmc_error_params, 2)) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'mcmc_error_params'"
@@ -415,11 +417,29 @@ contains
     end if
     lb_3 = lbound(this%mcmc_error_params, 3)
     ub_3 = lb_3 + size(mcmc_error_params, 3) - 1
-    this%mcmc_error_params(:, lb_2:ub_2, lb_3:ub_3) = mcmc_error_params
+    this%mcmc_error_params(lb_1:ub_1, lb_2:ub_2, lb_3:ub_3) = mcmc_error_params
     ! override with provided values
     if (present(name)) this%name = name
-    if (present(try_methods)) this%try_methods = try_methods
-    if (present(complex_sizes)) this%complex_sizes = complex_sizes
+    if (present(try_methods)) then
+      if (size(try_methods, 1) > size(this%try_methods, 1)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'try_methods'"
+        return
+      end if
+      lb_1 = lbound(this%try_methods, 1)
+      ub_1 = lb_1 + size(try_methods, 1) - 1
+      this%try_methods(lb_1:ub_1) = try_methods
+    end if
+    if (present(complex_sizes)) then
+      if (size(complex_sizes, 1) > size(this%complex_sizes, 1)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'complex_sizes'"
+        return
+      end if
+      lb_1 = lbound(this%complex_sizes, 1)
+      ub_1 = lb_1 + size(complex_sizes, 1) - 1
+      this%complex_sizes(lb_1:ub_1) = complex_sizes
+    end if
     if (present(seed)) this%seed = seed
     if (present(dds_r)) this%dds_r = dds_r
     if (present(mcmc_opti)) this%mcmc_opti = mcmc_opti

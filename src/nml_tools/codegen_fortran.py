@@ -284,7 +284,6 @@ def _build_context(
     shape_constants: dict[str, int] = {**static_constants, **runtime_dimension_values}
     runtime_dimensions: list[dict[str, str]] = []
     runtime_dimension_locals: dict[str, str] = {}
-    runtime_dimension_defaults: dict[str, str] = {}
     runtime_default_extent_requirements: list[dict[str, Any]] = []
     runtime_allocations: list[str] = []
     runtime_deallocations: list[str] = []
@@ -318,19 +317,12 @@ def _build_context(
         if not any(existing.lower() == name.lower() for existing in helper_imports):
             helper_imports.append(name)
 
-    def _alias_runtime_default(expr: str) -> str:
-        aliased = expr
-        for const_name, default_name in runtime_dimension_defaults.items():
-            aliased = re.sub(rf"\b{re.escape(const_name)}\b", default_name, aliased)
-        return aliased
-
     def _register_runtime_dimension(dim_name: str) -> str:
         local_name = runtime_dimension_locals.get(dim_name)
         if local_name is None:
             local_name = f"dim_{dim_name}"
             runtime_dimension_locals[dim_name] = local_name
             default_name = f"{dim_name}_default"
-            runtime_dimension_defaults[dim_name] = default_name
             _add_helper_import(f"{default_name}=>{dim_name}")
             runtime_dimensions.append(
                 {
@@ -386,7 +378,7 @@ def _build_context(
                 raise ValueError(
                     f"dimension '{type_info.length_expr}' cannot be used as x-fortran-len"
                 )
-            type_spec_with_defaults = _alias_runtime_default(type_info.type_spec)
+            type_spec_with_defaults = type_info.type_spec
 
             array_default_info: tuple[Any, bool] | None = None
             if type_info.category == "array":
@@ -569,8 +561,18 @@ def _build_context(
                 if uses_ieee:
                     requires_ieee = True
 
-            flex_bounds: list[dict[str, Any]] | None = None
             partial_bounds: list[dict[str, Any]] | None = None
+            if type_info.category == "array":
+                rank = len(type_info.dimensions)
+                all_bounds = []
+                for array_dim_index in range(1, rank + 1):
+                    lb_var, ub_var = _flex_bound_vars(array_dim_index)
+                    all_bounds.append(
+                        {"dim": array_dim_index, "lb_var": lb_var, "ub_var": ub_var}
+                    )
+                    flex_bound_vars.add(lb_var)
+                    flex_bound_vars.add(ub_var)
+                partial_bounds = all_bounds
             if flex_dim > 0:
                 rank = len(type_info.dimensions)
                 element_category = type_info.element_category
@@ -579,14 +581,16 @@ def _build_context(
                 flex_dims: list[int] = list(range(rank - flex_dim + 1, rank + 1))
                 slice_missing_conditions: list[str] = []
                 slice_uses_ieee = False
-                bounds: list[dict[str, Any]] = []
+                flex_dim_bounds: list[dict[str, Any]] = []
                 lb_vars: dict[int, str] = {}
                 ub_vars: dict[int, str] = {}
                 for flex_dim_index in flex_dims:
                     lb_var, ub_var = _flex_bound_vars(flex_dim_index)
                     lb_vars[flex_dim_index] = lb_var
                     ub_vars[flex_dim_index] = ub_var
-                    bounds.append({"dim": flex_dim_index, "lb_var": lb_var, "ub_var": ub_var})
+                    flex_dim_bounds.append(
+                        {"dim": flex_dim_index, "lb_var": lb_var, "ub_var": ub_var}
+                    )
                     flex_bound_vars.add(lb_var)
                     flex_bound_vars.add(ub_var)
                     slice_ref = _slice_ref(name, rank, flex_dim_index, "idx")
@@ -606,7 +610,6 @@ def _build_context(
                     len_ref=f"this%{name}",
                 )
                 prefix_any_missing_condition = f"any({prefix_missing_expr})"
-                flex_bounds = bounds
                 flex_arrays.append(
                     {
                         "name": name,
@@ -615,7 +618,7 @@ def _build_context(
                         "flex_dims": flex_dims,
                         "required": is_required,
                         "runtime_array": dynamic_array,
-                        "bounds": bounds,
+                        "bounds": flex_dim_bounds,
                         "slice_missing_conditions": slice_missing_conditions,
                         "prefix_any_missing_condition": prefix_any_missing_condition,
                     }
@@ -623,15 +626,6 @@ def _build_context(
                 uses_partly_set = True
                 if slice_uses_ieee or uses_ieee_prefix:
                     requires_ieee = True
-            elif type_info.category == "array" and has_default:
-                rank = len(type_info.dimensions)
-                bounds = []
-                for array_dim_index in range(1, rank + 1):
-                    lb_var, ub_var = _flex_bound_vars(array_dim_index)
-                    bounds.append({"dim": array_dim_index, "lb_var": lb_var, "ub_var": ub_var})
-                    flex_bound_vars.add(lb_var)
-                    flex_bound_vars.add(ub_var)
-                partial_bounds = bounds
 
             default_assignment: str | None = None
             set_default_assignment: str | None = None
@@ -871,11 +865,8 @@ def _build_context(
                     min_literal = _format_scalar_default(
                         min_value, bounds_type_info.kind, bounds_category
                     )
-                    bounds_type_spec_with_defaults = _alias_runtime_default(
-                        bounds_type_info.type_spec
-                    )
                     bounds_parameters.append(
-                        f"{bounds_type_spec_with_defaults}, parameter, public :: "
+                        f"{bounds_type_info.type_spec}, parameter, public :: "
                         f"{min_name} = {min_literal}"
                     )
                 if max_value is not None:
@@ -883,11 +874,8 @@ def _build_context(
                     max_literal = _format_scalar_default(
                         max_value, bounds_type_info.kind, bounds_category
                     )
-                    bounds_type_spec_with_defaults = _alias_runtime_default(
-                        bounds_type_info.type_spec
-                    )
                     bounds_parameters.append(
-                        f"{bounds_type_spec_with_defaults}, parameter, public :: "
+                        f"{bounds_type_info.type_spec}, parameter, public :: "
                         f"{max_name} = {max_literal}"
                     )
                 _, missing_condition, uses_ieee = _sentinel_expressions(
@@ -935,18 +923,9 @@ def _build_context(
 
             is_array = type_info.category == "array"
             if is_required:
-                if is_array and flex_dim > 0:
-                    set_required_assignments.append(
-                        _render_flex_set_block(
-                            name,
-                            len(type_info.dimensions),
-                            flex_dim,
-                            flex_bounds or [],
-                        )
-                    )
-                elif is_array and has_default:
-                    # Preserve partial-update semantics for arrays with defaults,
-                    # including runtime-sized arrays driven by constants.
+                if is_array:
+                    # Match namelist-buffer semantics: set assigns the provided
+                    # leading subsection and leaves completeness checks to is_valid.
                     set_required_assignments.append(
                         _render_partial_set_block(
                             name,
@@ -954,44 +933,17 @@ def _build_context(
                             partial_bounds or [],
                         )
                     )
-                elif is_array and dynamic_array:
-                    set_required_assignments.append(
-                        _render_exact_set_block(
-                            name,
-                            len(type_info.dimensions),
-                        )
-                    )
                 else:
                     set_required_assignments.append(f"this%{name} = {name}")
 
             if not is_required:
-                if is_array and flex_dim > 0:
-                    block = _render_flex_set_block(
-                        name,
-                        len(type_info.dimensions),
-                        flex_dim,
-                        flex_bounds or [],
-                    )
-                    indented_block = "\n".join(f"  {line}" for line in block.splitlines())
-                    set_present_assignment = (
-                        f"if (present({name})) then\n{indented_block}\nend if"
-                    )
-                elif is_array and has_default:
-                    # Preserve partial-update semantics for arrays with defaults,
-                    # including runtime-sized arrays driven by constants.
+                if is_array:
+                    # Match namelist-buffer semantics: set assigns the provided
+                    # leading subsection and leaves completeness checks to is_valid.
                     block = _render_partial_set_block(
                         name,
                         len(type_info.dimensions),
                         partial_bounds or [],
-                    )
-                    indented_block = "\n".join(f"  {line}" for line in block.splitlines())
-                    set_present_assignment = (
-                        f"if (present({name})) then\n{indented_block}\nend if"
-                    )
-                elif is_array and dynamic_array:
-                    block = _render_exact_set_block(
-                        name,
-                        len(type_info.dimensions),
                     )
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
@@ -1838,59 +1790,6 @@ def _slice_ref_bounds(
         else:
             dims.append(":")
     return f"this%{name}({', '.join(dims)})"
-
-
-def _render_flex_set_block(
-    name: str,
-    rank: int,
-    flex_dim_count: int,
-    bounds: list[dict[str, Any]],
-) -> str:
-    flex_dims = list(range(rank - flex_dim_count + 1, rank + 1))
-    lb_vars = {entry["dim"]: entry["lb_var"] for entry in bounds}
-    ub_vars = {entry["dim"]: entry["ub_var"] for entry in bounds}
-    lines: list[str] = []
-    for dim in range(1, rank - flex_dim_count + 1):
-        lines.append(f"if (size({name}, {dim}) /= size(this%{name}, {dim})) then")
-        lines.append("  status = NML_ERR_INVALID_INDEX")
-        lines.append(
-            f"  if (present(errmsg)) errmsg = \"dimension {dim} mismatch for '{name}'\""
-        )
-        lines.append("  return")
-        lines.append("end if")
-    for entry in bounds:
-        dim = entry["dim"]
-        lb_var = entry["lb_var"]
-        ub_var = entry["ub_var"]
-        lines.append(f"if (size({name}, {dim}) > size(this%{name}, {dim})) then")
-        lines.append("  status = NML_ERR_INVALID_INDEX")
-        lines.append(
-            f"  if (present(errmsg)) errmsg = \"dimension {dim} exceeds bounds for '{name}'\""
-        )
-        lines.append("  return")
-        lines.append("end if")
-        lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
-        lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
-    target_ref = _slice_ref_bounds(name, rank, flex_dims, lb_vars, ub_vars)
-    lines.append(f"{target_ref} = {name}")
-    return "\n".join(lines)
-
-
-def _render_exact_set_block(
-    name: str,
-    rank: int,
-) -> str:
-    lines: list[str] = []
-    for dim in range(1, rank + 1):
-        lines.append(f"if (size({name}, {dim}) /= size(this%{name}, {dim})) then")
-        lines.append("  status = NML_ERR_INVALID_INDEX")
-        lines.append(
-            f"  if (present(errmsg)) errmsg = \"dimension {dim} mismatch for '{name}'\""
-        )
-        lines.append("  return")
-        lines.append("end if")
-    lines.append(f"this%{name} = {name}")
-    return "\n".join(lines)
 
 
 def _render_partial_set_block(
