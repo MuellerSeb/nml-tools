@@ -86,31 +86,31 @@ contains
       errmsg=errmsg)
   end subroutine config_set_wrapper
 
-  !> \brief Set runtime constants on the handled config instance
-  subroutine config_set_constants_wrapper(handle, &
-    str_len, &
-    has_str_len, &
+  !> \brief Set runtime dimensions on the handled config instance
+  subroutine config_set_dims_wrapper(handle, &
+    n_weights, &
+    has_n_weights, &
     status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
-    integer, intent(in) :: str_len !< runtime override for str_len
-    logical, intent(in) :: has_str_len !< whether str_len was provided
+    integer, intent(in) :: n_weights !< runtime dimension override for n_weights
+    logical, intent(in) :: has_n_weights !< whether n_weights was provided
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_config_t), pointer :: this
-    integer, allocatable :: maybe_str_len
+    integer, allocatable :: maybe_n_weights
 
     call nml_config_resolve_handle(handle, this, status, errmsg)
     if (.not. associated(this)) then
       return
     end if
-    if (has_str_len) then
-      allocate(maybe_str_len)
-      maybe_str_len = str_len
+    if (has_n_weights) then
+      allocate(maybe_n_weights)
+      maybe_n_weights = n_weights
     end if
-    status = this%set_constants( &
-      str_len=maybe_str_len, &
+    status = this%set_dims( &
+      n_weights=maybe_n_weights, &
       errmsg=errmsg)
-  end subroutine config_set_constants_wrapper
+  end subroutine config_set_dims_wrapper
 
 
   !> \brief Check whether a config field is set

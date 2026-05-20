@@ -46,21 +46,22 @@ def test_required_python_arguments_reject_none() -> None:
         cfg.set(iterations=None, tolerance=1.0)
 
 
-def test_runtime_name_length_constant_is_applied() -> None:
+def test_runtime_weight_dimension_is_applied() -> None:
     example.reset_config()
     cfg = example.get_config()
 
-    cfg.set_constants(str_len=16)
-    cfg.set(iterations=3, tolerance=1.0e-3, name="alpha")
+    cfg.set_dims(n_weights=2)
+    cfg.set(iterations=3, tolerance=1.0e-3, weights=[4.0, 5.0])
     cfg.is_valid()
+    assert example.get_weights(2) == pytest.approx((4.0, 5.0))
 
 
-def test_runtime_name_length_constant_rejects_non_positive_values() -> None:
+def test_runtime_weight_dimension_rejects_non_positive_values() -> None:
     example.reset_config()
     cfg = example.get_config()
 
     with pytest.raises(example.NmlError, match="must be positive"):
-        cfg.set_constants(str_len=0)
+        cfg.set_dims(n_weights=0)
 
 
 def test_invalidate_clears_python_handle() -> None:

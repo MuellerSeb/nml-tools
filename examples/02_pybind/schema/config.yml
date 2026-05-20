@@ -33,9 +33,9 @@ properties:
     default: false
   weights:
     title: Weights
-    description: Three weights used to demonstrate array normalization from Python.
+    description: Weights used to demonstrate array normalization from Python.
     type: array
-    x-fortran-shape: [3]
+    x-fortran-shape: [n_weights]
     items:
       type: number
       x-fortran-kind: dp

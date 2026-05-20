@@ -34,6 +34,10 @@ buffer = 512
 value = 128
 doc = "String buffer length for the pybind example."
 
+[tool.nml-tools.dimensions.n_weights]
+value = 3
+doc = "Default number of weights."
+
 [tool.nml-tools.kinds]
 module = "iso_fortran_env"
 real = ["real64"]

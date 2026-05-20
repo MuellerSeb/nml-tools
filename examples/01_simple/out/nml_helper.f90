@@ -40,9 +40,9 @@ module nml_helper
   !> \brief Status code: zero opaque handle
   integer, parameter, public :: NML_ERR_INVALID_HANDLE = 22
 
-  !> \brief Shared constants for namelist dimensions
-  integer, parameter, public :: max_iter = 4 !< Maximum number of iterations.
+  !> \brief Shared constants for generated namelist modules
   integer, parameter, public :: buf = 256 !< Buffer length for character strings.
+  integer, parameter, public :: max_iter = 4 !< Maximum number of iterations.
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations

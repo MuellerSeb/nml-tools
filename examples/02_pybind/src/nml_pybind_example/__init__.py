@@ -38,11 +38,11 @@ def get_tolerance() -> float:
     return float(_f2py_config.f2py_config_store.config_get_tolerance_wrapper())
 
 
-def get_weights() -> tuple[float, float, float]:
+def get_weights(count: int = 3) -> tuple[float, ...]:
     """Return the configured weights from Fortran."""
     return tuple(
         float(_f2py_config.f2py_config_store.config_get_weight_wrapper(idx))
-        for idx in range(1, 4)
+        for idx in range(1, count + 1)
     )
 
 

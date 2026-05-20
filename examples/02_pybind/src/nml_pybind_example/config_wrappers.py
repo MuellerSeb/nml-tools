@@ -145,20 +145,20 @@ class Config:
         )
         _check_status(result)
 
-    def set_constants(
+    def set_dims(
         self,
-        str_len: Any = None,
+        n_weights: Any = None,
     ) -> None:
-        """Set runtime constants for the handled config instance.
+        """Set runtime dimensions for the handled config instance.
 
-        Omitted or None values reset the corresponding constant to the configured
-        helper-module default. Applying constants reinitializes the handled
-        Fortran object and clears previously configured namelist values.
+        Omitted or None values reset the corresponding dimension to the configured
+        helper-module default. Applying dimensions deallocates affected arrays
+        and clears previously configured namelist values.
 
         Parameters
         ----------
-        str_len : int, optional
-            Runtime override for str_len.
+        n_weights : int, optional
+            Runtime dimension override for n_weights.
 
         Raises
         ------
@@ -166,12 +166,12 @@ class Config:
             If the Fortran setter returns a non-OK status.
         """
         kwargs: dict[str, Any] = {}
-        if str_len is not None:
-            kwargs["str_len"] = str_len
+        if n_weights is not None:
+            kwargs["n_weights"] = n_weights
         else:
-            kwargs["str_len"] = 0
-        kwargs["has_str_len"] = str_len is not None
-        result = self._f2py.config_set_constants_wrapper(
+            kwargs["n_weights"] = 0
+        kwargs["has_n_weights"] = n_weights is not None
+        result = self._f2py.config_set_dims_wrapper(
             self.handle,
             **kwargs,
         )

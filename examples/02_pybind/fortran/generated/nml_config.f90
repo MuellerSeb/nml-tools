@@ -27,7 +27,8 @@ module nml_config
     idx_check, &
     to_lower, &
     NML_ERR_INVALID_HANDLE, &
-    str_len_default=>str_len
+    str_len, &
+    n_weights_default=>n_weights
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -38,7 +39,7 @@ module nml_config
   implicit none
 
   ! default values
-  character(len=str_len_default), parameter, public :: name_default = "pybind-example"
+  character(len=str_len), parameter, public :: name_default = "pybind-example"
   logical, parameter, public :: enabled_default = .false.
   real(dp), parameter, public :: weights_default = 1.0_dp
 
@@ -55,15 +56,15 @@ module nml_config
   !!
   type, public :: nml_config_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: constant_str_len = str_len_default !< runtime override for str_len
-    character(len=:), allocatable :: name !< Config name
+    integer :: dim_n_weights = n_weights_default !< runtime dimension for n_weights
+    character(len=str_len) :: name !< Config name
     integer(i4) :: iterations !< Iterations
     real(dp) :: tolerance !< Tolerance
     logical :: enabled !< Enabled
-    real(dp), dimension(3) :: weights !< Weights
+    real(dp), allocatable, dimension(:) :: weights !< Weights
   contains
     procedure :: init => nml_config_init
-    procedure :: set_constants => nml_config_set_constants
+    procedure :: set_dims => nml_config_set_dims
     procedure :: from_file => nml_config_from_file
     procedure :: set => nml_config_set
     procedure :: is_set => nml_config_is_set
@@ -138,55 +139,45 @@ contains
     this%is_configured = .false.
 
     ! allocate runtime-sized fields
-    if (allocated(this%name)) deallocate(this%name)
-    allocate(character(len=this%constant_str_len) :: this%name)
+    if (allocated(this%weights)) deallocate(this%weights)
+    allocate(this%weights(this%dim_n_weights))
 
     ! sentinel values for required/optional parameters
     this%iterations = -huge(this%iterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
     ! default values
-    block
-      integer :: nml_len
-      nml_len = min(len(this%name), len(name_default))
-      this%name = repeat(" ", len(this%name))
-      if (nml_len > 0) then
-        this%name(1:nml_len) = name_default(1:nml_len)
-      end if
-    end block
+    this%name = name_default
     this%enabled = enabled_default ! bool values always need a default
     this%weights = weights_default
   end function nml_config_init
 
-  !> \brief Reset runtime constants for config
-  integer function nml_config_set_constants(this, &
-    str_len, &
+  !> \brief Reset runtime dimensions for config
+  integer function nml_config_set_dims(this, &
+    n_weights, &
     errmsg) result(status)
     class(nml_config_t), intent(inout) :: this !< namelist instance
-    integer, intent(in), optional :: str_len !< runtime override for str_len
-    integer :: candidate_str_len
+    integer, intent(in), optional :: n_weights !< runtime dimension override for n_weights
+    integer :: candidate_n_weights
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (present(str_len)) then
-      candidate_str_len = str_len
+    if (present(n_weights)) then
+      candidate_n_weights = n_weights
     else
-      candidate_str_len = str_len_default
+      candidate_n_weights = n_weights_default
     end if
-    if (candidate_str_len <= 0) then
+    if (candidate_n_weights <= 0) then
       status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "constant 'str_len' must be positive"
+      if (present(errmsg)) errmsg = "dimension 'n_weights' must be positive"
       return
     end if
-    if (candidate_str_len < 14) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "constant 'str_len' must be >= 14"
-      return
-    end if
-    this%constant_str_len = candidate_str_len
+    this%dim_n_weights = candidate_n_weights
 
-    status = this%init(errmsg=errmsg)
-  end function nml_config_set_constants
+    ! deallocate runtime-sized fields; init/set/from_file allocate them again
+    if (allocated(this%weights)) deallocate(this%weights)
+    this%is_configured = .false.
+  end function nml_config_set_dims
 
 
   !> \brief Read config namelist from file
@@ -195,11 +186,11 @@ contains
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     ! namelist variables
-    character(len=this%constant_str_len) :: name
+    character(len=str_len) :: name
     integer(i4) :: iterations
     real(dp) :: tolerance
     logical :: enabled
-    real(dp), dimension(3) :: weights
+    real(dp), allocatable, dimension(:) :: weights
     ! locals
     type(nml_file_t) :: nml
     integer :: iostat
@@ -215,6 +206,9 @@ contains
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
+    ! allocate local namelist variables matching runtime-sized fields
+    if (allocated(weights)) deallocate(weights)
+    allocate(weights(this%dim_n_weights))
     name = this%name
     iterations = this%iterations
     tolerance = this%tolerance
@@ -245,14 +239,7 @@ contains
     end if
 
     ! assign values
-    block
-      integer :: nml_len
-      nml_len = min(len(this%name), len(name))
-      this%name = repeat(" ", len(this%name))
-      if (nml_len > 0) then
-        this%name(1:nml_len) = name(1:nml_len)
-      end if
-    end block
+    this%name = name
     this%iterations = iterations
     this%tolerance = tolerance
     this%enabled = enabled
@@ -290,16 +277,7 @@ contains
     this%iterations = iterations
     this%tolerance = tolerance
     ! override with provided values
-    if (present(name)) then
-      block
-        integer :: nml_len
-        nml_len = min(len(this%name), len(name))
-        this%name = repeat(" ", len(this%name))
-        if (nml_len > 0) then
-          this%name(1:nml_len) = name(1:nml_len)
-        end if
-      end block
-    end if
+    if (present(name)) this%name = name
     if (present(enabled)) this%enabled = enabled
     if (present(weights)) then
       if (size(weights, 1) > size(this%weights, 1)) then
@@ -354,6 +332,10 @@ contains
         return
       end if
     case ("weights")
+      if (.not. allocated(this%weights)) then
+        status = NML_ERR_NOT_SET
+        return
+      end if
       if (present(idx)) then
         status = idx_check(idx, lbound(this%weights), ubound(this%weights), &
           "weights", errmsg)

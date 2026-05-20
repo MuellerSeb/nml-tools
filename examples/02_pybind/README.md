@@ -60,12 +60,12 @@ from nml_pybind_example import (
 )
 
 cfg = get_config()
-cfg.set_constants(str_len=32)
+cfg.set_dims(n_weights=5)
 cfg.set(iterations=20, tolerance=1.0e-4, weights=1.0)
 cfg.is_valid()
 
 print(get_iterations())
-print(get_weights())
+print(get_weights(5))
 ```
 
 Scalar array values are normalized by the generated Python shim before calling f2py.
@@ -82,5 +82,8 @@ arguments in normal Fortran. This uses the Fortran 2008 behavior where an
 unallocated allocatable actual argument associated with an optional
 nonallocatable dummy argument is considered not present.
 
-Runtime constants are configured through the generated Python wrapper method
-`cfg.set_constants(...)`, for example `cfg.set_constants(str_len=32)`.
+Runtime array dimensions are configured through the generated Python wrapper
+method `cfg.set_dims(...)`, for example `cfg.set_dims(n_weights=5)`. Omitted
+or `None` values reset a dimension to the default from `[tool.nml-tools.dimensions]`.
+Changing dimensions clears previously configured values; call `set(...)` or
+`from_file(...)` afterwards.

@@ -78,10 +78,14 @@ name:
 
 - Location: array properties.
 - Type: integer, identifier, or list of integers/identifiers.
-- Meaning: Fortran array dimensions; identifiers are resolved via `[constants]`.
+- Meaning: Fortran array dimensions; identifiers are resolved via `[constants]`
+  or `[dimensions]`.
 - Required; deferred-size dimensions are not supported.
 - Nested arrays are not supported. Use a single array with a shape list for
   multi-dimensional arrays.
+- Shape identifiers from `[constants]` produce fixed-size arrays.
+- Shape identifiers from `[dimensions]` produce allocatable arrays whose
+  dimensions can be changed at runtime with the generated `set_dims()` method.
 
 Example:
 
@@ -263,15 +267,40 @@ Controls the generated helper module.
 
 ### [constants]
 
-Named constants used for dimensions and string lengths.
+Named static constants used for fixed dimensions, string lengths, and generated
+helper parameters.
 
 - Each entry is a table with `value` (int/float) and optional `doc`.
 - Values must be plain numbers (no kind suffixes).
+- String lengths from `x-fortran-len` may use integer constants only. Runtime
+  dimensions are intentionally not supported for string lengths.
 
 Example:
 
 ```toml
-[constants.max_iter]
+[constants.buf]
+value = 128
+doc = "String buffer length."
+```
+
+### [dimensions]
+
+Named runtime array dimension defaults.
+
+- Each entry is a table with positive integer `value` and optional `doc`.
+- Names must be unique across `[constants]` and `[dimensions]`.
+- Entries may be used in `x-fortran-shape`, but not in `x-fortran-len`.
+- Arrays whose shape contains a `[dimensions]` name are generated as
+  allocatable runtime-sized arrays.
+- Generated Fortran and Python wrappers expose `set_dims(...)`. Omitted or
+  `None` Python values reset the dimension to its configured default.
+- Calling `set_dims(...)` deallocates affected arrays and clears configured
+  values. Call `set(...)` or `from_file(...)` afterwards.
+
+Example:
+
+```toml
+[dimensions.max_iter]
 value = 4
 doc = "Maximum number of iterations."
 ```
@@ -455,7 +484,8 @@ nml-tools validate --schema demo.yml --input demo.nml
 nml-tools validate --schema a.yml --schema b.yml combined.nml
 ```
 
-Constants are resolved from `[constants]` in the config, or provided ad hoc:
+Constants are resolved from `[constants]` and `[dimensions]` in the config, or
+provided ad hoc:
 
 ```bash
 nml-tools validate --schema demo.yml --constants MAX_ITER=10 input.nml
