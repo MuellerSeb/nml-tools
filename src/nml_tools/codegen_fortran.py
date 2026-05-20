@@ -1087,7 +1087,7 @@ def _build_context(
             "default_name": entry["default_name"],
             "local_name": entry["local_name"],
             "arg_name": entry["name"],
-            "candidate_name": f"candidate_{entry['name']}",
+            "candidate_name": f"candidate_{entry['name']}_",
             "min_required": 1,
         }
         for entry in runtime_dimensions

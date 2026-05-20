@@ -345,7 +345,7 @@ def build_f2py_namelist_spec(
     for field in fields:
         type_info = type_infos[field.name]
         rank = len(type_info.dimensions) if type_info.category == "array" else 0
-        has_flag = None if field.required else f"has_{field.name}"
+        has_flag = None if field.required else f"has_{field.name}_"
         spec = F2pyArgumentSpec(
             name=field.name,
             title=_one_line(field.title),
@@ -385,7 +385,7 @@ def build_f2py_namelist_spec(
         const_name = entry["name"]
         arg_name = entry["arg_name"]
         python_name = _python_parameter_name(const_name)
-        has_flag = f"has_{const_name}"
+        has_flag = f"has_{const_name}_"
         set_dims_args.append(
             F2pyArgumentSpec(
                 name=const_name,
@@ -607,7 +607,7 @@ def _optional_bridge_declaration(name: str, type_info: FieldTypeInfo) -> str:
 
 
 def _optional_bridge_assignment(name: str, type_info: FieldTypeInfo) -> str:
-    has_flag = f"has_{name}"
+    has_flag = f"has_{name}_"
     maybe_name = f"maybe_{name}"
     if type_info.category == "array":
         dims = ", ".join(_array_dimension_argument_names(name, len(type_info.dimensions)))

@@ -101,14 +101,14 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     assert "integer, intent(in) :: values_n2 !< extent for values" in generated
     assert "real(dp), dimension(values_n1, values_n2), intent(in) :: values" in generated
     assert "integer(i4), intent(in) :: seed !< seed (optional)" in generated
-    assert "logical, intent(in) :: has_seed !< whether seed was provided" in generated
+    assert "logical, intent(in) :: has_seed_ !< whether seed was provided" in generated
     assert "integer, intent(in) :: weights_n1 !< extent for weights" in generated
     assert "integer(i4), dimension(weights_n1), intent(in) :: weights" in generated
-    assert "logical, intent(in) :: has_weights !< whether weights was provided" in generated
+    assert "logical, intent(in) :: has_weights_ !< whether weights was provided" in generated
     assert "integer(i4), allocatable :: maybe_seed" in generated
     assert "integer(i4), dimension(:), allocatable :: maybe_weights" in generated
-    assert "if (has_seed) then" in generated
-    assert "if (has_weights) then" in generated
+    assert "if (has_seed_) then" in generated
+    assert "if (has_weights_) then" in generated
     assert "status = this%set(" in generated
     assert "seed=maybe_seed" in generated
     assert "weights=maybe_weights" in generated
@@ -183,9 +183,9 @@ def test_generate_f2py_wrappers_exposes_set_dims_wrapper(tmp_path: Path) -> None
         "integer, intent(in) :: n_weights !< runtime dimension override for n_weights"
         in generated
     )
-    assert "logical, intent(in) :: has_n_weights !< whether n_weights was provided" in generated
+    assert "logical, intent(in) :: has_n_weights_ !< whether n_weights was provided" in generated
     assert "integer, allocatable :: maybe_n_weights" in generated
-    assert "if (has_n_weights) then" in generated
+    assert "if (has_n_weights_) then" in generated
     assert "status = this%set_dims(" in generated
     assert "n_weights=maybe_n_weights" in generated
 
@@ -291,18 +291,18 @@ def test_generate_python_wrapper_normalizes_arrays_and_handles_status(
         "method",
         "values",
         "seed",
-        "has_seed",
+        "has_seed_",
         "weights",
-        "has_weights",
+        "has_weights_",
     }
     assert kwargs["values"].shape == (1, 1)
     assert (kwargs["values"] == 0.1).all()
     assert kwargs["values"].flags.f_contiguous
     assert kwargs["seed"] == 0
-    assert kwargs["has_seed"] is False
+    assert kwargs["has_seed_"] is False
     assert kwargs["weights"].shape == (1,)
     assert kwargs["weights"].flags.f_contiguous
-    assert kwargs["has_weights"] is False
+    assert kwargs["has_weights_"] is False
     assert cfg.is_set("seed") is False
     assert calls[-1][1]["idx"].shape == (1,)
     assert calls[-1][1]["has_idx"] is False
@@ -383,9 +383,9 @@ def test_generate_python_wrapper_exposes_set_dims(tmp_path: Path) -> None:
         monkeypatch.undo()
 
     assert calls[0]["n_weights"] == 4
-    assert calls[0]["has_n_weights"] is True
+    assert calls[0]["has_n_weights_"] is True
     assert calls[1]["n_weights"] == 0
-    assert calls[1]["has_n_weights"] is False
+    assert calls[1]["has_n_weights_"] is False
 
 
 def test_generate_python_wrapper_set_dims_keyword_dimension_name(tmp_path: Path) -> None:
@@ -415,7 +415,7 @@ def test_generate_python_wrapper_set_dims_keyword_dimension_name(tmp_path: Path)
     assert "def set_dims(" in generated
     assert "class_: Any = None" in generated
     assert 'kwargs["class"] = class_' in generated
-    assert 'kwargs["has_class"] = class_ is not None' in generated
+    assert 'kwargs["has_class_"] = class_ is not None' in generated
 
 
 def test_generate_python_wrapper_supports_doxygen_docstrings(tmp_path: Path) -> None:

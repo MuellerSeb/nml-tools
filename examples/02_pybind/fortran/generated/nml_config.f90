@@ -157,22 +157,22 @@ contains
     errmsg) result(status)
     class(nml_config_t), intent(inout) :: this !< namelist instance
     integer, intent(in), optional :: n_weights !< runtime dimension override for n_weights
-    integer :: candidate_n_weights
+    integer :: candidate_n_weights_
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(n_weights)) then
-      candidate_n_weights = n_weights
+      candidate_n_weights_ = n_weights
     else
-      candidate_n_weights = n_weights_default_
+      candidate_n_weights_ = n_weights_default_
     end if
-    if (candidate_n_weights <= 0) then
+    if (candidate_n_weights_ <= 0) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'n_weights' must be positive"
       return
     end if
-    this%dim_n_weights_ = candidate_n_weights
+    this%dim_n_weights_ = candidate_n_weights_
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%weights)) deallocate(this%weights)

@@ -99,27 +99,27 @@ contains
     errmsg) result(status)
     class(nml_optimization_t), intent(inout) :: this !< namelist instance
     integer, intent(in), optional :: max_iter !< runtime dimension override for max_iter
-    integer :: candidate_max_iter
+    integer :: candidate_max_iter_
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(max_iter)) then
-      candidate_max_iter = max_iter
+      candidate_max_iter_ = max_iter
     else
-      candidate_max_iter = max_iter_default_
+      candidate_max_iter_ = max_iter_default_
     end if
-    if (candidate_max_iter <= 0) then
+    if (candidate_max_iter_ <= 0) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'max_iter' must be positive"
       return
     end if
-    if ((3 * 2 * candidate_max_iter) < 4) then
+    if ((3 * 2 * candidate_max_iter_) < 4) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "shape constants for 'mcmc_error_params' must allow at least 4 default values"
       return
     end if
-    this%dim_max_iter_ = candidate_max_iter
+    this%dim_max_iter_ = candidate_max_iter_
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
