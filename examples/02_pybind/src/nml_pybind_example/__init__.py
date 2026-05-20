@@ -48,9 +48,12 @@ def get_weights(count: int | None = None) -> tuple[float, ...]:
     """Return configured weights from Fortran.
 
     When *count* is omitted, all currently allocated weights are returned.
+    If no weights are currently allocated, this returns an empty tuple.
     """
     available = get_weight_count()
     if count is None:
+        if available == 0:
+            return ()
         count = available
     if isinstance(count, bool) or not isinstance(count, int):
         raise TypeError("count must be an integer")

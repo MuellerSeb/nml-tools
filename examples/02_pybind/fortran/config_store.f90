@@ -85,10 +85,24 @@ contains
 
   !> \brief Print the persistent config instance
   subroutine print_config()
+    integer :: i
+
     write(*, '(a, i0)') 'iterations = ', config%iterations
     write(*, '(a, es12.5)') 'tolerance = ', config%tolerance
     write(*, '(a, l1)') 'enabled = ', config%enabled
-    write(*, '(a, 3(es12.5, 1x))') 'weights = ', config%weights
+    if (.not. allocated(config%weights)) then
+      write(*, '(a)') 'weights = <unallocated>'
+      return
+    end if
+    if (size(config%weights) == 0) then
+      write(*, '(a)') 'weights = <empty>'
+      return
+    end if
+    write(*, '(a)', advance='no') 'weights = '
+    do i = 1, size(config%weights)
+      write(*, '(es12.5, 1x)', advance='no') config%weights(i)
+    end do
+    write(*, *)
   end subroutine print_config
 
 end module config_store
