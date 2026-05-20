@@ -632,7 +632,6 @@ def _collect_generated_outputs(
     ) = _load_documentation_settings(config)
     constants, constant_specs = _load_constants(config)
     dimensions, dimension_specs = _load_dimensions(config, constants)
-    shape_constants: dict[str, int | float] = {**constants, **dimensions}
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
     outputs: list[GeneratedOutput] = []
@@ -747,7 +746,8 @@ def _collect_generated_outputs(
                         schemas,
                         doc_mode=template_entry["doc_mode"],
                         value_mode=template_entry["value_mode"],
-                        constants=shape_constants,
+                        constants=constants,
+                        dimensions=dimensions,
                         kind_map=kind_map,
                         kind_allowlist=kind_allowlist,
                         values=template_entry["values"],
@@ -1272,7 +1272,6 @@ def gen_template(config_path: Path | None) -> None:
     base_dir = config_path.parent
     constants, _ = _load_constants(config)
     dimensions, _ = _load_dimensions(config, constants)
-    shape_constants: dict[str, int | float] = {**constants, **dimensions}
     _, kind_map, kind_allowlist = _load_kind_settings(config)
     templates = _iter_templates(config, base_dir)
     if not templates:
@@ -1290,7 +1289,8 @@ def gen_template(config_path: Path | None) -> None:
                 entry["output"],
                 doc_mode=entry["doc_mode"],
                 value_mode=entry["value_mode"],
-                constants=shape_constants,
+                constants=constants,
+                dimensions=dimensions,
                 kind_map=kind_map,
                 kind_allowlist=kind_allowlist,
                 values=entry["values"],

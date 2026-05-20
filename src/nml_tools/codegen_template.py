@@ -25,6 +25,7 @@ def generate_template(
     doc_mode: str = "plain",
     value_mode: str = "empty",
     constants: dict[str, int | float] | None = None,
+    dimensions: dict[str, int] | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: set[str] | None = None,
     values: dict[str, dict[str, Any]] | None = None,
@@ -35,6 +36,7 @@ def generate_template(
         doc_mode=doc_mode,
         value_mode=value_mode,
         constants=constants,
+        dimensions=dimensions,
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         values=values,
@@ -50,6 +52,7 @@ def render_template(
     doc_mode: str = "plain",
     value_mode: str = "empty",
     constants: dict[str, int | float] | None = None,
+    dimensions: dict[str, int] | None = None,
     kind_map: dict[str, str] | None = None,
     kind_allowlist: set[str] | None = None,
     values: dict[str, dict[str, Any]] | None = None,
@@ -69,6 +72,7 @@ def render_template(
         doc_mode=doc_mode,
         value_mode=value_mode,
         constants=constants,
+        dimensions=dimensions,
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
         values=values,
@@ -81,6 +85,7 @@ def _render_template(
     doc_mode: str,
     value_mode: str,
     constants: dict[str, int | float] | None,
+    dimensions: dict[str, int] | None,
     kind_map: dict[str, str] | None,
     kind_allowlist: set[str] | None,
     values: dict[str, dict[str, Any]] | None,
@@ -90,6 +95,10 @@ def _render_template(
     values_map = values or {}
     if not isinstance(values_map, dict):
         raise ValueError("template values must be a table of namelist tables")
+    shape_constants: dict[str, int | float] = {
+        **(constants or {}),
+        **(dimensions or {}),
+    }
 
     schema_by_name: dict[str, dict[str, Any]] = {}
     for schema in schemas_list:
@@ -145,7 +154,7 @@ def _render_template(
                 if not isinstance(prop, dict):
                     raise ValueError(f"property '{name}' must be an object")
                 type_info = _field_type_info(prop, constants)
-                _collect_dimension_constants(type_info.dimensions, constants)
+                _collect_dimension_constants(type_info.dimensions, shape_constants)
                 _validate_kind_allowlist(type_info, kind_map, kind_allowlist)
 
                 if type_info.category == "array":
@@ -170,7 +179,7 @@ def _render_template(
                     type_info,
                     value_mode=value_mode,
                     override=override_values.get(name, _MISSING),
-                    constants=constants,
+                    constants=shape_constants,
                 )
                 for entry_name, value_text in entries:
                     if value_text is None:

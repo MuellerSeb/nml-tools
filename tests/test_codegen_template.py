@@ -18,6 +18,58 @@ def _import_render_template():
     return module.render_template
 
 
+def test_render_template_accepts_runtime_dimensions_for_shapes() -> None:
+    schema = {
+        "title": "Runtime dimension template",
+        "x-fortran-namelist": "runtime_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "default": 7},
+                "x-fortran-shape": "n_values",
+            }
+        },
+    }
+
+    render_template = _import_render_template()
+    rendered = render_template(
+        [schema],
+        doc_mode="plain",
+        value_mode="filled",
+        dimensions={"n_values": 3},
+    )
+
+    assert "values(:) = 7" in rendered
+
+
+def test_render_template_rejects_runtime_dimensions_for_string_lengths() -> None:
+    schema = {
+        "title": "Runtime dimension length template",
+        "x-fortran-namelist": "runtime_nml",
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "x-fortran-len": "n_values",
+            }
+        },
+    }
+
+    render_template = _import_render_template()
+    try:
+        render_template(
+            [schema],
+            doc_mode="plain",
+            value_mode="filled",
+            dimensions={"n_values": 3},
+        )
+    except ValueError as exc:
+        assert "string length constant 'n_values' is not defined" in str(exc)
+    else:
+        raise AssertionError("expected runtime dimension in string length to fail")
+
+
 def test_render_template_minimal_filled_overrides_default() -> None:
     schema = {
         "title": "Minimal filled overrides",
