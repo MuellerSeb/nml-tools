@@ -218,7 +218,7 @@ contains
     ! sentinel values for required/optional parameters
     this%name = achar(0) ! sentinel for optional string
     this%method = achar(0) ! NULL string as sentinel for required string
-    this%try_methods(:) = achar(0) ! sentinel for optional string array
+    this%try_methods = achar(0) ! sentinel for optional string array
     this%complex_sizes = -huge(this%complex_sizes) ! sentinel for optional integer array
     this%niterations = -huge(this%niterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real

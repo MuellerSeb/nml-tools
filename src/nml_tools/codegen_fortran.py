@@ -1699,7 +1699,6 @@ def _render_sentinel_assignment(
     if type_info.category == "array" and type_info.element_category == "string":
         return _render_string_array_sentinel_assignment(
             target_ref=target_ref,
-            rank=len(type_info.dimensions),
             value_expr=value_expr,
             comment=comment,
         )
@@ -1718,12 +1717,10 @@ def _render_string_sentinel_assignment(
 def _render_string_array_sentinel_assignment(
     *,
     target_ref: str,
-    rank: int,
     value_expr: str,
     comment: str,
 ) -> str:
-    section_ref = _array_section_ref(target_ref, rank)
-    return f"{section_ref} = {value_expr}{comment}"
+    return f"{target_ref} = {value_expr}{comment}"
 
 
 def _sentinel_expressions(

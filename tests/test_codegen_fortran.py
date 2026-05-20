@@ -741,7 +741,7 @@ def test_generate_fortran_multidimensional_string_array_sentinels(
     )
 
     generated = output.read_text()
-    assert "this%names(:, :) = achar(0)" in generated
+    assert "this%names = achar(0)" in generated
     assert "all(this%names == achar(0))" in generated
 
 
