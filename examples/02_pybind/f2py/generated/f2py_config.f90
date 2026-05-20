@@ -36,25 +36,25 @@ contains
   !> \brief Set config values on the handled instance
   subroutine config_set_wrapper(handle, &
     name, &
-    nml_has__name__, &
+    has_name, &
     iterations, &
     tolerance, &
     enabled, &
-    nml_has__enabled__, &
+    has_enabled, &
     weights_n1, &
     weights, &
-    nml_has__weights__, &
+    has_weights, &
     status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
     character(len=*), intent(in) :: name !< Config name (optional)
-    logical, intent(in) :: nml_has__name__ !< whether name was provided
+    logical, intent(in) :: has_name !< whether name was provided
     integer(i4), intent(in) :: iterations !< Iterations (required)
     real(dp), intent(in) :: tolerance !< Tolerance (required)
     logical, intent(in) :: enabled !< Enabled (optional)
-    logical, intent(in) :: nml_has__enabled__ !< whether enabled was provided
+    logical, intent(in) :: has_enabled !< whether enabled was provided
     integer, intent(in) :: weights_n1 !< extent for weights
     real(dp), dimension(weights_n1), intent(in) :: weights !< Weights (optional)
-    logical, intent(in) :: nml_has__weights__ !< whether weights was provided
+    logical, intent(in) :: has_weights !< whether weights was provided
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_config_t), pointer :: this
@@ -66,14 +66,14 @@ contains
     if (.not. associated(this)) then
       return
     end if
-    if (nml_has__name__) then
+    if (has_name) then
       maybe_name = name
     end if
-    if (nml_has__enabled__) then
+    if (has_enabled) then
       allocate(maybe_enabled)
       maybe_enabled = enabled
     end if
-    if (nml_has__weights__) then
+    if (has_weights) then
       allocate(maybe_weights(weights_n1))
       maybe_weights = weights
     end if
@@ -89,11 +89,11 @@ contains
   !> \brief Set runtime dimensions on the handled config instance
   subroutine config_set_dims_wrapper(handle, &
     n_weights, &
-    nml_has__n_weights__, &
+    has_n_weights, &
     status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
     integer, intent(in) :: n_weights !< runtime dimension override for n_weights
-    logical, intent(in) :: nml_has__n_weights__ !< whether n_weights was provided
+    logical, intent(in) :: has_n_weights !< whether n_weights was provided
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_config_t), pointer :: this
@@ -103,7 +103,7 @@ contains
     if (.not. associated(this)) then
       return
     end if
-    if (nml_has__n_weights__) then
+    if (has_n_weights) then
       allocate(maybe_n_weights)
       maybe_n_weights = n_weights
     end if

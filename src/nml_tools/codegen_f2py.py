@@ -342,10 +342,29 @@ def build_f2py_namelist_spec(
     set_dims_call_arguments: list[str] = []
     set_dims_args: list[F2pyArgumentSpec] = []
     array_dimensions: list[F2pyArrayDimensionSpec] = []
+
+    field_argument_names: set[str] = set()
+    for field in fields:
+        field_type_info = type_infos[field.name]
+        field_args, _ = _f2py_field_arguments(field, field_type_info)
+        field_argument_names.update(name.lower() for name in field_args)
+
+    argument_names_in_use: set[str] = set(field_argument_names)
+    bridge_names_in_use: set[str] = set(field_argument_names) | {
+        "handle",
+        "status",
+        "errmsg",
+        "this",
+    }
+
     for field in fields:
         type_info = type_infos[field.name]
         rank = len(type_info.dimensions) if type_info.category == "array" else 0
-        has_flag = None if field.required else f"nml_has__{field.name}__"
+        has_flag: str | None = None
+        if not field.required:
+            has_base = f"has_{field.name}"
+            has_flag = _unique_generated_name(has_base, argument_names_in_use)
+            argument_names_in_use.add(has_flag.lower())
         spec = F2pyArgumentSpec(
             name=field.name,
             title=_one_line(field.title),
@@ -374,18 +393,37 @@ def build_f2py_namelist_spec(
             argument_declarations.append(
                 f"logical, intent(in) :: {has_flag} !< whether {field.name} was provided"
             )
-            bridge_declarations.append(_optional_bridge_declaration(field.name, type_info))
-            bridge_assignments.append(_optional_bridge_assignment(field.name, type_info))
-            set_call_arguments.append(f"{field.name}=maybe_{field.name}")
+            maybe_base = _maybe_bridge_name(field.name)
+            maybe_name = _unique_generated_name(maybe_base, bridge_names_in_use)
+            bridge_names_in_use.add(maybe_name.lower())
+            bridge_declarations.append(
+                _optional_bridge_declaration(field.name, type_info, maybe_name)
+            )
+            bridge_assignments.append(
+                _optional_bridge_assignment(field.name, type_info, has_flag, maybe_name)
+            )
+            set_call_arguments.append(f"{field.name}={maybe_name}")
         else:
             set_call_arguments.append(f"{field.name}={field.name}")
 
     runtime_dimension_args = cast("list[dict[str, str]]", context["set_dims_arguments"])
+    set_dims_argument_names_in_use: set[str] = {
+        str(entry["name"]).lower() for entry in runtime_dimension_args
+    }
+    set_dims_bridge_names_in_use: set[str] = set(set_dims_argument_names_in_use) | {
+        "handle",
+        "status",
+        "errmsg",
+        "this",
+    }
+
     for entry in runtime_dimension_args:
         const_name = entry["name"]
         arg_name = entry["arg_name"]
         python_name = _python_parameter_name(const_name)
-        has_flag = f"nml_has__{const_name}__"
+        has_base = f"has_{const_name}"
+        has_flag = _unique_generated_name(has_base, set_dims_argument_names_in_use)
+        set_dims_argument_names_in_use.add(has_flag.lower())
         set_dims_args.append(
             F2pyArgumentSpec(
                 name=const_name,
@@ -409,7 +447,9 @@ def build_f2py_namelist_spec(
         set_dims_argument_declarations.append(
             f"logical, intent(in) :: {has_flag} !< whether {const_name} was provided"
         )
-        maybe_name = f"maybe_{const_name}"
+        maybe_base = _maybe_bridge_name(const_name)
+        maybe_name = _unique_generated_name(maybe_base, set_dims_bridge_names_in_use)
+        set_dims_bridge_names_in_use.add(maybe_name.lower())
         set_dims_bridge_declarations.append(f"integer, allocatable :: {maybe_name}")
         set_dims_bridge_assignments.append(
             f"if ({has_flag}) then\n"
@@ -571,6 +611,21 @@ def _array_dimension_argument_names(name: str, rank: int) -> list[str]:
     return [f"{name}_n{idx}" for idx in range(1, rank + 1)]
 
 
+def _unique_generated_name(base_name: str, taken_names: set[str]) -> str:
+    if base_name.lower() not in taken_names:
+        return base_name
+    index = 1
+    while True:
+        candidate = f"{base_name}_{index}"
+        if candidate.lower() not in taken_names:
+            return candidate
+        index += 1
+
+
+def _maybe_bridge_name(name: str) -> str:
+    return f"maybe_{name}"
+
+
 def _f2py_field_arguments(
     field: FieldSpec,
     type_info: FieldTypeInfo,
@@ -595,20 +650,23 @@ def _f2py_field_arguments(
     return [*dim_names, field.name], declarations
 
 
-def _optional_bridge_declaration(name: str, type_info: FieldTypeInfo) -> str:
+def _optional_bridge_declaration(name: str, type_info: FieldTypeInfo, maybe_name: str) -> str:
     if type_info.category == "array":
         dims = ", ".join(":" for _ in type_info.dimensions)
         if type_info.element_category == "string":
-            return f"character(len=:), dimension({dims}), allocatable :: maybe_{name}"
-        return f"{type_info.arg_type_spec}, dimension({dims}), allocatable :: maybe_{name}"
+            return f"character(len=:), dimension({dims}), allocatable :: {maybe_name}"
+        return f"{type_info.arg_type_spec}, dimension({dims}), allocatable :: {maybe_name}"
     if type_info.category == "string":
-        return f"character(len=:), allocatable :: maybe_{name}"
-    return f"{type_info.arg_type_spec}, allocatable :: maybe_{name}"
+        return f"character(len=:), allocatable :: {maybe_name}"
+    return f"{type_info.arg_type_spec}, allocatable :: {maybe_name}"
 
 
-def _optional_bridge_assignment(name: str, type_info: FieldTypeInfo) -> str:
-    has_flag = f"nml_has__{name}__"
-    maybe_name = f"maybe_{name}"
+def _optional_bridge_assignment(
+    name: str,
+    type_info: FieldTypeInfo,
+    has_flag: str,
+    maybe_name: str,
+) -> str:
     if type_info.category == "array":
         dims = ", ".join(_array_dimension_argument_names(name, len(type_info.dimensions)))
         allocate_stmt = f"allocate({maybe_name}({dims}))"

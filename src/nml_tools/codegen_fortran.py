@@ -326,33 +326,30 @@ def _build_context(
         if not any(existing.lower() == name.lower() for existing in helper_imports):
             helper_imports.append(name)
 
-    def _unique_helper_import_alias(base_name: str) -> str:
-        local_names = _helper_import_local_names() | set(static_constants)
-        if base_name.lower() not in local_names:
+    def _unique_generated_name(base_name: str, taken_names: set[str]) -> str:
+        if base_name.lower() not in taken_names:
             return base_name
         index = 1
         while True:
-            if base_name.endswith("__"):
-                candidate = f"{base_name}{index}__"
-            elif base_name.endswith("_"):
-                candidate = f"{base_name}{index}_"
-            else:
-                candidate = f"{base_name}_{index}"
-            if candidate.lower() not in local_names:
+            candidate = f"{base_name}_{index}"
+            if candidate.lower() not in taken_names:
                 return candidate
             index += 1
+
+    def _unique_helper_import_alias(base_name: str) -> str:
+        local_names = _helper_import_local_names() | set(static_constants)
+        return _unique_generated_name(base_name, local_names)
 
     def _register_runtime_dimension(dim_name: str) -> str:
         local_name = runtime_dimension_locals.get(dim_name)
         if local_name is None:
-            local_name = f"nml_dim__{dim_name}__"
-            if local_name.lower() in property_name_map:
-                raise ValueError(
-                    f"property '{property_name_map[local_name.lower()]}' conflicts with "
-                    f"runtime dimension field '{local_name}'"
-                )
+            local_base = f"dim_{dim_name}"
+            local_taken = set(property_name_map) | {
+                existing.lower() for existing in runtime_dimension_locals.values()
+            }
+            local_name = _unique_generated_name(local_base, local_taken)
             runtime_dimension_locals[dim_name] = local_name
-            default_name = _unique_helper_import_alias(f"nml_default__{dim_name}__")
+            default_name = _unique_helper_import_alias(f"{dim_name}_default")
             _add_helper_import(f"{default_name}=>{dim_name}")
             runtime_dimensions.append(
                 {
@@ -1083,17 +1080,22 @@ def _build_context(
     if not isinstance(resolved_kind_module, str) or not resolved_kind_module:
         raise ValueError("kind module must be a non-empty string")
 
-    set_dims_arguments = [
-        {
-            "name": entry["name"],
-            "default_name": entry["default_name"],
-            "local_name": entry["local_name"],
-            "arg_name": entry["name"],
-            "candidate_name": f"nml_candidate__{entry['name']}__",
-            "min_required": 1,
-        }
-        for entry in runtime_dimensions
-    ]
+    set_dims_arguments: list[dict[str, Any]] = []
+    candidate_names_in_use: set[str] = set()
+    for entry in runtime_dimensions:
+        candidate_base = f"candidate_{entry['name']}"
+        candidate_name = _unique_generated_name(candidate_base, candidate_names_in_use)
+        candidate_names_in_use.add(candidate_name.lower())
+        set_dims_arguments.append(
+            {
+                "name": entry["name"],
+                "default_name": entry["default_name"],
+                "local_name": entry["local_name"],
+                "arg_name": entry["name"],
+                "candidate_name": candidate_name,
+                "min_required": 1,
+            }
+        )
 
     candidate_name_map: dict[str, str] = {
         str(entry["name"]): str(entry["candidate_name"]) for entry in set_dims_arguments
