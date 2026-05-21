@@ -255,6 +255,16 @@ def _build_context(
         if req_key not in required_fields:
             required_fields.append(req_key)
     required_set = set(required_fields)
+    reserved_property_default_names: set[str] = set()
+    for _, attr_name, prop in property_items:
+        has_default_parameter = False
+        if prop.get("type") == "array":
+            has_default_parameter = _array_default_value(prop) is not None
+        else:
+            has_default_parameter = "default" in prop
+        if has_default_parameter:
+            reserved_property_default_names.add(f"{attr_name}_default".lower())
+
     module_name = f"nml_{namelist_name}"
     type_name = f"{module_name}_t"
     doc_class = f"{module_name}_t"
@@ -337,7 +347,9 @@ def _build_context(
             index += 1
 
     def _unique_helper_import_alias(base_name: str) -> str:
-        local_names = _helper_import_local_names() | set(static_constants)
+        local_names = (
+            _helper_import_local_names() | set(static_constants) | reserved_property_default_names
+        )
         return _unique_generated_name(base_name, local_names)
 
     def _register_runtime_dimension(dim_name: str) -> str:

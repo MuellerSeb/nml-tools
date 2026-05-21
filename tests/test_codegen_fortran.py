@@ -392,6 +392,43 @@ def test_generate_fortran_renames_runtime_dimension_default_aliases(
     assert "integer :: dim_max_layers = max_layers_default_1" in generated
 
 
+def test_generate_fortran_renames_runtime_dimension_alias_when_property_default_exists(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Runtime dimension/property default collision",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "max_layers": {
+                "type": "integer",
+                "x-fortran-kind": "i4",
+                "default": 2,
+            },
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": "max_layers",
+            },
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"max_layers": 3},
+    )
+
+    generated = output.read_text()
+    assert "integer(i4), parameter, public :: max_layers_default = 2_i4" in generated
+    assert "max_layers_default=>max_layers" not in generated
+    assert "max_layers_default_1=>max_layers" in generated
+    assert "integer :: dim_max_layers = max_layers_default_1" in generated
+
+
 def test_generate_fortran_does_not_alias_runtime_dimension_names_in_type_specs(
     tmp_path: Path,
 ) -> None:
