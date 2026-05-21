@@ -28,7 +28,7 @@ module nml_config
     to_lower, &
     NML_ERR_INVALID_HANDLE, &
     str_len, &
-    nml_default__n_weights__=>n_weights
+    n_weights_default=>n_weights
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -56,7 +56,7 @@ module nml_config
   !!
   type, public :: nml_config_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: nml_dim__n_weights__ = nml_default__n_weights__ !< runtime dimension for n_weights
+    integer :: dim_n_weights = n_weights_default !< runtime dimension for n_weights
     character(len=str_len) :: name !< Config name
     integer(i4) :: iterations !< Iterations
     real(dp) :: tolerance !< Tolerance
@@ -140,7 +140,7 @@ contains
 
     ! allocate runtime-sized fields
     if (allocated(this%weights)) deallocate(this%weights)
-    allocate(this%weights(this%nml_dim__n_weights__))
+    allocate(this%weights(this%dim_n_weights))
 
     ! sentinel values for required/optional parameters
     this%iterations = -huge(this%iterations) ! sentinel for required integer
@@ -157,22 +157,22 @@ contains
     errmsg) result(status)
     class(nml_config_t), intent(inout) :: this !< namelist instance
     integer, intent(in), optional :: n_weights !< runtime dimension override for n_weights
-    integer :: nml_candidate__n_weights__
+    integer :: candidate_n_weights
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(n_weights)) then
-      nml_candidate__n_weights__ = n_weights
+      candidate_n_weights = n_weights
     else
-      nml_candidate__n_weights__ = nml_default__n_weights__
+      candidate_n_weights = n_weights_default
     end if
-    if (nml_candidate__n_weights__ <= 0) then
+    if (candidate_n_weights <= 0) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'n_weights' must be positive"
       return
     end if
-    this%nml_dim__n_weights__ = nml_candidate__n_weights__
+    this%dim_n_weights = candidate_n_weights
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%weights)) deallocate(this%weights)
@@ -208,7 +208,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(weights)) deallocate(weights)
-    allocate(weights(this%nml_dim__n_weights__))
+    allocate(weights(this%dim_n_weights))
     name = this%name
     iterations = this%iterations
     tolerance = this%tolerance

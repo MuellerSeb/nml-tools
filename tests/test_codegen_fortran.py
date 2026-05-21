@@ -288,12 +288,12 @@ def test_generate_fortran_accepts_runtime_dimensions(tmp_path: Path) -> None:
     )
 
     generated = output.read_text()
-    assert "integer :: nml_dim__max_layers__ = nml_default__max_layers__" in generated
+    assert "integer :: dim_max_layers = max_layers_default" in generated
     assert "integer(i4), allocatable, dimension(:) :: values" in generated
     assert "procedure :: set_dims => nml_test_nml_set_dims" in generated
-    assert "allocate(this%values(this%nml_dim__max_layers__))" in generated
+    assert "allocate(this%values(this%dim_max_layers))" in generated
     assert "use nml_helper, only:" in generated
-    assert "nml_default__max_layers__=>max_layers" in generated
+    assert "max_layers_default=>max_layers" in generated
     assert "integer(i4), parameter, public :: values_default = 1_i4" in generated
     assert "this%values = values_default" in generated
 
@@ -322,11 +322,11 @@ def test_generate_fortran_normalizes_runtime_dimension_names(tmp_path: Path) -> 
     )
 
     generated = output.read_text()
-    assert "integer :: nml_dim__max_layers__ = nml_default__max_layers__" in generated
-    assert "nml_default__max_layers__=>max_layers" in generated
+    assert "integer :: dim_max_layers = max_layers_default" in generated
+    assert "max_layers_default=>max_layers" in generated
 
 
-def test_generate_fortran_rejects_runtime_dimension_field_collisions(
+def test_generate_fortran_renames_runtime_dimension_field_collisions(
     tmp_path: Path,
 ) -> None:
     schema = {
@@ -334,7 +334,7 @@ def test_generate_fortran_rejects_runtime_dimension_field_collisions(
         "x-fortran-namelist": "test_nml",
         "type": "object",
         "properties": {
-            "nml_dim__max_layers__": {"type": "integer", "x-fortran-kind": "i4"},
+            "dim_max_layers": {"type": "integer", "x-fortran-kind": "i4"},
             "values": {
                 "type": "array",
                 "items": {"type": "integer", "x-fortran-kind": "i4"},
@@ -343,14 +343,17 @@ def test_generate_fortran_rejects_runtime_dimension_field_collisions(
         },
     }
 
+    output = tmp_path / "nml_test.f90"
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match="conflicts with runtime dimension field"):
-        generate_fortran(
-            schema,
-            tmp_path / "nml_test.f90",
-            kind_module="mo_kind",
-            dimensions={"max_layers": 3},
-        )
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"max_layers": 3},
+    )
+
+    generated = output.read_text()
+    assert "integer :: dim_max_layers_1 = max_layers_default" in generated
 
 
 def test_generate_fortran_renames_runtime_dimension_default_aliases(
@@ -363,7 +366,7 @@ def test_generate_fortran_renames_runtime_dimension_default_aliases(
         "properties": {
             "name": {
                 "type": "string",
-                "x-fortran-len": "nml_default__max_layers__",
+                "x-fortran-len": "max_layers_default",
             },
             "values": {
                 "type": "array",
@@ -379,14 +382,51 @@ def test_generate_fortran_renames_runtime_dimension_default_aliases(
         schema,
         output,
         kind_module="mo_kind",
-        constants={"nml_default__max_layers__": 32},
+        constants={"max_layers_default": 32},
         dimensions={"max_layers": 3},
     )
 
     generated = output.read_text()
-    assert "nml_default__max_layers__, &" in generated
-    assert "nml_default__max_layers__1__=>max_layers" in generated
-    assert "integer :: nml_dim__max_layers__ = nml_default__max_layers__1__" in generated
+    assert "max_layers_default, &" in generated
+    assert "max_layers_default_1=>max_layers" in generated
+    assert "integer :: dim_max_layers = max_layers_default_1" in generated
+
+
+def test_generate_fortran_renames_runtime_dimension_alias_when_property_default_exists(
+    tmp_path: Path,
+) -> None:
+    schema = {
+        "title": "Runtime dimension/property default collision",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "max_layers": {
+                "type": "integer",
+                "x-fortran-kind": "i4",
+                "default": 2,
+            },
+            "values": {
+                "type": "array",
+                "items": {"type": "integer", "x-fortran-kind": "i4"},
+                "x-fortran-shape": "max_layers",
+            },
+        },
+    }
+
+    output = tmp_path / "nml_test.f90"
+    generate_fortran = _import_generate_fortran()
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"max_layers": 3},
+    )
+
+    generated = output.read_text()
+    assert "integer(i4), parameter, public :: max_layers_default = 2_i4" in generated
+    assert "max_layers_default=>max_layers" not in generated
+    assert "max_layers_default_1=>max_layers" in generated
+    assert "integer :: dim_max_layers = max_layers_default_1" in generated
 
 
 def test_generate_fortran_does_not_alias_runtime_dimension_names_in_type_specs(
@@ -821,7 +861,7 @@ def test_generate_fortran_set_dims_validates_before_assignment(tmp_path: Path) -
     )
 
     generated = output.read_text()
-    assert "if (nml_candidate__max_layers__ < 4) then" in generated
+    assert "if (candidate_max_layers < 4) then" in generated
     assert "shape constants for 'values' must allow at least 4 default values" in generated
     assert "namelist not configured; call set or from_file" in generated
 
@@ -830,8 +870,8 @@ def test_generate_fortran_set_dims_validates_before_assignment(tmp_path: Path) -
     generated.index("if (.not. this%is_configured) then", is_set_idx)
     generated.index("if (.not. this%is_configured) then", is_valid_idx)
 
-    validate_idx = generated.index("if (nml_candidate__max_layers__ <= 0) then")
-    assign_idx = generated.index("this%nml_dim__max_layers__ = nml_candidate__max_layers__")
+    validate_idx = generated.index("if (candidate_max_layers <= 0) then")
+    assign_idx = generated.index("this%dim_max_layers = candidate_max_layers")
     assert assign_idx > validate_idx
 
 
@@ -920,7 +960,7 @@ def test_generate_fortran_runtime_sized_string_array_uses_static_length(
 
     generated = output.read_text()
     assert "character(len=name_len), allocatable, dimension(:) :: names" in generated
-    assert "allocate(character(len=name_len) :: this%names(this%nml_dim__max_names__))" in generated
+    assert "allocate(character(len=name_len) :: this%names(this%dim_max_names))" in generated
     assert "character(len=:), allocatable" not in generated
     assert "this%names = names" in generated
 

@@ -74,7 +74,7 @@ Fortran `set` method's partial-array behavior for arrays with defaults; the rema
 entries keep their defaults.
 
 The f2py-facing Fortran wrappers deliberately avoid `optional` dummy arguments
-and assumed-shape arrays. The Python shim passes `nml_has__<name>__` flags plus dummy
+and assumed-shape arrays. The Python shim passes `has_<name>` flags plus dummy
 values for omitted optional fields. The Fortran wrapper converts those flags to
 allocated or unallocated local allocatables before calling the generated
 type-bound `set` method, so omitted values still behave like absent optional

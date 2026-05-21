@@ -24,7 +24,7 @@ module nml_optimization
     idx_check, &
     to_lower, &
     buf, &
-    nml_default__max_iter__=>max_iter, &
+    max_iter_default=>max_iter, &
     NML_ERR_PARTLY_SET
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
@@ -58,7 +58,7 @@ module nml_optimization
   !> \details All relevant configurations for the optimization parameters.
   type, public :: nml_optimization_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: nml_dim__max_iter__ = nml_default__max_iter__ !< runtime dimension for max_iter
+    integer :: dim_max_iter = max_iter_default !< runtime dimension for max_iter
     character(len=buf) :: name !< Optimization name
     character(len=buf) :: method !< Optimization method
     character(len=buf), dimension(3) :: try_methods !< Try alternative methods
@@ -213,7 +213,7 @@ contains
 
     ! allocate runtime-sized fields
     if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
-    allocate(this%mcmc_error_params(3, 2, this%nml_dim__max_iter__))
+    allocate(this%mcmc_error_params(3, 2, this%dim_max_iter))
 
     ! sentinel values for required/optional parameters
     this%name = achar(0) ! sentinel for optional string
@@ -236,22 +236,22 @@ contains
     errmsg) result(status)
     class(nml_optimization_t), intent(inout) :: this !< namelist instance
     integer, intent(in), optional :: max_iter !< runtime dimension override for max_iter
-    integer :: nml_candidate__max_iter__
+    integer :: candidate_max_iter
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(max_iter)) then
-      nml_candidate__max_iter__ = max_iter
+      candidate_max_iter = max_iter
     else
-      nml_candidate__max_iter__ = nml_default__max_iter__
+      candidate_max_iter = max_iter_default
     end if
-    if (nml_candidate__max_iter__ <= 0) then
+    if (candidate_max_iter <= 0) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'max_iter' must be positive"
       return
     end if
-    this%nml_dim__max_iter__ = nml_candidate__max_iter__
+    this%dim_max_iter = candidate_max_iter
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
@@ -299,7 +299,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(mcmc_error_params)) deallocate(mcmc_error_params)
-    allocate(mcmc_error_params(3, 2, this%nml_dim__max_iter__))
+    allocate(mcmc_error_params(3, 2, this%dim_max_iter))
     name = this%name
     method = this%method
     try_methods = this%try_methods
