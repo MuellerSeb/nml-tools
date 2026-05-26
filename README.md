@@ -653,7 +653,7 @@ namelist workflows, plus extensions for Fortran-specific types and shapes.
 
 Main missing features compared to JSON Schema:
 
-- No `$ref`/`$defs` or remote schema resolution.
+- No remote schema resolution.
 - No composition keywords: `allOf`, `anyOf`, `oneOf`, `not`.
 - No conditional keywords: `if`/`then`/`else`.
 - No object constraints: `additionalProperties`, `patternProperties`,
@@ -667,3 +667,40 @@ Main missing features compared to JSON Schema:
 
 Use the `x-fortran-*` extensions to express kind, length, and shape information
 needed for code generation.
+
+### Reusable definitions and references
+
+Schemas may reuse supported scalar or scalar-array field definitions with JSON
+Schema Draft 2020-12 `$defs` and `$ref`:
+
+```yaml
+x-fortran-namelist: solver
+type: object
+$defs:
+  positive_count:
+    type: integer
+    minimum: 1
+    x-fortran-kind: i4
+properties:
+  iterations:
+    $ref: "#/$defs/positive_count"
+    title: Iteration limit
+    default: 100
+```
+
+References may target the same document or local `.yml`, `.yaml`, or `.json`
+files, for example `common-definitions.yml#/$defs/fraction`. Relative file
+paths are resolved from the file containing the `$ref`; no project registry or
+network retrieval is used. Standard JSON Pointer fragments are supported.
+
+Keywords next to `$ref` compose with the reusable definition. A use site may
+narrow numeric bounds or enums, and its `title`, `description`, `examples`, or
+`default` is used for generated output when present. Conflicting Fortran
+representation keywords such as `x-fortran-kind`, `x-fortran-len`, and
+`x-fortran-shape` are rejected. For arrays, a use-site array `default` replaces
+the referenced default together with any `x-fortran-default-*` controls.
+
+Only references within the existing namelist model are supported: namelist
+roots, scalar/scalar-array fields, and array `items`. Derived-type object
+properties, `$id`/`$anchor` resolution, recursive references, `$dynamicRef`,
+legacy `definitions`, and general composition keywords are not supported.

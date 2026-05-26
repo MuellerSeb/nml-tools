@@ -20,6 +20,47 @@ def test_validate_namelist_rejects_unknown_property() -> None:
         validate_namelist(schema, namelist)
 
 
+def test_validate_namelist_rejects_invalid_schema_defaults() -> None:
+    scalar_schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {"count": {"type": "integer", "minimum": 1, "default": 0}},
+    }
+    with pytest.raises(ValueError, match="must be >= 1"):
+        validate_namelist(scalar_schema, {})
+
+    array_schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "items": {"type": "integer", "enum": [1, 2]},
+                "default": [1],
+                "x-fortran-default-pad": 3,
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="outside enum"):
+        validate_namelist(array_schema, {})
+
+    partial_schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "items": {"type": "integer"},
+                "default": [1],
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="shorter than declared x-fortran-shape"):
+        validate_namelist(partial_schema, {})
+
+
 def test_validate_namelist_flex_array_shape() -> None:
     schema = {
         "x-fortran-namelist": "config",

@@ -246,6 +246,63 @@ def test_validate_accepts_cli_dimensions(tmp_path: Path) -> None:
         assert result.exit_code == 0, result.output
 
 
+def test_validate_resolves_external_references_with_cli_shape_values(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("definitions.yml").write_text(
+            dedent(
+                """
+                $defs:
+                  values:
+                    type: array
+                    x-fortran-shape: n_values
+                    items:
+                      type: integer
+                      minimum: 1
+                  label:
+                    type: string
+                    x-fortran-len: label_len
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  values:
+                    $ref: "definitions.yml#/$defs/values"
+                  label:
+                    $ref: "definitions.yml#/$defs/label"
+                required: [values, label]
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text(
+            "&demo\nvalues = 1, 2, 3\nlabel = 'valid'\n/\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "--constants",
+                "label_len=8",
+                "--dimensions",
+                "n_values=3",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+
 def test_validate_cli_dimensions_override_config_dimensions(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):
@@ -329,6 +386,68 @@ def test_generate_command_uses_pyproject_config_in_process(tmp_path: Path) -> No
 
         assert result.exit_code == 0, result.output
         assert Path("out/nml_demo.f90").exists()
+
+
+def test_generate_command_resolves_definitions_for_all_outputs(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("definitions.yml").write_text(
+            dedent(
+                """
+                $defs:
+                  value:
+                    type: integer
+                    x-fortran-kind: i4
+                    minimum: 0
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                title: Demo
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  value:
+                    $ref: "definitions.yml#/$defs/value"
+                    title: Demo value
+                    default: 2
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("nml-config.toml").write_text(
+            dedent(
+                """
+                [kinds]
+                module = "iso_fortran_env"
+                real = ["real64"]
+                integer = ["int32"]
+                map = { i4 = "int32" }
+
+                [[namelists]]
+                schema = "schema.yml"
+                mod_path = "out/nml_demo.f90"
+                doc_path = "out/nml_demo.md"
+
+                [[templates]]
+                schemas = ["schema.yml"]
+                output = "out/demo.nml"
+                value_mode = "filled"
+                doc_mode = "documented"
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(cli_module.cli, ["generate", "--config", "nml-config.toml"])
+
+        assert result.exit_code == 0, result.output
+        assert "integer(i4)" in Path("out/nml_demo.f90").read_text(encoding="ascii")
+        assert "Default: `2`" in Path("out/nml_demo.md").read_text(encoding="ascii")
+        assert "value = 2" in Path("out/demo.nml").read_text(encoding="ascii")
 
 
 def test_generation_subcommands_use_discovered_pyproject_config(
