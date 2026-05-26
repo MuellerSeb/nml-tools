@@ -1,0 +1,39 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$defs:
+  period:
+    title: Simulation period
+    description: Start and end years for a configured time window.
+    type: object
+    x-fortran-type: period_t
+    required: [start_year, end_year]
+    properties:
+      start_year:
+        title: Start year
+        type: integer
+        x-fortran-kind: i4
+      end_year:
+        title: End year
+        type: integer
+        x-fortran-kind: i4
+      label:
+        title: Period label
+        type: string
+        x-fortran-len: period_label_len
+        default: period
+  station:
+    title: Imported station
+    description: Application-owned station descriptor with longer label storage.
+    type: object
+    x-fortran-type: station_t
+    x-fortran-module: application_types
+    required: [code]
+    properties:
+      code:
+        title: Station code
+        type: integer
+        x-fortran-kind: i4
+      label:
+        title: Station label
+        type: string
+        x-fortran-len: station_label_len
+        default: unknown

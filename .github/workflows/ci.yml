@@ -69,10 +69,16 @@ jobs:
         run: nml-tools check --config examples/02_pybind/pyproject.toml --diff
       - name: Check generated 03_references files
         run: nml-tools check --config examples/03_references/nml-config.toml --diff
+      - name: Check generated 04_derived_types files
+        run: nml-tools check --config examples/04_derived_types/pyproject.toml --diff
       - name: Validate 03_references template
         run: >
           nml-tools validate --config examples/03_references/nml-config.toml
           examples/03_references/out/reference-demo.nml
+      - name: Validate 04_derived_types template
+        run: >
+          nml-tools validate --config examples/04_derived_types/pyproject.toml
+          examples/04_derived_types/templates/run.nml
       - name: Build 01_simple
         run: >
           cmake -S examples/01_simple -B build/01_simple -G Ninja
@@ -88,3 +94,7 @@ jobs:
         run: python -m pip install -e "examples/02_pybind[test]"
       - name: Test 02_pybind package
         run: python -m pytest -q examples/02_pybind/tests
+      - name: Build 04_derived_types package
+        run: python -m pip install -e "examples/04_derived_types[test]"
+      - name: Test 04_derived_types package
+        run: python -m pytest -q examples/04_derived_types/tests

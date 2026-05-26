@@ -1,0 +1,17 @@
+! Derived-type configuration
+&run
+  ! Main simulation period
+  period%start_year = 2001
+  period%end_year = 2010
+  period%label = "main"
+  ! Comparison periods
+  periods(1)%start_year = 1980
+  periods(1)%end_year = 1990
+  periods(1)%label = "period"
+  periods(2)%start_year = 2001
+  periods(2)%end_year = 2010
+  periods(2)%label = "future"
+  ! Selected station
+  station%code = 7
+  station%label = "central"
+/

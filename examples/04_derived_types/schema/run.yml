@@ -1,0 +1,19 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: Derived-type configuration
+description: Demonstrates locally generated and imported reusable derived types.
+x-fortran-namelist: run
+type: object
+required: [period, periods, station]
+properties:
+  period:
+    $ref: "definitions.yml#/$defs/period"
+    title: Main simulation period
+  periods:
+    title: Comparison periods
+    type: array
+    x-fortran-shape: n_periods
+    items:
+      $ref: "definitions.yml#/$defs/period"
+  station:
+    $ref: "definitions.yml#/$defs/station"
+    title: Selected station

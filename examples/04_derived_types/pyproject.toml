@@ -1,0 +1,86 @@
+[build-system]
+requires = [
+    "scikit-build-core>=0.11,<0.12",
+    "numpy>=1.24,<3",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "nml-derived-types-example"
+version = "0.1.0"
+description = "nml-tools derived-type f2py example"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = ["numpy>=1.24,<3"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.scikit-build]
+wheel.packages = ["src/nml_derived_types_example"]
+
+[tool.scikit-build.cmake]
+minimum-version = "3.26"
+build-type = "Release"
+
+[tool.nml-tools]
+
+[tool.nml-tools.helper]
+path = "fortran/generated/nml_helper.f90"
+module = "nml_helper"
+buffer = 512
+
+[tool.nml-tools.constants.period_label_len]
+value = 12
+doc = "Storage length of labels on locally generated periods."
+
+[tool.nml-tools.constants.station_label_len]
+value = 8
+doc = "Mapped station label length; application storage may be longer."
+
+[tool.nml-tools.dimensions.n_periods]
+value = 2
+doc = "Default number of configured periods."
+
+[tool.nml-tools.kinds]
+module = "iso_fortran_env"
+real = ["real64"]
+integer = ["int32"]
+map = { dp = "real64", i4 = "int32" }
+
+[tool.nml-tools.f2py]
+f2cmap_path = "f2py/generated/.f2py_f2cmap"
+
+[tool.nml-tools.f2py.c_types.integer]
+i4 = "int"
+
+[[tool.nml-tools.namelists]]
+schema = "schema/run.yml"
+mod_path = "fortran/generated/nml_run.f90"
+doc_path = "docs/run.md"
+f2py_path = "f2py/generated/f2py_config.f90"
+py_path = "src/nml_derived_types_example/config_wrappers.py"
+
+[[tool.nml-tools.templates]]
+output = "templates/run.nml"
+schemas = ["schema/run.yml"]
+doc_mode = "documented"
+value_mode = "filled"
+
+[tool.nml-tools.templates.values.run.period]
+start_year = 2001
+end_year = 2010
+label = "main"
+
+[[tool.nml-tools.templates.values.run.periods]]
+start_year = 1980
+end_year = 1990
+
+[[tool.nml-tools.templates.values.run.periods]]
+start_year = 2001
+end_year = 2010
+label = "future"
+
+[tool.nml-tools.templates.values.run.station]
+code = 7
+label = "central"
