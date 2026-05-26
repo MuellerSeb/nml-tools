@@ -26,6 +26,30 @@ class ScalarConstraints:
     max_exclusive: bool
 
 
+def validate_schema_defaults(
+    schema: Mapping[str, Any],
+    *,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
+) -> None:
+    """Validate operational defaults against each property's constraints."""
+    constants = normalize_constant_values(constants)
+    dimensions = normalize_runtime_dimensions(dimensions)
+    reject_constant_dimension_overlap(constants, dimensions)
+    properties = schema.get("properties")
+    if not isinstance(properties, Mapping):
+        return
+    for name, prop in properties.items():
+        if not isinstance(name, str) or not isinstance(prop, Mapping):
+            continue
+        _validate_property_defaults(
+            name,
+            prop,
+            constants=constants,
+            dimensions=dimensions,
+        )
+
+
 def validate_namelist(
     schema: dict[str, Any],
     namelist: dict[str, Any],
@@ -37,6 +61,7 @@ def validate_namelist(
     constants = normalize_constant_values(constants)
     dimensions = normalize_runtime_dimensions(dimensions)
     reject_constant_dimension_overlap(constants, dimensions)
+    validate_schema_defaults(schema, constants=constants, dimensions=dimensions)
 
     namelist_name = schema.get("x-fortran-namelist")
     if not isinstance(namelist_name, str) or not namelist_name.strip():
@@ -68,6 +93,118 @@ def validate_namelist(
             )
         elif key in required:
             raise ValueError(f"namelist '{namelist_name}' is missing required '{prop_name}'")
+
+
+def _validate_property_defaults(
+    name: str,
+    prop: Mapping[str, Any],
+    *,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
+) -> None:
+    if prop.get("type") != "array":
+        if "default" in prop:
+            _validate_property(
+                name,
+                prop,
+                prop["default"],
+                constants=constants,
+                dimensions=dimensions,
+            )
+        return
+
+    items = prop.get("items")
+    if not isinstance(items, Mapping):
+        return
+    controls = {
+        "x-fortran-default-order",
+        "x-fortran-default-repeat",
+        "x-fortran-default-pad",
+    }
+    if controls.intersection(prop) and "default" not in prop:
+        raise ValueError(f"array property '{name}' default options require an array default")
+    if "default" in prop and "default" in items:
+        raise ValueError(
+            f"array property '{name}' default must be defined on property or items, not both"
+        )
+    has_default = "default" in prop or "default" in items
+    if has_default:
+        shape_constants = {**(constants or {}), **(dimensions or {})}
+        shape = _parse_shape(prop.get("x-fortran-shape"), shape_constants, name)
+        if _parse_flex_tail_dims(prop, len(shape), name, shape) > 0:
+            raise ValueError(f"array property '{name}' flex arrays cannot define defaults")
+
+    if "default" in prop:
+        default = prop["default"]
+        if not isinstance(default, list):
+            raise ValueError(f"array property '{name}' default must be a list")
+        _validate_array_default_layout(name, prop, default, constants, dimensions)
+        for value in _iter_scalars(default):
+            _validate_property(
+                name,
+                items,
+                value,
+                constants=constants,
+                dimensions=dimensions,
+            )
+    elif "default" in items:
+        _validate_property(
+            name,
+            items,
+            items["default"],
+            constants=constants,
+            dimensions=dimensions,
+        )
+
+    if "x-fortran-default-pad" in prop:
+        pad = prop["x-fortran-default-pad"]
+        pad_values = pad if isinstance(pad, list) else [pad]
+        for value in _iter_scalars(pad_values):
+            _validate_property(
+                name,
+                items,
+                value,
+                constants=constants,
+                dimensions=dimensions,
+            )
+
+
+def _validate_array_default_layout(
+    name: str,
+    prop: Mapping[str, Any],
+    default: list[Any],
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
+) -> None:
+    if any(isinstance(value, list) for value in default):
+        raise ValueError(f"array property '{name}' default must be a flat list")
+    if not default:
+        raise ValueError(f"array property '{name}' default must contain at least one value")
+    shape_constants = {**(constants or {}), **(dimensions or {})}
+    shape = _parse_shape(prop.get("x-fortran-shape"), shape_constants, name)
+    if any(dimension is None for dimension in shape):
+        raise ValueError(
+            f"array property '{name}' defaults do not support deferred-size dimensions"
+        )
+    total_size = math.prod(dimension for dimension in shape if dimension is not None)
+    if len(default) > total_size:
+        raise ValueError(f"array property '{name}' default is longer than its shape")
+    order = prop.get("x-fortran-default-order", "F")
+    if not isinstance(order, str) or order.upper() not in {"F", "C"}:
+        raise ValueError(f"array property '{name}' default order must be 'F' or 'C'")
+    repeat = prop.get("x-fortran-default-repeat", False)
+    if not isinstance(repeat, bool):
+        raise ValueError(f"array property '{name}' default repeat must be boolean")
+    pad = prop.get("x-fortran-default-pad")
+    if pad is not None and repeat:
+        raise ValueError(f"array property '{name}' default cannot set both pad and repeat")
+    if isinstance(pad, list) and not pad:
+        raise ValueError(f"array property '{name}' default pad must not be empty")
+    if len(default) < total_size and pad is None and not repeat:
+        raise ValueError(
+            "array default shorter than declared x-fortran-shape without pad or repeat"
+        )
+
 
 def _normalize_properties(
     properties: Mapping[str, Any],

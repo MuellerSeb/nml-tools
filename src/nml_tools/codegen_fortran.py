@@ -16,6 +16,7 @@ from ._utils import (
     reject_constant_dimension_overlap,
     strip_trailing_whitespace,
 )
+from .validate import validate_schema_defaults
 
 _TEMPLATE_ENV = Environment(
     loader=FileSystemLoader(Path(__file__).resolve().parent / "templates"),
@@ -292,6 +293,11 @@ def _build_context(
     static_constants = normalize_constant_values(constants)
     runtime_dimension_values = normalize_runtime_dimensions(dimensions)
     reject_constant_dimension_overlap(static_constants, runtime_dimension_values)
+    validate_schema_defaults(
+        schema,
+        constants=static_constants,
+        dimensions=runtime_dimension_values,
+    )
     shape_constants: dict[str, int] = {**static_constants, **runtime_dimension_values}
     runtime_dimensions: list[dict[str, str]] = []
     runtime_dimension_locals: dict[str, str] = {}

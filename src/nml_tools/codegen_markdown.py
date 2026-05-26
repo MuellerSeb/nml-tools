@@ -26,6 +26,7 @@ from .codegen_fortran import (
     _reject_runtime_dimension_lengths,
 )
 from .codegen_template import render_template
+from .validate import validate_schema_defaults
 
 _DEFAULT_MISSING = object()
 
@@ -88,6 +89,7 @@ def render_docs(
     constants = normalize_constant_values(constants)
     dimensions = normalize_runtime_dimensions(dimensions)
     reject_constant_dimension_overlap(constants, dimensions)
+    validate_schema_defaults(schema, constants=constants, dimensions=dimensions)
     shape_constants: dict[str, int] = {
         **constants,
         **dimensions,
