@@ -1075,6 +1075,11 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
                             "type": "integer",
                             "x-fortran-kind": "i4",
                         },
+                        "end_year": {
+                            "title": "End year",
+                            "type": "integer",
+                            "x-fortran-kind": "i4",
+                        },
                         "label": {
                             "title": "Label",
                             "type": "string",
@@ -1082,7 +1087,7 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
                             "default": "default",
                         },
                     },
-                    "required": ["start_year"],
+                    "required": ["start_year", "end_year"],
                 }
             },
             "required": ["period", "periods"],
@@ -1125,6 +1130,8 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
     assert "this%period%start_year" in generated
     assert 'case ("period%start_year")' in generated
     assert 'case ("periods%start_year")' in generated
+    assert " .and. &" in generated
+    assert " .or. &" in generated
 
 
 def test_generate_fortran_imports_application_owned_derived_type() -> None:

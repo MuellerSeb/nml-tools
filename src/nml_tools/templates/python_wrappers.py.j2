@@ -313,7 +313,10 @@ class {{ cls.class_name }}:
 {% endfor %}
             }
             if unknown:
-                raise ValueError("derived argument '{{ arg.name }}' has unknown members: " + ", ".join(sorted(unknown)))
+                raise ValueError(
+                    "derived argument '{{ arg.name }}' has unknown members: "
+                    + ", ".join(sorted(unknown))
+                )
 {% for leaf in arg.derived_leaves %}
             kwargs["{{ leaf.encoded_name }}"] = {{ arg.name }}.get("{{ leaf.name }}", {{ leaf.dummy_value }})
             kwargs["has__{{ leaf.encoded_name }}"] = "{{ leaf.name }}" in {{ arg.name }}
@@ -336,7 +339,10 @@ class {{ cls.class_name }}:
 {% endfor %}
                 }
                 if unknown:
-                    raise ValueError(f"derived array argument '{{ arg.name }}'[{index}] has unknown members: " + ", ".join(sorted(unknown)))
+                    raise ValueError(
+                        f"derived array argument '{{ arg.name }}'[{index}] has unknown members: "
+                        + ", ".join(sorted(unknown))
+                    )
 {% for leaf in arg.derived_leaves %}
             kwargs["{{ leaf.encoded_name }}"] = _normalize_array(
                 [item.get("{{ leaf.name }}", {{ leaf.dummy_value }}) for item in {{ arg.name }}],

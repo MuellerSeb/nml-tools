@@ -1531,6 +1531,26 @@ def _derived_presence_cases(
     blocks: list[str] = []
     idx_args = ", ".join(f"idx({index})" for index in range(1, rank + 1))
 
+    def append_condition(
+        lines: list[str],
+        *,
+        prefix: str,
+        conditions: list[str],
+        operator: str,
+        suffix: str,
+    ) -> None:
+        if len(conditions) == 1:
+            lines.append(f"{prefix}{conditions[0]}{suffix}")
+            return
+        continuation = " " * (len(prefix) + 2)
+        for index, condition in enumerate(conditions):
+            if index == 0:
+                lines.append(f"{prefix}{condition} {operator} &")
+            elif index == len(conditions) - 1:
+                lines.append(f"{continuation}{condition}{suffix}")
+            else:
+                lines.append(f"{continuation}{condition} {operator} &")
+
     def array_prefix(lines: list[str]) -> None:
         if runtime_array:
             lines.extend(
@@ -1606,22 +1626,42 @@ def _derived_presence_cases(
             for condition in aggregate_conditions
         ]
         if indexed_conditions:
-            all_missing = " .and. ".join(indexed_conditions)
-            any_missing = " .or. ".join(indexed_conditions)
-            lines.append(f"    if ({all_missing}) then")
+            append_condition(
+                lines,
+                prefix="    if (",
+                conditions=indexed_conditions,
+                operator=".and.",
+                suffix=") then",
+            )
             lines.append("      status = NML_ERR_NOT_SET")
             if required_conditions and len(indexed_conditions) > 1:
-                lines.append(f"    else if ({any_missing}) then")
+                append_condition(
+                    lines,
+                    prefix="    else if (",
+                    conditions=indexed_conditions,
+                    operator=".or.",
+                    suffix=") then",
+                )
                 lines.append("      status = NML_ERR_PARTLY_SET")
             lines.append("    end if")
         lines.append("  else")
         if aggregate_conditions:
-            all_missing = " .and. ".join(aggregate_conditions)
-            any_missing = " .or. ".join(aggregate_conditions)
-            lines.append(f"    if (all({all_missing})) then")
+            append_condition(
+                lines,
+                prefix="    if (all(",
+                conditions=aggregate_conditions,
+                operator=".and.",
+                suffix=")) then",
+            )
             lines.append("      status = NML_ERR_NOT_SET")
             if required_conditions and (len(aggregate_conditions) > 1 or is_array):
-                lines.append(f"    else if (any({any_missing})) then")
+                append_condition(
+                    lines,
+                    prefix="    else if (any(",
+                    conditions=aggregate_conditions,
+                    operator=".or.",
+                    suffix=")) then",
+                )
                 lines.append("      status = NML_ERR_PARTLY_SET")
             lines.append("    end if")
         lines.append("  end if")
@@ -1636,12 +1676,22 @@ def _derived_presence_cases(
             ]
         )
         if aggregate_conditions:
-            all_missing = " .and. ".join(aggregate_conditions)
-            any_missing = " .or. ".join(aggregate_conditions)
-            lines.append(f"  if ({all_missing}) then")
+            append_condition(
+                lines,
+                prefix="  if (",
+                conditions=aggregate_conditions,
+                operator=".and.",
+                suffix=") then",
+            )
             lines.append("    status = NML_ERR_NOT_SET")
             if len(aggregate_conditions) > 1 and required_conditions:
-                lines.append(f"  else if ({any_missing}) then")
+                append_condition(
+                    lines,
+                    prefix="  else if (",
+                    conditions=aggregate_conditions,
+                    operator=".or.",
+                    suffix=") then",
+                )
                 lines.append("    status = NML_ERR_PARTLY_SET")
             lines.append("  end if")
     blocks.append("\n".join(lines))
