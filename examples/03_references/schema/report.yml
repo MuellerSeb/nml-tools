@@ -1,0 +1,21 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+
+title: Reference-driven report configuration
+description: A second namelist sharing the external definition library.
+x-fortran-namelist: report
+type: object
+properties:
+  label:
+    $ref: "common-definitions.yml#/$defs/label"
+    title: Report label
+    description: Use-site documentation and default override for a shared string.
+    default: station-summary
+  level:
+    $ref: "common-definitions.yml#/$defs/report_level"
+    description: Inherits the default reporting level from the shared definition.
+  acceptance_fraction:
+    $ref: "common-definitions.yml#/$defs/fraction"
+    title: Acceptance fraction
+    description: Use-site lower bound and default for the report threshold.
+    minimum: 0.5
+    default: 0.75

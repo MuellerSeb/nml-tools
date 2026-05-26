@@ -1,0 +1,35 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+
+$defs:
+  label:
+    title: Shared label
+    description: General label stored in a fixed-length Fortran character field.
+    type: string
+    x-fortran-len: label_len
+    default: reference-example
+
+  fraction:
+    type: number
+    x-fortran-kind: dp
+    minimum: 0.0
+    maximum: 1.0
+
+  weight:
+    type: number
+    x-fortran-kind: dp
+    minimum: 0.0
+
+  station_weights:
+    type: array
+    x-fortran-shape: n_stations
+    items:
+      $ref: "#/$defs/weight"
+    default: [1.0]
+    x-fortran-default-repeat: true
+
+  report_level:
+    title: Reporting detail
+    type: integer
+    x-fortran-kind: i4
+    enum: [0, 1, 2]
+    default: 1

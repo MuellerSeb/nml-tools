@@ -1,0 +1,34 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+
+$ref: "run-base.yml"
+title: Reference-driven run configuration
+description: Configuration composed from a reusable root schema and local fields.
+x-fortran-namelist: run
+
+$defs:
+  method:
+    type: string
+    x-fortran-len: label_len
+    enum: [Euler, RK2, RK4]
+
+properties:
+  label:
+    description: Human-readable label for this concrete run.
+  steps:
+    maximum: 10000
+  method:
+    $ref: "#/$defs/method"
+    title: Time integration method
+    description: Integration scheme selected for this run.
+    default: RK2
+  relaxation:
+    $ref: "common-definitions.yml#/$defs/fraction"
+    title: Relaxation factor
+    description: A strictly positive fraction narrowed at the use site.
+    exclusiveMinimum: 0.0
+    maximum: 0.5
+    default: 0.25
+  station_weights:
+    description: Override the library default pattern for this use site.
+    default: [0.5, 1.0]
+    x-fortran-default-repeat: true

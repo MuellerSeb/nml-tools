@@ -1,0 +1,23 @@
+! Reference-driven run configuration
+&run
+  ! Run label
+  label = "reference-example"
+  ! Simulation steps
+  steps = 24
+  ! Station weights
+  station_weights(:) = 0.5, 1.0
+  ! Time integration method
+  method = "RK2"
+  ! Relaxation factor
+  relaxation = 0.25
+/
+
+! Reference-driven report configuration
+&report
+  ! Report label
+  label = "station-summary"
+  ! Reporting detail
+  level = 1
+  ! Acceptance fraction
+  acceptance_fraction = 0.75
+/
