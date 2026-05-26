@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
@@ -44,6 +45,19 @@ else:  # pragma: no cover - python<3.11
     import tomli as tomllib
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_f90nml_values(value: Any) -> Any:
+    """Remove parser bookkeeping while preserving nested derived values."""
+    if isinstance(value, Mapping):
+        return {
+            key: _normalize_f90nml_values(item)
+            for key, item in value.items()
+            if not (isinstance(key, str) and key.lower() == "_start_index")
+        }
+    if isinstance(value, list):
+        return [_normalize_f90nml_values(item) for item in value]
+    return value
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _DEFAULT_CONFIG = Path("nml-config.toml")
 _PYPROJECT_CONFIG = Path("pyproject.toml")
@@ -1241,7 +1255,7 @@ def validate(
         try:
             validate_namelist(
                 schema,
-                file_entries[key][1],
+                _normalize_f90nml_values(file_entries[key][1]),
                 constants=constants,
                 dimensions=dimensions,
             )

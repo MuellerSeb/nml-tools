@@ -303,6 +303,53 @@ def test_validate_resolves_external_references_with_cli_shape_values(tmp_path: P
         assert result.exit_code == 0, result.output
 
 
+def test_validate_accepts_f90nml_derived_array_bookkeeping(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: run
+                type: object
+                $defs:
+                  period:
+                    type: object
+                    x-fortran-type: period_t
+                    properties:
+                      start_year:
+                        type: integer
+                    required: [start_year]
+                required: [periods]
+                properties:
+                  periods:
+                    type: array
+                    x-fortran-shape: n_periods
+                    items:
+                      $ref: "#/$defs/period"
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text(
+            "&run\nperiods(1)%start_year = 1980\nperiods(2)%start_year = 2001\n/\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "--dimensions",
+                "n_periods=2",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+
 def test_validate_cli_dimensions_override_config_dimensions(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):
