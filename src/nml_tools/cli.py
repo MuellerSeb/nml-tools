@@ -34,7 +34,7 @@ from .codegen_fortran import (
 )
 from .codegen_markdown import generate_docs, render_docs
 from .codegen_template import generate_template, render_template
-from .schema import load_schema
+from .schema import SchemaResolver, load_schema
 from .validate import validate_namelist
 
 if sys.version_info >= (3, 11):
@@ -646,6 +646,7 @@ def _collect_generated_outputs(
     dimensions, dimension_specs = _load_dimensions(config, constants)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
+    resolver = SchemaResolver()
     outputs: list[GeneratedOutput] = []
 
     if helper_path is not None:
@@ -676,7 +677,7 @@ def _collect_generated_outputs(
             raise click.ClickException("namelists entry missing schema path")
         try:
             logger.debug("Loading schema %s", schema_path)
-            schema = load_schema(schema_path)
+            schema = load_schema(schema_path, resolver=resolver)
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
         loaded_entries.append({"entry": namelist_entry, "schema": schema})
@@ -749,7 +750,7 @@ def _collect_generated_outputs(
             schemas = []
             for schema_path in template_entry["schemas"]:
                 logger.debug("Loading schema %s", schema_path)
-                schemas.append(load_schema(schema_path))
+                schemas.append(load_schema(schema_path, resolver=resolver))
             logger.debug("Rendering template at %s", template_entry["output"])
             outputs.append(
                 GeneratedOutput(
@@ -1014,6 +1015,7 @@ def gen_fortran(config_path: Path | None) -> None:
     dimensions, dimension_specs = _load_dimensions(config, constants)
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
+    resolver = SchemaResolver()
     if helper_path is not None:
         try:
             logger.info("Generating helper module at %s", helper_path)
@@ -1037,7 +1039,7 @@ def gen_fortran(config_path: Path | None) -> None:
             raise click.ClickException("namelists entry missing schema path")
         try:
             logger.info("Loading schema %s", schema_path)
-            schema = load_schema(schema_path)
+            schema = load_schema(schema_path, resolver=resolver)
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
         loaded_entries.append({"entry": entry, "schema": schema})
@@ -1134,6 +1136,7 @@ def validate(
     dimension_overrides = _parse_cli_dimensions(dimension_args)
     dimensions: dict[str, int] = {}
     schemas: list[dict[str, Any]] = []
+    resolver = SchemaResolver()
 
     if schema_paths:
         if config_path is not None:
@@ -1148,7 +1151,7 @@ def validate(
         for schema_file in schema_paths:
             try:
                 logger.info("Loading schema %s", schema_file)
-                schemas.append(load_schema(schema_file))
+                schemas.append(load_schema(schema_file, resolver=resolver))
             except (FileNotFoundError, ValueError) as exc:
                 raise click.ClickException(str(exc)) from exc
         require_all = True
@@ -1168,7 +1171,7 @@ def validate(
                 raise click.ClickException("namelists entry missing schema path")
             try:
                 logger.info("Loading schema %s", schema_path)
-                schemas.append(load_schema(schema_path))
+                schemas.append(load_schema(schema_path, resolver=resolver))
             except (FileNotFoundError, ValueError) as exc:
                 raise click.ClickException(str(exc)) from exc
         require_all = False
@@ -1246,6 +1249,7 @@ def gen_markdown(config_path: Path | None) -> None:
         config
     )
     entries = _iter_namelists(config, base_dir)
+    resolver = SchemaResolver()
     logger.info("Found %d schema entries", len(entries))
     for entry in entries:
         schema_path = entry["schema"]
@@ -1253,7 +1257,7 @@ def gen_markdown(config_path: Path | None) -> None:
             raise click.ClickException("namelists entry missing schema path")
         try:
             logger.info("Loading schema %s", schema_path)
-            schema = load_schema(schema_path)
+            schema = load_schema(schema_path, resolver=resolver)
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc
         doc_path = entry["doc_path"]
@@ -1290,6 +1294,7 @@ def gen_template(config_path: Path | None) -> None:
     dimensions, _ = _load_dimensions(config, constants)
     _, kind_map, kind_allowlist = _load_kind_settings(config)
     templates = _iter_templates(config, base_dir)
+    resolver = SchemaResolver()
     if not templates:
         raise click.ClickException("config must define non-empty 'templates'")
     logger.info("Found %d template entries", len(templates))
@@ -1298,7 +1303,7 @@ def gen_template(config_path: Path | None) -> None:
             schemas = []
             for schema_path in entry["schemas"]:
                 logger.info("Loading schema %s", schema_path)
-                schemas.append(load_schema(schema_path))
+                schemas.append(load_schema(schema_path, resolver=resolver))
             logger.info("Generating template at %s", entry["output"])
             generate_template(
                 schemas,

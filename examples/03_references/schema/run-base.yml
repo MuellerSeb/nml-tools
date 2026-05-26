@@ -1,0 +1,17 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+
+type: object
+required: [steps]
+properties:
+  label:
+    $ref: "common-definitions.yml#/$defs/label"
+    title: Run label
+  steps:
+    title: Simulation steps
+    type: integer
+    x-fortran-kind: i4
+    minimum: 1
+    examples: [24]
+  station_weights:
+    $ref: "common-definitions.yml#/$defs/station_weights"
+    title: Station weights

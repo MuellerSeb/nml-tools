@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nml_tools.validate import validate_namelist
+from nml_tools.validate import validate_namelist, validate_schema_defaults
 
 
 def test_validate_namelist_rejects_unknown_property() -> None:
@@ -18,6 +18,104 @@ def test_validate_namelist_rejects_unknown_property() -> None:
     namelist = {"foo": 1, "bar": 2}
     with pytest.raises(ValueError, match="unknown property"):
         validate_namelist(schema, namelist)
+
+
+def test_validate_namelist_rejects_invalid_schema_defaults() -> None:
+    scalar_schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {"count": {"type": "integer", "minimum": 1, "default": 0}},
+    }
+    with pytest.raises(ValueError, match="must be >= 1"):
+        validate_namelist(scalar_schema, {})
+
+    array_schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "items": {"type": "integer", "enum": [1, 2]},
+                "default": [1],
+                "x-fortran-default-pad": 3,
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="outside enum"):
+        validate_namelist(array_schema, {})
+
+    partial_schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "items": {"type": "integer"},
+                "default": [1],
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="shorter than declared x-fortran-shape"):
+        validate_namelist(partial_schema, {})
+
+    scalar_array_default_schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": 1,
+                "items": {"type": "integer"},
+                "default": 1,
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="array default must be a list"):
+        validate_namelist(scalar_array_default_schema, {})
+
+    missing_items_schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": 1,
+                "default": [1],
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="must define object 'items'"):
+        validate_namelist(missing_items_schema, {})
+
+    options_without_default_schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-default-repeat": True,
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="default options require an array default"):
+        validate_namelist(options_without_default_schema, {})
+
+
+def test_validation_rejects_unresolved_schema_references() -> None:
+    schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "$defs": {"count": {"type": "integer"}},
+        "properties": {"count": {"$ref": "#/$defs/count"}},
+    }
+
+    with pytest.raises(ValueError, match=r"use load_schema\(\) or resolve_schema\(\)"):
+        validate_schema_defaults(schema)
+
+    with pytest.raises(ValueError, match=r"use load_schema\(\) or resolve_schema\(\)"):
+        validate_namelist(schema, {})
 
 
 def test_validate_namelist_flex_array_shape() -> None:

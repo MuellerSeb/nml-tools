@@ -20,6 +20,7 @@ from .codegen_fortran import (
     _parse_default_dimensions,
     _reject_runtime_dimension_lengths,
 )
+from .validate import validate_schema_defaults
 
 _MISSING = object()
 
@@ -111,6 +112,7 @@ def _render_template(
 
     schema_by_name: dict[str, dict[str, Any]] = {}
     for schema in schemas_list:
+        validate_schema_defaults(schema, constants=constants, dimensions=dimensions)
         namelist_name = schema.get("x-fortran-namelist")
         if not isinstance(namelist_name, str):
             raise ValueError("schema must define 'x-fortran-namelist'")

@@ -1,0 +1,40 @@
+[helper]
+path = "out/nml_helper.f90"
+module = "nml_helper"
+buffer = 512
+header = '''
+! created with nml-tools: reusable schema reference example
+'''
+
+[constants.label_len]
+value = 32
+doc = "Length of labels referenced from shared definitions."
+
+[dimensions.n_stations]
+value = 4
+doc = "Number of station weights in the run configuration."
+
+[kinds]
+module = "iso_fortran_env"
+real = ["real64"]
+integer = ["int32"]
+map = { dp = "real64", i4 = "int32" }
+
+[[namelists]]
+schema = "schema/run.yml"
+mod_path = "out/nml_run.f90"
+doc_path = "out/nml_run.md"
+
+[[namelists]]
+schema = "schema/report.yml"
+mod_path = "out/nml_report.f90"
+doc_path = "out/nml_report.md"
+
+[[templates]]
+output = "out/reference-demo.nml"
+schemas = ["schema/run.yml", "schema/report.yml"]
+doc_mode = "documented"
+value_mode = "filled"
+
+[templates.values.run]
+steps = 24
