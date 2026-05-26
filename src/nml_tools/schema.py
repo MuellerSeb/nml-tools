@@ -15,6 +15,7 @@ import yaml
 
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 _DOCUMENT_SUFFIXES = {".json", ".yml", ".yaml"}
+_WINDOWS_ABSOLUTE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 _REPRESENTATION_KEYS = {
     "type",
     "x-fortran-kind",
@@ -85,7 +86,6 @@ class SchemaResolver:
     def __init__(self) -> None:
         self._documents: dict[Path, _Document] = {}
         self._active_refs: list[tuple[str, str]] = []
-        self._reference_identities: set[tuple[str, str]] = set()
 
     def resolve_file(self, path: str | Path) -> dict[str, Any]:
         """Load and resolve a file-backed schema document."""
@@ -165,7 +165,6 @@ class SchemaResolver:
                     f"{_location(document, pointer)}: cyclic $ref '{ref}' "
                     f"targeting {_location(target_document, target_pointer)}"
                 )
-            self._reference_identities.add(identity)
             self._active_refs.append(identity)
             try:
                 resolved_target = self._resolve_node(
@@ -251,18 +250,24 @@ class SchemaResolver:
         document: _Document,
         pointer: str,
     ) -> tuple[dict[str, Any], _Document, str]:
-        split = urlsplit(ref)
-        if split.scheme or split.netloc or split.query:
-            raise ValueError(
-                f"{_location(document, pointer)}: remote or URI $ref is not supported: '{ref}'"
-            )
-        if split.path:
+        if _WINDOWS_ABSOLUTE_PATH.match(ref):
+            ref_path, separator, ref_fragment = ref.partition("#")
+            fragment = ref_fragment if separator else ""
+        else:
+            split = urlsplit(ref)
+            if split.scheme or split.netloc or split.query:
+                raise ValueError(
+                    f"{_location(document, pointer)}: remote or URI $ref is not supported: '{ref}'"
+                )
+            ref_path = split.path
+            fragment = split.fragment
+        if ref_path:
             if document.path is None:
                 raise ValueError(
                     f"{_location(document, pointer)}: external $ref '{ref}' "
                     "requires a source path"
                 )
-            external_path = Path(unquote(split.path))
+            external_path = Path(unquote(ref_path))
             if not external_path.is_absolute():
                 external_path = document.path.parent / external_path
             try:
@@ -275,7 +280,7 @@ class SchemaResolver:
             self._validate_document_metadata(target_document)
         else:
             target_document = document
-        target_pointer = _fragment_to_pointer(split.fragment, ref, document, pointer)
+        target_pointer = _fragment_to_pointer(fragment, ref, document, pointer)
         target = _lookup_pointer(
             target_document.data,
             target_pointer,

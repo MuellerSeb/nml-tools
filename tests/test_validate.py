@@ -60,6 +60,21 @@ def test_validate_namelist_rejects_invalid_schema_defaults() -> None:
     with pytest.raises(ValueError, match="shorter than declared x-fortran-shape"):
         validate_namelist(partial_schema, {})
 
+    scalar_array_default_schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": 1,
+                "items": {"type": "integer"},
+                "default": 1,
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="array default must be a list"):
+        validate_namelist(scalar_array_default_schema, {})
+
 
 def test_validate_namelist_flex_array_shape() -> None:
     schema = {

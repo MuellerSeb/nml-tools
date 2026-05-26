@@ -287,6 +287,21 @@ def test_resolve_mapping_external_reference_requires_source_path() -> None:
         resolve_schema(schema)
 
 
+@pytest.mark.parametrize(
+    "ref",
+    [r"C:\schemas\definitions.yml#/$defs/value", "C:/schemas/definitions.yml#/$defs/value"],
+)
+def test_windows_absolute_references_are_local_file_references(ref: str) -> None:
+    schema = {
+        "x-fortran-namelist": "demo",
+        "type": "object",
+        "properties": {"value": {"$ref": ref}},
+    }
+
+    with pytest.raises(ValueError, match="requires a source path"):
+        resolve_schema(schema)
+
+
 def test_unresolved_reference_diagnostic_identifies_use_site_and_target(tmp_path: Path) -> None:
     definitions = tmp_path / "definitions.yml"
     definitions.write_text("$defs: {}\n", encoding="utf-8")

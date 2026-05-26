@@ -137,7 +137,7 @@ def _validate_property_defaults(
     if "default" in prop:
         default = prop["default"]
         if not isinstance(default, list):
-            raise ValueError(f"array property '{name}' default must be a list")
+            raise ValueError(f"array default must be a list for property '{name}'")
         _validate_array_default_layout(name, prop, default, constants, dimensions)
         for value in _iter_scalars(default):
             _validate_property(
