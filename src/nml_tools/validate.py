@@ -33,6 +33,11 @@ def validate_schema_defaults(
     dimensions: dict[str, int] | None = None,
 ) -> None:
     """Validate operational defaults against each property's constraints."""
+    if _has_reachable_reference(schema, position="root"):
+        raise ValueError(
+            "schema contains unresolved '$ref'; use load_schema() or resolve_schema() "
+            "before validation or generation"
+        )
     constants = normalize_constant_values(constants)
     dimensions = normalize_runtime_dimensions(dimensions)
     reject_constant_dimension_overlap(constants, dimensions)
@@ -48,6 +53,21 @@ def validate_schema_defaults(
             constants=constants,
             dimensions=dimensions,
         )
+
+
+def _has_reachable_reference(raw: Mapping[str, Any], *, position: str) -> bool:
+    if "$ref" in raw:
+        return True
+    if position == "root":
+        properties = raw.get("properties")
+        if isinstance(properties, Mapping):
+            for prop in properties.values():
+                if isinstance(prop, Mapping) and _has_reachable_reference(
+                    prop, position="property"
+                ):
+                    return True
+    items = raw.get("items")
+    return isinstance(items, Mapping) and _has_reachable_reference(items, position="items")
 
 
 def validate_namelist(
@@ -113,9 +133,6 @@ def _validate_property_defaults(
             )
         return
 
-    items = prop.get("items")
-    if not isinstance(items, Mapping):
-        return
     controls = {
         "x-fortran-default-order",
         "x-fortran-default-repeat",
@@ -123,6 +140,11 @@ def _validate_property_defaults(
     }
     if controls.intersection(prop) and "default" not in prop:
         raise ValueError(f"array property '{name}' default options require an array default")
+    items = prop.get("items")
+    if not isinstance(items, Mapping):
+        if "default" in prop:
+            raise ValueError(f"array property '{name}' with a default must define object 'items'")
+        return
     if "default" in prop and "default" in items:
         raise ValueError(
             f"array property '{name}' default must be defined on property or items, not both"
