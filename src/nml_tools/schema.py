@@ -13,15 +13,20 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
+from ._utils import FORTRAN_IDENTIFIER
+
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 _DOCUMENT_SUFFIXES = {".json", ".yml", ".yaml"}
 _WINDOWS_ABSOLUTE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+DERIVED_REF_ORIGIN_KEY = "_nml_tools_ref_origin"
 _REPRESENTATION_KEYS = {
     "type",
     "x-fortran-kind",
     "x-fortran-len",
     "x-fortran-shape",
     "x-fortran-flex-tail-dims",
+    "x-fortran-type",
+    "x-fortran-module",
 }
 _ANNOTATION_KEYS = {"title", "description", "examples", "$comment"}
 _DEFAULT_CONTROL_KEYS = {
@@ -90,7 +95,8 @@ class SchemaResolver:
     def resolve_file(self, path: str | Path) -> dict[str, Any]:
         """Load and resolve a file-backed schema document."""
         document = self._load_document(Path(path))
-        if not _contains_reachable_ref(document.data, position="root"):
+        _reject_reserved_marker(document.data, document, "")
+        if not _requires_normalization(document.data, position="root"):
             return copy.deepcopy(document.data)
         self._validate_document_metadata(document)
         return self._resolve_node(document.data, document, "", position="root")
@@ -107,7 +113,8 @@ class SchemaResolver:
         document = _Document(data, path)
         if path is not None:
             self._documents[path] = document
-        if not _contains_reachable_ref(data, position="root"):
+        _reject_reserved_marker(data, document, "")
+        if not _requires_normalization(data, position="root"):
             return copy.deepcopy(data)
         self._validate_document_metadata(document)
         return self._resolve_node(data, document, "", position="root")
@@ -152,6 +159,7 @@ class SchemaResolver:
         pointer: str,
         *,
         position: str,
+        allow_derived_definition: bool = False,
     ) -> dict[str, Any]:
         _reject_unsupported_reference_keywords(raw, document, pointer)
         ref = raw.get("$ref")
@@ -168,7 +176,11 @@ class SchemaResolver:
             self._active_refs.append(identity)
             try:
                 resolved_target = self._resolve_node(
-                    target, target_document, target_pointer, position=position
+                    target,
+                    target_document,
+                    target_pointer,
+                    position=position,
+                    allow_derived_definition=position in {"property", "items"},
                 )
             finally:
                 self._active_refs.pop()
@@ -180,14 +192,26 @@ class SchemaResolver:
                 raise ValueError(
                     f"{_location(document, pointer)}: invalid $ref '{ref}': {exc}"
                 ) from exc
+            if position in {"property", "items"} and result.get("type") == "object":
+                base_definition = copy.deepcopy(resolved_target)
+                base_definition.pop(DERIVED_REF_ORIGIN_KEY, None)
+                result[DERIVED_REF_ORIGIN_KEY] = {
+                    "identity": [target_document.identity, target_pointer],
+                    "definition": base_definition,
+                }
         else:
             result = self._resolve_plain(raw, document, pointer, position=position)
 
-        _validate_effective_node(result, position=position)
-        if position != "root" and result.get("type") == "object":
+        if (
+            position != "root"
+            and result.get("type") == "object"
+            and DERIVED_REF_ORIGIN_KEY not in result
+            and not allow_derived_definition
+        ):
             raise ValueError(
-                f"{_location(document, pointer)}: object properties require derived-type support"
+                f"{_location(document, pointer)}: derived-type object properties must use '$ref'"
             )
+        _validate_effective_node(result, position=position)
         return result
 
     def _resolve_plain(
@@ -203,7 +227,7 @@ class SchemaResolver:
             for key, value in raw.items()
             if key not in {"$ref", "$defs"}
         }
-        if position == "root" and "properties" in raw:
+        if "properties" in raw:
             properties = raw["properties"]
             if not isinstance(properties, Mapping):
                 raise ValueError(f"{_location(document, pointer)}: 'properties' must be an object")
@@ -330,17 +354,50 @@ def _contains_reachable_ref(raw: Mapping[str, Any], *, position: str) -> bool:
     return isinstance(items, Mapping) and _contains_reachable_ref(items, position="items")
 
 
+def _requires_normalization(raw: Mapping[str, Any], *, position: str) -> bool:
+    if _contains_reachable_ref(raw, position=position):
+        return True
+    if raw.get("type") == "object" and position != "root":
+        return True
+    properties = raw.get("properties")
+    if isinstance(properties, Mapping):
+        for prop in properties.values():
+            if isinstance(prop, Mapping) and _requires_normalization(prop, position="property"):
+                return True
+    items = raw.get("items")
+    return isinstance(items, Mapping) and _requires_normalization(items, position="items")
+
+
 def _reject_unsupported_reference_keywords(
     raw: Mapping[str, Any],
     document: _Document,
     pointer: str,
 ) -> None:
+    if DERIVED_REF_ORIGIN_KEY in raw:
+        raise ValueError(
+            f"{_location(document, pointer)}: keyword '{DERIVED_REF_ORIGIN_KEY}' is reserved"
+        )
     for keyword in _REJECTED_REFERENCE_KEYS:
         if keyword in raw:
             raise ValueError(
                 f"{_location(document, pointer)}: keyword '{keyword}' is not supported "
                 "with references"
             )
+
+
+def _reject_reserved_marker(raw: Any, document: _Document, pointer: str) -> None:
+    if isinstance(raw, Mapping):
+        if DERIVED_REF_ORIGIN_KEY in raw:
+            raise ValueError(
+                f"{_location(document, pointer)}: keyword '{DERIVED_REF_ORIGIN_KEY}' is reserved"
+            )
+        for key, value in raw.items():
+            if isinstance(key, str):
+                _reject_reserved_marker(value, document, _child_pointer(pointer, key))
+        return
+    if isinstance(raw, list):
+        for index, value in enumerate(raw):
+            _reject_reserved_marker(value, document, _child_pointer(pointer, str(index)))
 
 
 def _compose_nodes(
@@ -395,15 +452,21 @@ def _compose_nodes(
             )
 
     if "properties" in referenced or "properties" in local:
-        if position != "root":
-            raise ValueError("object property composition is not supported for fields")
-        result["properties"] = _compose_properties(
-            referenced.get("properties", {}),
-            local.get("properties", {}),
-        )
+        if position == "root":
+            result["properties"] = _compose_properties(
+                referenced.get("properties", {}),
+                local.get("properties", {}),
+            )
+        elif result.get("type") == "object":
+            result["properties"] = _compose_derived_properties(
+                referenced.get("properties", {}),
+                local.get("properties", {}),
+            )
+        else:
+            raise ValueError("object property composition is not supported for scalar fields")
     if "required" in referenced or "required" in local:
-        if position != "root":
-            raise ValueError("'required' composition is only supported at the namelist root")
+        if position != "root" and result.get("type") != "object":
+            raise ValueError("'required' composition is only supported for objects")
         result["required"] = _union_required(
             referenced.get("required", []),
             local.get("required", []),
@@ -426,6 +489,23 @@ def _compose_properties(
             result[name] = _compose_nodes(result[name], schema, position="property")
         else:
             result[name] = copy.deepcopy(schema)
+    return result
+
+
+def _compose_derived_properties(referenced: Any, local: Any) -> dict[str, Any]:
+    if not isinstance(referenced, dict) or not isinstance(local, dict):
+        raise ValueError("'properties' must be objects")
+    result = copy.deepcopy(referenced)
+    canonical = {name.lower(): name for name in referenced if isinstance(name, str)}
+    for name, schema in local.items():
+        if not isinstance(name, str):
+            raise ValueError("derived-type component names must be strings")
+        target_name = canonical.get(name.lower())
+        if target_name is None:
+            raise ValueError(f"derived-type use site must not add component '{name}'")
+        if not isinstance(result[target_name], dict) or not isinstance(schema, dict):
+            raise ValueError(f"component '{name}' must be a schema object")
+        result[target_name] = _compose_nodes(result[target_name], schema, position="property")
     return result
 
 
@@ -550,6 +630,17 @@ def _validate_effective_node(schema: dict[str, Any], *, position: str) -> None:
     if schema.get("type") == "array":
         if _DEFAULT_CONTROL_KEYS.intersection(schema) and "default" not in schema:
             raise ValueError("array x-fortran-default-* options require an array-level default")
+        items = schema.get("items")
+        if isinstance(items, Mapping) and items.get("type") == "object":
+            if "x-fortran-flex-tail-dims" in schema:
+                raise ValueError(
+                    "derived-type arrays must not define 'x-fortran-flex-tail-dims'"
+                )
+            if "default" in schema or _DEFAULT_CONTROL_KEYS.intersection(schema):
+                raise ValueError("derived-type arrays must not define defaults")
+        return
+    if schema.get("type") == "object" and position != "root":
+        _validate_derived_object(schema)
         return
     enum = schema.get("enum")
     if enum is None:
@@ -563,6 +654,49 @@ def _validate_effective_node(schema: dict[str, Any], *, position: str) -> None:
         if not effective_values:
             raise ValueError("enum values are eliminated by effective constraints")
         raise ValueError("enum contains values outside effective constraints")
+
+
+def _validate_derived_object(schema: Mapping[str, Any]) -> None:
+    type_name = schema.get("x-fortran-type")
+    if not isinstance(type_name, str) or not type_name.strip():
+        raise ValueError("derived-type object must define non-empty 'x-fortran-type'")
+    if FORTRAN_IDENTIFIER.match(type_name.strip()) is None:
+        raise ValueError("'x-fortran-type' must be a valid Fortran identifier")
+    module_name = schema.get("x-fortran-module")
+    if module_name is not None:
+        if (
+            not isinstance(module_name, str)
+            or FORTRAN_IDENTIFIER.match(module_name.strip()) is None
+        ):
+            raise ValueError("'x-fortran-module' must be a valid Fortran identifier")
+    if "default" in schema:
+        raise ValueError("derived-type object must not define a default")
+    properties = schema.get("properties")
+    if not isinstance(properties, Mapping) or not properties:
+        raise ValueError("derived-type object must define non-empty 'properties'")
+    canonical: set[str] = set()
+    for name, prop in properties.items():
+        if not isinstance(name, str):
+            raise ValueError("derived-type component names must be strings")
+        key = name.lower()
+        if key in canonical:
+            raise ValueError(f"derived-type object defines duplicate component '{name}'")
+        canonical.add(key)
+        if not isinstance(prop, Mapping) or prop.get("type") not in {
+            "integer",
+            "number",
+            "boolean",
+            "string",
+        }:
+            raise ValueError(
+                f"derived-type component '{name}' must define an intrinsic scalar type"
+            )
+    required = schema.get("required", [])
+    if not isinstance(required, list):
+        raise ValueError("derived-type 'required' must be a list")
+    for name in required:
+        if not isinstance(name, str) or name.lower() not in canonical:
+            raise ValueError(f"derived-type required component '{name}' is not a property")
 
 
 def _scalar_satisfies_static_constraints(value: Any, schema: Mapping[str, Any]) -> bool:

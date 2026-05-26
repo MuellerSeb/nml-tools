@@ -410,3 +410,190 @@ def test_resolved_schema_is_equivalent_for_outputs_and_validation(tmp_path: Path
         "dict(real=dict(dp='double'), integer=dict(c_intptr_t='long_long'))\n"
     )
     validate_namelist(referenced, {"values": [1.0, 2.0]}, dimensions={"n_values": 2})
+
+
+def test_resolve_schema_preserves_referenced_derived_type_origin_and_refinements() -> None:
+    resolved = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "title": "Time period",
+                    "description": "Reusable bounds for one period.",
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "start_year": {"type": "integer", "minimum": 1900},
+                        "label": {"type": "string", "x-fortran-len": 16},
+                    },
+                    "required": ["start_year"],
+                }
+            },
+            "required": ["period"],
+            "properties": {
+                "period": {
+                    "$ref": "#/$defs/period",
+                    "title": "Evaluation period",
+                    "properties": {
+                        "start_year": {"minimum": 2000},
+                        "label": {"default": "calibration"},
+                    },
+                }
+            },
+        }
+    )
+
+    period = resolved["properties"]["period"]
+    assert period["x-fortran-type"] == "period_t"
+    assert period["title"] == "Evaluation period"
+    assert period["properties"]["start_year"]["minimum"] == 2000
+    assert period["properties"]["label"]["default"] == "calibration"
+    origin = period["_nml_tools_ref_origin"]
+    assert origin["identity"] == ["<mapping>", "/$defs/period"]
+    assert origin["definition"]["title"] == "Time period"
+    assert origin["definition"]["properties"]["start_year"]["minimum"] == 1900
+
+
+def test_resolve_schema_accepts_arrays_of_referenced_derived_values() -> None:
+    resolved = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {"year": {"type": "integer"}},
+                }
+            },
+            "properties": {
+                "periods": {
+                    "type": "array",
+                    "x-fortran-shape": "n_periods",
+                    "items": {"$ref": "#/$defs/period"},
+                }
+            },
+        }
+    )
+
+    assert resolved["properties"]["periods"]["items"]["x-fortran-type"] == "period_t"
+    assert resolved["properties"]["periods"]["items"]["_nml_tools_ref_origin"]["identity"] == [
+        "<mapping>",
+        "/$defs/period",
+    ]
+
+
+def test_resolve_schema_rejects_user_authored_derived_origin_marker() -> None:
+    with pytest.raises(ValueError, match="_nml_tools_ref_origin.*reserved"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "_nml_tools_ref_origin": {},
+                "properties": {"year": {"type": "integer"}},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("property_schema", "match"),
+    [
+        (
+            {"type": "object", "x-fortran-type": "period_t", "properties": {}},
+            "must use '\\$ref'",
+        ),
+        (
+            {"$ref": "#/$defs/missing_type"},
+            "must define non-empty 'x-fortran-type'",
+        ),
+        (
+            {"$ref": "#/$defs/period", "properties": {"other": {"type": "integer"}}},
+            "must not add component",
+        ),
+        (
+            {"$ref": "#/$defs/period", "x-fortran-type": "other_t"},
+            "conflicting 'x-fortran-type'",
+        ),
+    ],
+)
+def test_referenced_derived_type_rejects_invalid_property_forms(
+    property_schema: dict[str, object], match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "$defs": {
+                    "missing_type": {
+                        "type": "object",
+                        "properties": {"year": {"type": "integer"}},
+                    },
+                    "period": {
+                        "type": "object",
+                        "x-fortran-type": "period_t",
+                        "properties": {"year": {"type": "integer"}},
+                    },
+                },
+                "properties": {"period": property_schema},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("property_schema", "match"),
+    [
+        (
+            {"$ref": "#/$defs/nested"},
+            "component 'child' must define an intrinsic scalar type",
+        ),
+        (
+            {"$ref": "#/$defs/array_component"},
+            "component 'years' must define an intrinsic scalar type",
+        ),
+        (
+            {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "x-fortran-flex-tail-dims": 1,
+                "items": {"$ref": "#/$defs/period"},
+            },
+            "derived-type arrays must not define 'x-fortran-flex-tail-dims'",
+        ),
+    ],
+)
+def test_referenced_derived_types_reject_unsupported_v1_layouts(
+    property_schema: dict[str, object], match: str
+) -> None:
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "$defs": {
+            "period": {
+                "type": "object",
+                "x-fortran-type": "period_t",
+                "properties": {"year": {"type": "integer"}},
+            },
+            "nested": {
+                "type": "object",
+                "x-fortran-type": "nested_t",
+                "properties": {"child": {"$ref": "#/$defs/period"}},
+            },
+            "array_component": {
+                "type": "object",
+                "x-fortran-type": "array_component_t",
+                "properties": {
+                    "years": {
+                        "type": "array",
+                        "x-fortran-shape": 2,
+                        "items": {"type": "integer"},
+                    }
+                },
+            },
+        },
+        "properties": {"value": property_schema},
+    }
+
+    with pytest.raises(ValueError, match=match):
+        resolve_schema(schema)

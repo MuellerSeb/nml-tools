@@ -259,3 +259,81 @@ def test_validate_namelist_rejects_invalid_dimensions() -> None:
 
     with pytest.raises(ValueError, match="must be positive"):
         validate_namelist(schema, {"arr": [1]}, dimensions={"n_values": 0})
+
+
+def _derived_schema(*, optional: bool = False) -> dict[str, object]:
+    return {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "period": {
+                "type": "object",
+                "x-fortran-type": "period_t",
+                "_nml_tools_ref_origin": {
+                    "identity": ["<mapping>", "/$defs/period"],
+                    "definition": {},
+                },
+                "properties": {
+                    "start_year": {"type": "integer", "minimum": 1900},
+                    "label": {"type": "string", "x-fortran-len": 8, "default": "default"},
+                },
+                "required": ["start_year"],
+            },
+            "periods": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "items": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "_nml_tools_ref_origin": {
+                        "identity": ["<mapping>", "/$defs/period"],
+                        "definition": {},
+                    },
+                    "properties": {"start_year": {"type": "integer", "minimum": 1900}},
+                    "required": ["start_year"],
+                },
+            },
+        },
+        "required": [] if optional else ["period", "periods"],
+    }
+
+
+def test_validate_namelist_accepts_nested_derived_values() -> None:
+    validate_namelist(
+        _derived_schema(),
+        {
+            "period": {"start_year": 2001, "label": "eval"},
+            "periods": [{"start_year": 1980}, {"start_year": 2001}],
+        },
+    )
+
+    with pytest.raises(ValueError, match=r"period\.start_year.*>= 1900"):
+        validate_namelist(
+            _derived_schema(),
+            {
+                "period": {"start_year": 1800},
+                "periods": [{"start_year": 1980}, {"start_year": 2001}],
+            },
+        )
+    with pytest.raises(ValueError, match=r"periods\[2\]\.missing.*unknown"):
+        validate_namelist(
+            _derived_schema(),
+            {
+                "period": {"start_year": 2001},
+                "periods": [{"start_year": 1980}, {"start_year": 2001, "missing": 1}],
+            },
+        )
+
+
+def test_validate_namelist_rejects_optional_derived_values_with_required_members() -> None:
+    with pytest.raises(ValueError, match="optional derived property 'period'.*required"):
+        validate_schema_defaults(_derived_schema(optional=True))
+
+
+def test_validate_schema_defaults_traverses_derived_members() -> None:
+    schema = _derived_schema()
+    period = schema["properties"]["period"]  # type: ignore[index]
+    period["properties"]["label"]["default"] = "too-long-value"  # type: ignore[index]
+
+    with pytest.raises(ValueError, match=r"period\.label.*exceeds length"):
+        validate_schema_defaults(schema)
