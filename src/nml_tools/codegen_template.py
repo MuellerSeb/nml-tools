@@ -348,7 +348,9 @@ def _derived_value_entries(
     )
 
 
-def _as_str_keyed_table(value: dict[Any, Any], context: str) -> dict[str, Any]:
+def _as_str_keyed_table(value: object, context: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{context} must be a table")
     table: dict[str, Any] = {}
     for key, entry in value.items():
         if not isinstance(key, str):
