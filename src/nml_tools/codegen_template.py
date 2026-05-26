@@ -317,18 +317,22 @@ def _derived_value_entries(
                 raise ValueError(
                     f"derived array template value '{name}[{index}]' must be a table"
                 )
+            value_map = _as_str_keyed_table(value, f"derived array template value '{name}[{index}]'")
             entries.extend(
                 _derived_component_entries(
                     f"{name}({index})",
                     properties,
                     value_mode=value_mode,
-                    overrides=value,
+                    overrides=value_map,
                     constants=constants,
                 )
             )
         return entries
     if override is not _MISSING and not isinstance(override, dict):
         raise ValueError(f"derived template value '{name}' must be a table")
+    override_map: dict[str, Any] = {}
+    if override is not _MISSING:
+        override_map = _as_str_keyed_table(override, f"derived template value '{name}'")
     prefix = name
     if is_array:
         prefix = f"{name}{_array_slice(len(type_info.dimensions))}"
@@ -336,9 +340,18 @@ def _derived_value_entries(
         prefix,
         properties,
         value_mode=value_mode,
-        overrides={} if override is _MISSING else override,
+        overrides=override_map,
         constants=constants,
     )
+
+
+def _as_str_keyed_table(value: dict[Any, Any], context: str) -> dict[str, Any]:
+    table: dict[str, Any] = {}
+    for key, entry in value.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{context} must use string keys")
+        table[key] = entry
+    return table
 
 
 def _derived_component_entries(
