@@ -6,6 +6,8 @@ import importlib
 import sys
 from pathlib import Path
 
+from nml_tools.schema import resolve_schema
+
 
 def _import_generate_docs():
     root = Path(__file__).resolve().parents[1]
@@ -140,3 +142,57 @@ def test_generate_docs_adds_doxygen_id_and_toc(tmp_path: Path) -> None:
     assert lines[0] == "# TOC docs {#config_optimize}"
     assert lines[1] == ""
     assert lines[2] == "[TOC]"
+
+
+def test_generate_docs_documents_derived_fields_and_reusable_types(tmp_path: Path) -> None:
+    schema = resolve_schema(
+        {
+            "title": "Run",
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "title": "Time period",
+                    "description": "Bounds for one interval.",
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "start_year": {
+                            "type": "integer",
+                            "minimum": 1900,
+                        },
+                        "label": {
+                            "type": "string",
+                            "x-fortran-len": 8,
+                            "default": "base",
+                        },
+                    },
+                }
+            },
+            "properties": {
+                "period": {
+                    "$ref": "#/$defs/period",
+                    "properties": {"start_year": {"minimum": 2000}},
+                },
+                "periods": {
+                    "type": "array",
+                    "x-fortran-shape": 2,
+                    "items": {"$ref": "#/$defs/period"},
+                },
+            },
+        }
+    )
+    output = tmp_path / "run.md"
+
+    _import_generate_docs()(schema, output)
+    rendered = output.read_text()
+
+    assert "type(period_t)" in rendered
+    assert "Components:" in rendered
+    assert "`period%start_year`" in rendered
+    assert "Minimum: `>= 2000`" in rendered
+    assert "## Derived types" in rendered
+    assert rendered.count("### `period_t`") == 1
+    assert "Bounds for one interval." in rendered
+    assert "- Ownership: `nml_helper`" in rendered
+    assert "period%start_year = 0" in rendered

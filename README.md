@@ -12,15 +12,14 @@ Generate Fortran namelist modules, Markdown docs, and template namelists from a 
 - Core keywords from JSON schema: `type`, `properties`, `required`, `default`, `examples`, `title`, `description`.
 - Fortran extensions: `x-fortran-namelist`, `x-fortran-kind`,
   `x-fortran-len`, `x-fortran-shape`, `x-fortran-flex-tail-dims`,
-  `x-fortran-default-*`.
+  `x-fortran-default-*`, `x-fortran-type`, `x-fortran-module`.
 - Outputs: Fortran module, helper module, Markdown docs, template namelist.
 - Config-driven CLI for batching multiple schemas.
 
 ### Missing Fortran features
 
-- No support for derived types:
-  - Only scalars and arrays of scalars are supported.
-  - Could be emulated with nested objects, but one would need to decide where the respective fortran types are defined or used from.
+- Derived types currently support one level of intrinsic scalar components
+  only; nested derived values and array components are not supported.
 - No support for complex types:
   - JSON doesn't have a native complex type.
   - Could be emulated with:
@@ -96,6 +95,63 @@ values:
   items:
     type: number
     x-fortran-kind: dp
+```
+
+### x-fortran-type and x-fortran-module
+
+- Location: a referenced `type: object` definition used as a property or as
+  array `items`.
+- `x-fortran-type` is required and gives the Fortran derived type name.
+- `x-fortran-module` is optional. If absent, the type is emitted once in the
+  generated helper module. If present, the namelist module imports the type
+  from that application-owned module.
+
+```yaml
+$defs:
+  period:
+    title: Time period
+    description: Bounds for one interval.
+    type: object
+    x-fortran-type: period_t
+    properties:
+      start_year:
+        type: integer
+      label:
+        type: string
+        x-fortran-len: 16
+        default: default
+properties:
+  period:
+    $ref: "#/$defs/period"
+  periods:
+    type: array
+    x-fortran-shape: n_periods
+    items:
+      $ref: "#/$defs/period"
+```
+
+Only intrinsic scalar members are supported in the first implementation.
+Object defaults, derived array defaults, derived flexible-tail arrays, nested
+derived members, and array members are rejected. Optional derived fields must
+not declare required inner members. For scalar imported fields with string
+members, generated code verifies that application storage is at least
+`x-fortran-len` characters long and blanks longer trailing storage after reads
+and setters.
+
+Generated native APIs accept typed values and add `init_type`, for example:
+
+```fortran
+type(period_t) :: period
+status = config%init_type(period=period)
+period%start_year = 2001
+status = config%set(period=period)
+```
+
+Namelist and template entries use normal component notation:
+
+```fortran
+period%start_year = 2001
+periods(2)%start_year = 2001
 ```
 
 ### x-fortran-flex-tail-dims
@@ -438,6 +494,19 @@ niterations = 4
 tolerance = 0.1
 ```
 
+Derived overrides use nested TOML tables and arrays of tables:
+
+```toml
+[templates.values.run.period]
+start_year = 2001
+
+[[templates.values.run.periods]]
+start_year = 1980
+
+[[templates.values.run.periods]]
+start_year = 2001
+```
+
 ## CLI
 
 The command line interface is available as `nml-tools` or `nmlt`.
@@ -663,7 +732,8 @@ Main missing features compared to JSON Schema:
 - No numeric or string validation keywords like `multipleOf`, `minLength`,
   `maxLength`, `pattern`, `format` (bounds are supported via `minimum`,
   `maximum`, `exclusiveMinimum`, and `exclusiveMaximum`).
-- No nested object schemas; properties are scalars or arrays of scalars only.
+- Object schemas are supported only as one-level referenced Fortran derived
+  types with intrinsic scalar members.
 
 Use the `x-fortran-*` extensions to express kind, length, and shape information
 needed for code generation.
@@ -700,7 +770,9 @@ representation keywords such as `x-fortran-kind`, `x-fortran-len`, and
 `x-fortran-shape` are rejected. For arrays, a use-site array `default` replaces
 the referenced default together with any `x-fortran-default-*` controls.
 
-Only references within the existing namelist model are supported: namelist
-roots, scalar/scalar-array fields, and array `items`. Derived-type object
-properties, `$id`/`$anchor` resolution, recursive references, `$dynamicRef`,
-legacy `definitions`, and general composition keywords are not supported.
+Referenced named object definitions may also represent one-level derived-type
+properties through `x-fortran-type` and optional `x-fortran-module`. Type use
+sites may refine existing scalar components but cannot add components or change
+the Fortran type identity. `$id`/`$anchor` resolution, recursive references,
+`$dynamicRef`, legacy `definitions`, and general composition keywords are not
+supported.

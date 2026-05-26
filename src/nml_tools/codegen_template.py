@@ -14,6 +14,7 @@ from .codegen_fortran import (
     FieldTypeInfo,
     _array_default_value,
     _collect_dimension_constants,
+    _derived_schema,
     _enum_values,
     _field_type_info,
     _format_scalar_default,
@@ -227,6 +228,17 @@ def _value_entries(
     override: Any,
     constants: dict[str, int] | None,
 ) -> list[tuple[str, str | None]]:
+    derived = _derived_schema(prop)
+    if derived is not None:
+        return _derived_value_entries(
+            name,
+            prop,
+            derived,
+            type_info,
+            value_mode=value_mode,
+            override=override,
+            constants=constants,
+        )
     if value_mode in {"empty", "minimal-empty"}:
         entry_name = name
         if type_info.category == "array":
@@ -280,6 +292,82 @@ def _value_entries(
         type_info.category,
     )
     return [(name, scalar)]
+
+
+def _derived_value_entries(
+    name: str,
+    prop: dict[str, Any],
+    derived: dict[str, Any],
+    type_info: FieldTypeInfo,
+    *,
+    value_mode: str,
+    override: Any,
+    constants: dict[str, int] | None,
+) -> list[tuple[str, str | None]]:
+    properties = derived.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        raise ValueError(f"derived property '{name}' must define properties")
+    is_array = type_info.category == "array"
+    entries: list[tuple[str, str | None]] = []
+    if is_array and override is not _MISSING:
+        if not isinstance(override, list):
+            raise ValueError(f"derived array template value '{name}' must be an array of tables")
+        for index, value in enumerate(override, start=1):
+            if not isinstance(value, dict):
+                raise ValueError(
+                    f"derived array template value '{name}[{index}]' must be a table"
+                )
+            entries.extend(
+                _derived_component_entries(
+                    f"{name}({index})",
+                    properties,
+                    value_mode=value_mode,
+                    overrides=value,
+                    constants=constants,
+                )
+            )
+        return entries
+    if override is not _MISSING and not isinstance(override, dict):
+        raise ValueError(f"derived template value '{name}' must be a table")
+    prefix = name
+    if is_array:
+        prefix = f"{name}{_array_slice(len(type_info.dimensions))}"
+    return _derived_component_entries(
+        prefix,
+        properties,
+        value_mode=value_mode,
+        overrides={} if override is _MISSING else override,
+        constants=constants,
+    )
+
+
+def _derived_component_entries(
+    prefix: str,
+    properties: dict[str, Any],
+    *,
+    value_mode: str,
+    overrides: dict[str, Any],
+    constants: dict[str, int] | None,
+) -> list[tuple[str, str | None]]:
+    for key in overrides:
+        if key not in properties:
+            raise ValueError(f"derived template value '{prefix}%{key}' is unknown")
+    entries: list[tuple[str, str | None]] = []
+    for child_name, child in properties.items():
+        if not isinstance(child_name, str) or not isinstance(child, dict):
+            raise ValueError(f"derived property '{prefix}' components must be schema objects")
+        child_type = _field_type_info(child, constants)
+        entries.extend(
+            _value_entries(
+                f"{prefix}%{child_name}",
+                child,
+                child_type,
+                value_mode=value_mode,
+                override=overrides.get(child_name, _MISSING),
+                constants=constants,
+            )
+        )
+    return entries
 
 
 def _array_list_entries(

@@ -6,6 +6,8 @@ import importlib
 import sys
 from pathlib import Path
 
+from nml_tools.schema import resolve_schema
+
 
 def _import_render_template():
     root = Path(__file__).resolve().parents[1]
@@ -139,3 +141,47 @@ def test_render_template_items_default() -> None:
     rendered = render_template([schema], doc_mode="plain", value_mode="filled")
 
     assert "grid(:) = 7" in rendered
+
+
+def test_render_template_derived_values_use_component_syntax_and_nested_overrides() -> None:
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "start_year": {"type": "integer", "default": 1900},
+                        "label": {"type": "string", "x-fortran-len": 8, "default": "base"},
+                    },
+                }
+            },
+            "properties": {
+                "period": {"$ref": "#/$defs/period"},
+                "periods": {
+                    "type": "array",
+                    "x-fortran-shape": 2,
+                    "items": {"$ref": "#/$defs/period"},
+                },
+            },
+        }
+    )
+
+    rendered = _import_render_template()(
+        [schema],
+        value_mode="filled",
+        values={
+            "run": {
+                "period": {"start_year": 2001, "label": "eval"},
+                "periods": [{"start_year": 1980}, {"start_year": 2001, "label": "future"}],
+            }
+        },
+    )
+
+    assert "period%start_year = 2001" in rendered
+    assert 'period%label = "eval"' in rendered
+    assert "periods(1)%start_year = 1980" in rendered
+    assert 'periods(1)%label = "base"' in rendered
+    assert 'periods(2)%label = "future"' in rendered
