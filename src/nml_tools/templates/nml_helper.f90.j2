@@ -10,6 +10,11 @@
 {{ module_doc }}
 {% endif %}
 module {{ module_name }}
+{% if kind_imports %}
+  ! kind specifiers used by locally generated derived types
+  use {{ kind_module }}, only: &
+    {{ kind_imports | join(', &\n    ') }}
+{% endif %}
 
   !> \brief Buffer length for reading lines
   integer, public :: nml_line_buffer = {{ len_buf }}
@@ -52,6 +57,19 @@ module {{ module_name }}
 {% endfor %}
 {% endif %}
 
+{% for derived in local_derived_types %}
+  !> \class {{ derived.type_name }}
+  !> \brief {{ derived.title }}
+{% if derived.description %}
+  !> \details {{ derived.description | replace('\n', '\n  !! ') }}
+{% endif %}
+  type, public :: {{ derived.type_name }}
+{% for declaration in derived.declarations %}
+    {{ declaration }}
+{% endfor %}
+  end type {{ derived.type_name }}
+
+{% endfor %}
   !> \class nml_file_t
   !> \brief Type for namelist file operations
   type, public :: nml_file_t
