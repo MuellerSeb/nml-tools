@@ -421,7 +421,7 @@ i4 = "int"
 
 The f2py-visible wrapper procedures avoid Fortran `optional` dummy arguments
 and assumed-shape arrays. Optional Python values are represented by generated
-`has_<name>` flags and harmless dummy values. Inside the Fortran wrapper,
+`has__<name>` flags and harmless dummy values. Inside the Fortran wrapper,
 allocated local variables are passed to the generated type-bound `set` method
 when a value is present; unallocated allocatables are passed otherwise, so the
 type-bound `set` still sees `present(arg) == .false.`. This keeps the f2py ABI
@@ -433,6 +433,18 @@ present.
 For array arguments, the generated Python shim follows the same partial-set
 semantics as the Fortran setter. Scalar inputs become shape `(1, ..., 1)`;
 lower-rank inputs get singleton trailing dimensions before being passed to f2py.
+
+Derived values stay natural at the Python API boundary:
+
+```python
+cfg.set(period={"start_year": 2001})
+cfg.set(periods=[{"start_year": 1980}, {"start_year": 2001}])
+```
+
+Only the internal f2py ABI is flattened: `%` paths are encoded with `__`, for
+example `period__start_year` and `has__period__start_year`. Python
+`is_set("period.start_year")` is translated to the native
+`is_set("period%start_year")` lookup.
 
 The f2py wrappers use opaque integer handles for Fortran-owned namelist
 instances. nml-tools assumes that the owning Fortran library creates those

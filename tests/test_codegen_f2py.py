@@ -10,6 +10,8 @@ from typing import Any
 
 import pytest
 
+from nml_tools.schema import resolve_schema
+
 
 def _import_codegen_f2py() -> Any:
     root = Path(__file__).resolve().parents[1]
@@ -62,6 +64,36 @@ def _runtime_dimension_schema(name: str = "config") -> dict[str, Any]:
     }
 
 
+def _derived_schema() -> dict[str, Any]:
+    return resolve_schema(
+        {
+            "title": "Derived",
+            "x-fortran-namelist": "derived",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "start_year": {"type": "integer", "x-fortran-kind": "i4"},
+                        "label": {"type": "string", "x-fortran-len": 8, "default": "base"},
+                    },
+                    "required": ["start_year"],
+                }
+            },
+            "required": ["period", "periods"],
+            "properties": {
+                "period": {"$ref": "#/$defs/period"},
+                "periods": {
+                    "type": "array",
+                    "x-fortran-shape": "n_periods",
+                    "items": {"$ref": "#/$defs/period"},
+                },
+            },
+        }
+    )
+
+
 def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     codegen = _import_codegen_f2py()
     output = tmp_path / "f2py_config_wrappers.f90"
@@ -101,14 +133,14 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     assert "integer, intent(in) :: values_n2 !< extent for values" in generated
     assert "real(dp), dimension(values_n1, values_n2), intent(in) :: values" in generated
     assert "integer(i4), intent(in) :: seed !< seed (optional)" in generated
-    assert "logical, intent(in) :: has_seed !< whether seed was provided" in generated
+    assert "logical, intent(in) :: has__seed !< whether seed was provided" in generated
     assert "integer, intent(in) :: weights_n1 !< extent for weights" in generated
     assert "integer(i4), dimension(weights_n1), intent(in) :: weights" in generated
-    assert "logical, intent(in) :: has_weights !< whether weights was provided" in generated
+    assert "logical, intent(in) :: has__weights !< whether weights was provided" in generated
     assert "integer(i4), allocatable :: maybe_seed" in generated
     assert "integer(i4), dimension(:), allocatable :: maybe_weights" in generated
-    assert "if (has_seed) then" in generated
-    assert "if (has_weights) then" in generated
+    assert "if (has__seed) then" in generated
+    assert "if (has__weights) then" in generated
     assert "status = this%set(" in generated
     assert "seed=maybe_seed" in generated
     assert "weights=maybe_weights" in generated
@@ -184,14 +216,42 @@ def test_generate_f2py_wrappers_exposes_set_dims_wrapper(tmp_path: Path) -> None
         in generated
     )
     assert (
-        "logical, intent(in) :: has_n_weights "
+        "logical, intent(in) :: has__n_weights "
         "!< whether n_weights was provided"
         in generated
     )
     assert "integer, allocatable :: maybe_n_weights" in generated
-    assert "if (has_n_weights) then" in generated
+    assert "if (has__n_weights) then" in generated
     assert "status = this%set_dims(" in generated
     assert "n_weights=maybe_n_weights" in generated
+
+
+def test_generate_f2py_wrappers_flattens_derived_values_to_intrinsic_arguments() -> None:
+    codegen = _import_codegen_f2py()
+
+    generated = codegen.render_f2py_wrappers(
+        [_derived_schema()],
+        file_name="f2py_derived.f90",
+        kind_module="iso_fortran_env",
+        kind_map={"i4": "int32"},
+        kind_allowlist={"int32"},
+        dimensions={"n_periods": 2},
+    )
+
+    assert "integer(i4), intent(in) :: period__start_year" in generated
+    assert "logical, intent(in) :: has__period__start_year" in generated
+    assert "integer(i4), dimension(periods_n1), intent(in) :: periods__start_year" in generated
+    assert "logical, dimension(periods_n1), intent(in) :: has__periods__start_year" in generated
+    assert "type(period_t) :: maybe_period" in generated
+    assert "type(period_t), dimension(:), allocatable :: maybe_periods" in generated
+    assert "status = this%init_type(period=maybe_period, errmsg=errmsg)" in generated
+    assert "where (has__periods__start_year)" in generated
+    assert "status = this%set(" in generated
+    assert "period=maybe_period" in generated
+    assert "periods=maybe_periods" in generated
+
+    usage = codegen.collect_f2py_kind_usage([_derived_schema()])
+    assert usage.integer == {"i4"}
 
 
 def test_collect_f2py_kind_usage_rejects_dimension_as_string_length() -> None:
@@ -295,18 +355,18 @@ def test_generate_python_wrapper_normalizes_arrays_and_handles_status(
         "method",
         "values",
         "seed",
-        "has_seed",
+        "has__seed",
         "weights",
-        "has_weights",
+        "has__weights",
     }
     assert kwargs["values"].shape == (1, 1)
     assert (kwargs["values"] == 0.1).all()
     assert kwargs["values"].flags.f_contiguous
     assert kwargs["seed"] == 0
-    assert kwargs["has_seed"] is False
+    assert kwargs["has__seed"] is False
     assert kwargs["weights"].shape == (1,)
     assert kwargs["weights"].flags.f_contiguous
-    assert kwargs["has_weights"] is False
+    assert kwargs["has__weights"] is False
     assert cfg.is_set("seed") is False
     assert calls[-1][1]["idx"].shape == (1,)
     assert calls[-1][1]["has_idx"] is False
@@ -387,9 +447,66 @@ def test_generate_python_wrapper_exposes_set_dims(tmp_path: Path) -> None:
         monkeypatch.undo()
 
     assert calls[0]["n_weights"] == 4
-    assert calls[0]["has_n_weights"] is True
+    assert calls[0]["has__n_weights"] is True
     assert calls[1]["n_weights"] == 0
-    assert calls[1]["has_n_weights"] is False
+    assert calls[1]["has__n_weights"] is False
+
+
+def test_generate_python_wrapper_flattens_derived_mappings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    codegen = _import_codegen_f2py()
+    spec = codegen.build_f2py_namelist_spec(
+        _derived_schema(),
+        dimensions={"n_periods": 2},
+    )
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    output = package_dir / "config_wrappers.py"
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class FakeF2pyDerived:
+        @staticmethod
+        def derived_set_wrapper(handle: int, **kwargs: Any) -> tuple[int, str]:
+            calls.append(("set", kwargs))
+            return 0, ""
+
+        @staticmethod
+        def derived_is_set_wrapper(
+            handle: int, name: str, **kwargs: Any
+        ) -> tuple[int, str]:
+            calls.append((name, kwargs))
+            return 12, ""
+
+    class FakeExtension:
+        f2py_derived = FakeF2pyDerived
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setitem(sys.modules, "pkg.f2py_derived", FakeExtension)
+    codegen.generate_python_wrappers([(spec, "f2py_derived")], output)
+    module_spec = importlib.util.spec_from_file_location("pkg.config_wrappers", output)
+    assert module_spec is not None and module_spec.loader is not None
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+
+    cfg = module.Derived(3)
+    cfg.set(
+        period={"start_year": 2001},
+        periods=[{"start_year": 1980}, {"start_year": 2001, "label": "next"}],
+    )
+    kwargs = calls[-1][1]
+    assert kwargs["period__start_year"] == 2001
+    assert kwargs["has__period__start_year"] is True
+    assert kwargs["has__period__label"] is False
+    assert kwargs["periods__start_year"].tolist() == [1980, 2001]
+    assert kwargs["has__periods__label"].tolist() == [False, True]
+    assert cfg.is_set("period.start_year") is False
+    assert calls[-1][0] == "period%start_year"
+
+    with pytest.raises(ValueError, match="unknown members"):
+        cfg.set(period={"bad": 1}, periods=[])
 
 
 def test_generate_python_wrapper_set_dims_keyword_dimension_name(tmp_path: Path) -> None:
@@ -419,7 +536,7 @@ def test_generate_python_wrapper_set_dims_keyword_dimension_name(tmp_path: Path)
     assert "def set_dims(" in generated
     assert "class_: Any = None" in generated
     assert 'kwargs["class"] = class_' in generated
-    assert 'kwargs["has_class"] = class_ is not None' in generated
+    assert 'kwargs["has__class"] = class_ is not None' in generated
 
 
 def test_generate_python_wrapper_supports_doxygen_docstrings(tmp_path: Path) -> None:

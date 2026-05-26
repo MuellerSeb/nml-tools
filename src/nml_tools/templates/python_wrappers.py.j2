@@ -8,7 +8,11 @@ Python wrappers for f2py generated namelist modules.
 
 from __future__ import annotations
 
+{% if uses_derived %}
+from typing import Any, Mapping
+{% else %}
 from typing import Any
+{% endif %}
 
 import numpy as np
 
@@ -298,6 +302,68 @@ class {{ cls.class_name }}:
 {% endif %}
         kwargs: dict[str, Any] = {}
 {% for arg in cls.all_args %}
+{% if arg.derived_leaves is not none %}
+{% if arg.rank == 0 %}
+        if {{ arg.name }} is not None:
+            if not isinstance({{ arg.name }}, Mapping):
+                raise ValueError("derived argument '{{ arg.name }}' must be a mapping")
+            unknown = set({{ arg.name }}) - {
+{% for leaf in arg.derived_leaves %}
+                "{{ leaf.name }}",
+{% endfor %}
+            }
+            if unknown:
+                raise ValueError("derived argument '{{ arg.name }}' has unknown members: " + ", ".join(sorted(unknown)))
+{% for leaf in arg.derived_leaves %}
+            kwargs["{{ leaf.encoded_name }}"] = {{ arg.name }}.get("{{ leaf.name }}", {{ leaf.dummy_value }})
+            kwargs["has__{{ leaf.encoded_name }}"] = "{{ leaf.name }}" in {{ arg.name }}
+{% endfor %}
+        else:
+{% for leaf in arg.derived_leaves %}
+            kwargs["{{ leaf.encoded_name }}"] = {{ leaf.dummy_value }}
+            kwargs["has__{{ leaf.encoded_name }}"] = False
+{% endfor %}
+{% else %}
+        if {{ arg.name }} is not None:
+            if not isinstance({{ arg.name }}, (list, tuple)):
+                raise ValueError("derived array argument '{{ arg.name }}' must be a sequence of mappings")
+            for index, item in enumerate({{ arg.name }}, start=1):
+                if not isinstance(item, Mapping):
+                    raise ValueError(f"derived array argument '{{ arg.name }}'[{index}] must be a mapping")
+                unknown = set(item) - {
+{% for leaf in arg.derived_leaves %}
+                    "{{ leaf.name }}",
+{% endfor %}
+                }
+                if unknown:
+                    raise ValueError(f"derived array argument '{{ arg.name }}'[{index}] has unknown members: " + ", ".join(sorted(unknown)))
+{% for leaf in arg.derived_leaves %}
+            kwargs["{{ leaf.encoded_name }}"] = _normalize_array(
+                [item.get("{{ leaf.name }}", {{ leaf.dummy_value }}) for item in {{ arg.name }}],
+                {{ arg.rank }},
+                "{{ arg.name }}.{{ leaf.name }}",
+                dtype={% if leaf.numpy_dtype is none %}None{% else %}"{{ leaf.numpy_dtype }}"{% endif %},
+            )
+            kwargs["has__{{ leaf.encoded_name }}"] = _normalize_array(
+                ["{{ leaf.name }}" in item for item in {{ arg.name }}],
+                {{ arg.rank }},
+                "{{ arg.name }}.{{ leaf.name }} presence",
+                dtype="bool",
+            )
+{% endfor %}
+        else:
+{% for leaf in arg.derived_leaves %}
+            kwargs["{{ leaf.encoded_name }}"] = _dummy_array(
+                {{ arg.rank }},
+                dtype={% if leaf.numpy_dtype is none %}None{% else %}"{{ leaf.numpy_dtype }}"{% endif %},
+            )
+            kwargs["has__{{ leaf.encoded_name }}"] = _dummy_array({{ arg.rank }}, dtype="bool")
+{% endfor %}
+{% endif %}
+{% if arg.has_flag is not none %}
+        kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
+{% endif %}
+{% else %}
 {% if arg.rank > 0 %}
         if {{ arg.name }} is not None:
             kwargs["{{ arg.name }}"] = _normalize_array(
@@ -322,6 +388,7 @@ class {{ cls.class_name }}:
             kwargs["{{ arg.name }}"] = {{ arg.dummy_value }}
 {% if arg.has_flag is not none %}
         kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
+{% endif %}
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -379,7 +446,7 @@ class {{ cls.class_name }}:
             kwargs["has_idx"] = False
         result = self._f2py.{{ cls.namelist_name }}_is_set_wrapper(
             self.handle,
-            name,
+            name.replace(".", "%"),
             **kwargs,
         )
         status, errmsg = _split_result(result)
