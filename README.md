@@ -133,10 +133,10 @@ properties:
 Only intrinsic scalar members are supported in the first implementation.
 Object defaults, derived array defaults, derived flexible-tail arrays, nested
 derived members, and array members are rejected. Optional derived fields must
-not declare required inner members. For scalar imported fields with string
-members, generated code verifies that application storage is at least
-`x-fortran-len` characters long and blanks longer trailing storage after reads
-and setters.
+not declare required inner members. For imported fields with string members,
+including arrays of imported values, generated code verifies that application
+storage is at least `x-fortran-len` characters long and blanks longer trailing
+storage after reads and setters.
 
 Generated native APIs accept typed values and add `init_type`, for example:
 
@@ -444,7 +444,10 @@ cfg.set(periods=[{"start_year": 1980}, {"start_year": 2001}])
 Only the internal f2py ABI is flattened: `%` paths are encoded with `__`, for
 example `period__start_year` and `has__period__start_year`. Python
 `is_set("period.start_year")` is translated to the native
-`is_set("period%start_year")` lookup.
+`is_set("period%start_year")` lookup. Nested sequences of mappings are accepted
+for multi-rank derived arrays. Flattened generated names are made unique
+case-insensitively and deterministically shortened when needed to remain valid
+Fortran identifiers.
 
 The f2py wrappers use opaque integer handles for Fortran-owned namelist
 instances. nml-tools assumes that the owning Fortran library creates those

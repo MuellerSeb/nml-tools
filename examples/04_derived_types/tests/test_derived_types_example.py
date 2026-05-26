@@ -76,3 +76,19 @@ def test_missing_required_nested_leaf_is_invalid() -> None:
 
     with pytest.raises(example.NmlError):
         cfg.is_valid()
+
+
+def test_nested_component_bounds_are_checked_in_native_validation() -> None:
+    example.reset_config()
+    cfg = example.get_config()
+    cfg.set(
+        period={"start_year": 1700, "end_year": 2010},
+        periods=[
+            {"start_year": 1980, "end_year": 1990},
+            {"start_year": 1991, "end_year": 2000},
+        ],
+        station={"code": 7},
+    )
+
+    with pytest.raises(example.NmlError, match="bounds constraint failed"):
+        cfg.is_valid()

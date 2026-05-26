@@ -122,6 +122,49 @@ def _dummy_array(rank: int, dtype: Any = None) -> np.ndarray:
     return np.asfortranarray(np.zeros(target_shape, dtype=dtype))
 
 
+{% if uses_derived %}
+def _derived_array(
+    value: Any,
+    name: str,
+    rank: int,
+    members: set[str],
+) -> np.ndarray:
+    array = np.asarray(value, dtype=object)
+    if array.ndim == 0:
+        raise ValueError(f"derived array argument '{name}' must be a sequence of mappings")
+    if array.ndim > rank:
+        raise ValueError(
+            f"derived array argument '{name}' has rank {array.ndim}, expected at most {rank}"
+        )
+    for index in np.ndindex(array.shape):
+        item = array[index]
+        path = "".join(f"[{part + 1}]" for part in index)
+        if not isinstance(item, Mapping):
+            raise ValueError(f"derived array argument '{name}'{path} must be a mapping")
+        unknown = set(item) - members
+        if unknown:
+            raise ValueError(
+                f"derived array argument '{name}'{path} has unknown members: "
+                + ", ".join(sorted(unknown))
+            )
+    return array
+
+
+def _derived_member_array(
+    array: np.ndarray,
+    member: str,
+    dummy: Any,
+) -> tuple[np.ndarray, np.ndarray]:
+    values = np.empty(array.shape, dtype=object)
+    present = np.empty(array.shape, dtype=bool)
+    for index in np.ndindex(array.shape):
+        item = array[index]
+        values[index] = item.get(member, dummy)
+        present[index] = member in item
+    return values, present
+
+
+{% endif %}
 {% for cls in classes %}
 class {{ cls.class_name }}:
 {% if py_style == "doxygen" %}
@@ -319,39 +362,39 @@ class {{ cls.class_name }}:
                 )
 {% for leaf in arg.derived_leaves %}
             kwargs["{{ leaf.encoded_name }}"] = {{ arg.name }}.get("{{ leaf.name }}", {{ leaf.dummy_value }})
-            kwargs["has__{{ leaf.encoded_name }}"] = "{{ leaf.name }}" in {{ arg.name }}
+            kwargs["{{ leaf.has_name }}"] = "{{ leaf.name }}" in {{ arg.name }}
 {% endfor %}
         else:
 {% for leaf in arg.derived_leaves %}
             kwargs["{{ leaf.encoded_name }}"] = {{ leaf.dummy_value }}
-            kwargs["has__{{ leaf.encoded_name }}"] = False
+            kwargs["{{ leaf.has_name }}"] = False
 {% endfor %}
 {% else %}
         if {{ arg.name }} is not None:
-            if not isinstance({{ arg.name }}, (list, tuple)):
-                raise ValueError("derived array argument '{{ arg.name }}' must be a sequence of mappings")
-            for index, item in enumerate({{ arg.name }}, start=1):
-                if not isinstance(item, Mapping):
-                    raise ValueError(f"derived array argument '{{ arg.name }}'[{index}] must be a mapping")
-                unknown = set(item) - {
+            {{ arg.name }}_array = _derived_array(
+                {{ arg.name }},
+                "{{ arg.name }}",
+                {{ arg.rank }},
+                {
 {% for leaf in arg.derived_leaves %}
                     "{{ leaf.name }}",
 {% endfor %}
-                }
-                if unknown:
-                    raise ValueError(
-                        f"derived array argument '{{ arg.name }}'[{index}] has unknown members: "
-                        + ", ".join(sorted(unknown))
-                    )
+                },
+            )
 {% for leaf in arg.derived_leaves %}
+            {{ leaf.encoded_name }}_values, {{ leaf.encoded_name }}_present = _derived_member_array(
+                {{ arg.name }}_array,
+                "{{ leaf.name }}",
+                {{ leaf.dummy_value }},
+            )
             kwargs["{{ leaf.encoded_name }}"] = _normalize_array(
-                [item.get("{{ leaf.name }}", {{ leaf.dummy_value }}) for item in {{ arg.name }}],
+                {{ leaf.encoded_name }}_values,
                 {{ arg.rank }},
                 "{{ arg.name }}.{{ leaf.name }}",
                 dtype={% if leaf.numpy_dtype is none %}None{% else %}"{{ leaf.numpy_dtype }}"{% endif %},
             )
-            kwargs["has__{{ leaf.encoded_name }}"] = _normalize_array(
-                ["{{ leaf.name }}" in item for item in {{ arg.name }}],
+            kwargs["{{ leaf.has_name }}"] = _normalize_array(
+                {{ leaf.encoded_name }}_present,
                 {{ arg.rank }},
                 "{{ arg.name }}.{{ leaf.name }} presence",
                 dtype="bool",
@@ -363,7 +406,7 @@ class {{ cls.class_name }}:
                 {{ arg.rank }},
                 dtype={% if leaf.numpy_dtype is none %}None{% else %}"{{ leaf.numpy_dtype }}"{% endif %},
             )
-            kwargs["has__{{ leaf.encoded_name }}"] = _dummy_array({{ arg.rank }}, dtype="bool")
+            kwargs["{{ leaf.has_name }}"] = _dummy_array({{ arg.rank }}, dtype="bool")
 {% endfor %}
 {% endif %}
 {% if arg.has_flag is not none %}

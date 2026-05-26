@@ -1074,6 +1074,7 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
                             "title": "Start year",
                             "type": "integer",
                             "x-fortran-kind": "i4",
+                            "minimum": 1900,
                         },
                         "end_year": {
                             "title": "End year",
@@ -1085,6 +1086,7 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
                             "type": "string",
                             "x-fortran-len": 16,
                             "default": "default",
+                            "enum": ["default", "archive"],
                         },
                     },
                     "required": ["start_year", "end_year"],
@@ -1132,6 +1134,11 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
     assert 'case ("periods%start_year")' in generated
     assert " .and. &" in generated
     assert " .or. &" in generated
+    assert "integer(i4), parameter, public :: period_start_year_min = 1900_i4" in generated
+    assert "elemental logical function period_start_year_in_bounds" in generated
+    assert "period_label_in_enum(this%period%label)" in generated
+    assert "periods_start_year_in_bounds(this%periods%start_year" in generated
+    assert "if (allocated(this%periods)) then" in generated
 
 
 def test_generate_fortran_imports_application_owned_derived_type() -> None:
@@ -1156,8 +1163,15 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
                     },
                 }
             },
-            "required": ["location"],
-            "properties": {"location": {"$ref": "#/$defs/location"}},
+            "required": ["location", "locations"],
+            "properties": {
+                "location": {"$ref": "#/$defs/location"},
+                "locations": {
+                    "type": "array",
+                    "x-fortran-shape": 2,
+                    "items": {"$ref": "#/$defs/location"},
+                },
+            },
         }
     )
 
@@ -1167,3 +1181,5 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
     assert "type(location_t) :: location" in generated
     assert "if (len(this%location%name) < 8) then" in generated
     assert 'this%location%name(8 + 1:) = ""' in generated
+    assert "if (len(this%locations%name) < 8) then" in generated
+    assert 'this%locations%name(8 + 1:) = ""' in generated

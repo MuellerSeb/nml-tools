@@ -620,7 +620,7 @@ contains
 {% for check in enum_checks %}
 {% if check.is_array %}
 {% if check.runtime_array %}
-    if (allocated({{ check.array_ref }})) then
+    if (allocated({{ check.allocation_ref }})) then
 {% endif %}
     if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
       status = NML_ERR_ENUM
@@ -650,7 +650,7 @@ contains
 {% for check in bounds_checks %}
 {% if check.is_array %}
 {% if check.runtime_array %}
-    if (allocated({{ check.array_ref }})) then
+    if (allocated({{ check.allocation_ref }})) then
 {% endif %}
     if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
       status = NML_ERR_BOUNDS

@@ -101,6 +101,47 @@ def _dummy_array(rank: int, dtype: Any = None) -> np.ndarray:
     return np.asfortranarray(np.zeros(target_shape, dtype=dtype))
 
 
+def _derived_array(
+    value: Any,
+    name: str,
+    rank: int,
+    members: set[str],
+) -> np.ndarray:
+    array = np.asarray(value, dtype=object)
+    if array.ndim == 0:
+        raise ValueError(f"derived array argument '{name}' must be a sequence of mappings")
+    if array.ndim > rank:
+        raise ValueError(
+            f"derived array argument '{name}' has rank {array.ndim}, expected at most {rank}"
+        )
+    for index in np.ndindex(array.shape):
+        item = array[index]
+        path = "".join(f"[{part + 1}]" for part in index)
+        if not isinstance(item, Mapping):
+            raise ValueError(f"derived array argument '{name}'{path} must be a mapping")
+        unknown = set(item) - members
+        if unknown:
+            raise ValueError(
+                f"derived array argument '{name}'{path} has unknown members: "
+                + ", ".join(sorted(unknown))
+            )
+    return array
+
+
+def _derived_member_array(
+    array: np.ndarray,
+    member: str,
+    dummy: Any,
+) -> tuple[np.ndarray, np.ndarray]:
+    values = np.empty(array.shape, dtype=object)
+    present = np.empty(array.shape, dtype=bool)
+    for index in np.ndindex(array.shape):
+        item = array[index]
+        values[index] = item.get(member, dummy)
+        present[index] = member in item
+    return values, present
+
+
 class Run:
     """Python handle for the run namelist.
 
@@ -235,53 +276,63 @@ class Run:
             kwargs["period__label"] = ""
             kwargs["has__period__label"] = False
         if periods is not None:
-            if not isinstance(periods, (list, tuple)):
-                raise ValueError("derived array argument 'periods' must be a sequence of mappings")
-            for index, item in enumerate(periods, start=1):
-                if not isinstance(item, Mapping):
-                    raise ValueError(f"derived array argument 'periods'[{index}] must be a mapping")
-                unknown = set(item) - {
+            periods_array = _derived_array(
+                periods,
+                "periods",
+                1,
+                {
                     "start_year",
                     "end_year",
                     "label",
-                }
-                if unknown:
-                    raise ValueError(
-                        f"derived array argument 'periods'[{index}] has unknown members: "
-                        + ", ".join(sorted(unknown))
-                    )
+                },
+            )
+            periods__start_year_values, periods__start_year_present = _derived_member_array(
+                periods_array,
+                "start_year",
+                0,
+            )
             kwargs["periods__start_year"] = _normalize_array(
-                [item.get("start_year", 0) for item in periods],
+                periods__start_year_values,
                 1,
                 "periods.start_year",
                 dtype="int",
             )
             kwargs["has__periods__start_year"] = _normalize_array(
-                ["start_year" in item for item in periods],
+                periods__start_year_present,
                 1,
                 "periods.start_year presence",
                 dtype="bool",
             )
+            periods__end_year_values, periods__end_year_present = _derived_member_array(
+                periods_array,
+                "end_year",
+                0,
+            )
             kwargs["periods__end_year"] = _normalize_array(
-                [item.get("end_year", 0) for item in periods],
+                periods__end_year_values,
                 1,
                 "periods.end_year",
                 dtype="int",
             )
             kwargs["has__periods__end_year"] = _normalize_array(
-                ["end_year" in item for item in periods],
+                periods__end_year_present,
                 1,
                 "periods.end_year presence",
                 dtype="bool",
             )
+            periods__label_values, periods__label_present = _derived_member_array(
+                periods_array,
+                "label",
+                "",
+            )
             kwargs["periods__label"] = _normalize_array(
-                [item.get("label", "") for item in periods],
+                periods__label_values,
                 1,
                 "periods.label",
                 dtype="str",
             )
             kwargs["has__periods__label"] = _normalize_array(
-                ["label" in item for item in periods],
+                periods__label_present,
                 1,
                 "periods.label presence",
                 dtype="bool",

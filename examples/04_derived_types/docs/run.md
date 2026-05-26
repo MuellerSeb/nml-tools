@@ -25,7 +25,7 @@ Summary:
 - Required: yes
 
 Components:
-- `period%start_year`: `integer(i4)`
+- `period%start_year`: `integer(i4)`; Minimum: `>= 1800`; Maximum: `<= 2200`
 - `period%end_year`: `integer(i4)`
 - `period%label`: `character(len=period_label_len)`; default `"period"`
 
@@ -38,7 +38,7 @@ Summary:
 - Required: yes
 
 Components:
-- `periods%start_year`: `integer(i4)`
+- `periods%start_year`: `integer(i4)`; Minimum: `>= 1800`; Maximum: `<= 2200`
 - `periods%end_year`: `integer(i4)`
 - `periods%label`: `character(len=period_label_len)`; default `"period"`
 
@@ -53,7 +53,7 @@ Summary:
 - Required: yes
 
 Components:
-- `station%code`: `integer(i4)`
+- `station%code`: `integer(i4)`; Minimum: `>= 1`
 - `station%label`: `character(len=station_label_len)`; default `"unknown"`
 
 ## Derived types

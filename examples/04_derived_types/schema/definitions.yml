@@ -11,6 +11,8 @@ $defs:
         title: Start year
         type: integer
         x-fortran-kind: i4
+        minimum: 1800
+        maximum: 2200
       end_year:
         title: End year
         type: integer
@@ -32,6 +34,7 @@ $defs:
         title: Station code
         type: integer
         x-fortran-kind: i4
+        minimum: 1
       label:
         title: Station label
         type: string

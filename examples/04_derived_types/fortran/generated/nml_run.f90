@@ -36,6 +36,13 @@ module nml_run
 
   implicit none
 
+  ! bounds values
+  integer(i4), parameter, public :: period_start_year_min = 1800_i4
+  integer(i4), parameter, public :: period_start_year_max = 2200_i4
+  integer(i4), parameter, public :: periods_start_year_min = 1800_i4
+  integer(i4), parameter, public :: periods_start_year_max = 2200_i4
+  integer(i4), parameter, public :: station_code_min = 1_i4
+
   !> \class nml_run_t
   !> \brief Derived-type configuration
   !> \details Demonstrates locally generated and imported reusable derived types.
@@ -56,6 +63,62 @@ module nml_run
   end type nml_run_t
 
 contains
+
+  !> \brief Check whether a value is within bounds
+  elemental logical function period_start_year_in_bounds(val, allow_missing) result(in_bounds)
+    integer(i4), intent(in) :: val !< value to check
+    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+
+    if (present(allow_missing)) then
+      if (allow_missing) then
+        if (val == -huge(val)) then
+          in_bounds = .true.
+          return
+        end if
+      end if
+    end if
+
+    in_bounds = .true.
+    if (val < period_start_year_min) in_bounds = .false.
+    if (val > period_start_year_max) in_bounds = .false.
+  end function period_start_year_in_bounds
+
+  !> \brief Check whether a value is within bounds
+  elemental logical function periods_start_year_in_bounds(val, allow_missing) result(in_bounds)
+    integer(i4), intent(in) :: val !< value to check
+    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+
+    if (present(allow_missing)) then
+      if (allow_missing) then
+        if (val == -huge(val)) then
+          in_bounds = .true.
+          return
+        end if
+      end if
+    end if
+
+    in_bounds = .true.
+    if (val < periods_start_year_min) in_bounds = .false.
+    if (val > periods_start_year_max) in_bounds = .false.
+  end function periods_start_year_in_bounds
+
+  !> \brief Check whether a value is within bounds
+  elemental logical function station_code_in_bounds(val, allow_missing) result(in_bounds)
+    integer(i4), intent(in) :: val !< value to check
+    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+
+    if (present(allow_missing)) then
+      if (allow_missing) then
+        if (val == -huge(val)) then
+          in_bounds = .true.
+          return
+        end if
+      end if
+    end if
+
+    in_bounds = .true.
+    if (val < station_code_min) in_bounds = .false.
+  end function station_code_in_bounds
 
   !> \brief Resolve an opaque C pointer handle to a nml_run_t pointer
   subroutine nml_run_resolve_handle(handle, this, status, errmsg)
@@ -482,6 +545,36 @@ contains
       return
     end if
     if (istat /= NML_OK) then
+      status = istat
+      return
+    end if
+    ! bounds constraints
+    istat = this%is_set("period%start_year", errmsg=errmsg)
+    if (istat == NML_OK) then
+      if (.not. period_start_year_in_bounds(this%period%start_year)) then
+        status = NML_ERR_BOUNDS
+        if (present(errmsg)) errmsg = "bounds constraint failed: period%start_year"
+        return
+      end if
+    else if (istat /= NML_ERR_NOT_SET) then
+      status = istat
+      return
+    end if
+    if (allocated(this%periods)) then
+    if (.not. all(periods_start_year_in_bounds(this%periods%start_year, allow_missing=.true.))) then
+      status = NML_ERR_BOUNDS
+      if (present(errmsg)) errmsg = "bounds constraint failed: periods%start_year"
+      return
+    end if
+    end if
+    istat = this%is_set("station%code", errmsg=errmsg)
+    if (istat == NML_OK) then
+      if (.not. station_code_in_bounds(this%station%code)) then
+        status = NML_ERR_BOUNDS
+        if (present(errmsg)) errmsg = "bounds constraint failed: station%code"
+        return
+      end if
+    else if (istat /= NML_ERR_NOT_SET) then
       status = istat
       return
     end if

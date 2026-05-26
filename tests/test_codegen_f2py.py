@@ -64,7 +64,7 @@ def _runtime_dimension_schema(name: str = "config") -> dict[str, Any]:
     }
 
 
-def _derived_schema() -> dict[str, Any]:
+def _derived_schema(array_shape: Any = "n_periods") -> dict[str, Any]:
     return resolve_schema(
         {
             "title": "Derived",
@@ -86,7 +86,7 @@ def _derived_schema() -> dict[str, Any]:
                 "period": {"$ref": "#/$defs/period"},
                 "periods": {
                     "type": "array",
-                    "x-fortran-shape": "n_periods",
+                    "x-fortran-shape": array_shape,
                     "items": {"$ref": "#/$defs/period"},
                 },
             },
@@ -270,6 +270,64 @@ def test_collect_f2py_kind_usage_rejects_dimension_as_string_length() -> None:
 
     with pytest.raises(ValueError, match="cannot be used as x-fortran-len"):
         codegen.collect_f2py_kind_usage([schema], dimensions={"n_weights": 3})
+
+
+def test_generate_f2py_wrappers_supports_multirank_derived_arrays() -> None:
+    codegen = _import_codegen_f2py()
+
+    generated = codegen.render_f2py_wrappers(
+        [_derived_schema([2, 2])],
+        file_name="f2py_derived.f90",
+    )
+
+    assert (
+        "integer(i4), dimension(periods_n1, periods_n2), intent(in) :: "
+        "periods__start_year"
+    ) in generated
+    assert "type(period_t), dimension(:, :), allocatable :: maybe_periods" in generated
+    assert "maybe_periods(1:periods_n1, 1:periods_n2)%start_year" in generated
+
+
+def test_derived_abi_names_avoid_intrinsic_collisions_and_identifier_overflow() -> None:
+    codegen = _import_codegen_f2py()
+    collision_schema = _derived_schema()
+    collision_schema["required"].append("period__start_year")
+    collision_schema["properties"]["period__start_year"] = {"type": "integer"}
+
+    collision_spec = codegen.build_f2py_namelist_spec(
+        collision_schema,
+        dimensions={"n_periods": 2},
+    )
+    period = next(arg for arg in collision_spec.required_args if arg.name == "period")
+    assert period.derived_leaves is not None
+    start_year = next(leaf for leaf in period.derived_leaves if leaf.name == "start_year")
+    assert start_year.encoded_name == "period__start_year_1"
+    assert start_year.has_name == "has__period__start_year_1"
+
+    long_field = "configured_period_field_with_a_long_descriptive_name"
+    long_member = "start_year_attribute_with_a_long_descriptive_name"
+    long_schema = resolve_schema(
+        {
+            "x-fortran-namelist": "long_names",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {long_member: {"type": "integer"}},
+                }
+            },
+            "required": [long_field],
+            "properties": {long_field: {"$ref": "#/$defs/period"}},
+        }
+    )
+    first_spec = codegen.build_f2py_namelist_spec(long_schema)
+    second_spec = codegen.build_f2py_namelist_spec(long_schema)
+    first_leaf = first_spec.required_args[0].derived_leaves[0]  # type: ignore[index]
+    second_leaf = second_spec.required_args[0].derived_leaves[0]  # type: ignore[index]
+    assert first_leaf.encoded_name == second_leaf.encoded_name
+    assert len(first_leaf.encoded_name) <= 63
+    assert len(first_leaf.has_name) <= 63
 
 
 def test_generate_f2cmap_requires_explicit_kind_mappings(tmp_path: Path) -> None:
@@ -507,6 +565,55 @@ def test_generate_python_wrapper_flattens_derived_mappings(
 
     with pytest.raises(ValueError, match="unknown members"):
         cfg.set(period={"bad": 1}, periods=[])
+
+
+def test_generate_python_wrapper_flattens_multirank_derived_mappings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    codegen = _import_codegen_f2py()
+    spec = codegen.build_f2py_namelist_spec(_derived_schema([2, 2]))
+    package_dir = tmp_path / "pkg"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+    output = package_dir / "config_wrappers.py"
+    calls: list[dict[str, Any]] = []
+
+    class FakeF2pyDerived:
+        @staticmethod
+        def derived_set_wrapper(handle: int, **kwargs: Any) -> tuple[int, str]:
+            calls.append(kwargs)
+            return 0, ""
+
+    class FakeExtension:
+        f2py_derived = FakeF2pyDerived
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setitem(sys.modules, "pkg.f2py_derived", FakeExtension)
+    codegen.generate_python_wrappers([(spec, "f2py_derived")], output)
+    module_spec = importlib.util.spec_from_file_location("pkg.config_wrappers", output)
+    assert module_spec is not None and module_spec.loader is not None
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+
+    cfg = module.Derived(3)
+    cfg.set(
+        period={"start_year": 2001},
+        periods=[
+            [{"start_year": 1980}, {"start_year": 1990}],
+            [{"start_year": 2000}, {"start_year": 2010, "label": "latest"}],
+        ],
+    )
+    kwargs = calls[-1]
+    assert kwargs["periods__start_year"].shape == (2, 2)
+    assert kwargs["periods__start_year"].flags.f_contiguous
+    assert kwargs["has__periods__label"].tolist() == [[False, False], [False, True]]
+
+    with pytest.raises(ValueError, match=r"periods.*\[1\]\[2\].*unknown members"):
+        cfg.set(
+            period={"start_year": 2001},
+            periods=[[{"start_year": 1980}, {"bad": 1}]],
+        )
 
 
 def test_generate_python_wrapper_set_dims_keyword_dimension_name(tmp_path: Path) -> None:

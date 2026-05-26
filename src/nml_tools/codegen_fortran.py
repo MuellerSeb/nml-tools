@@ -627,7 +627,6 @@ def _build_context(
                     if (
                         module is not None
                         and child_info.category == "string"
-                        and type_info.category != "array"
                         and child_info.length_expr is not None
                     ):
                         expected_len = child_info.length_expr
@@ -695,6 +694,126 @@ def _build_context(
                             "has_default": has_default,
                         }
                     )
+                    constraint_name = f"{name}_{child_name}"
+                    component_ref = f"this%{name}%{child_name}"
+                    enum_values = _enum_values(child, child_info, constants)
+                    if enum_values is not None:
+                        enum_category = _enum_category(child_info)
+                        enum_const_name = f"{constraint_name}_enum_values"
+                        enum_literals = [
+                            _format_scalar_default(value, child_info.kind, enum_category)
+                            for value in enum_values
+                        ]
+                        if enum_category == "string":
+                            enum_array_literal = (
+                                f"[{child_info.type_spec} :: {', '.join(enum_literals)}]"
+                            )
+                            enum_parameters.append(
+                                f"{child_info.type_spec}, parameter, public :: &\n"
+                                f"    {enum_const_name}({len(enum_literals)}) = "
+                                f"{enum_array_literal}"
+                            )
+                        else:
+                            enum_parameters.append(
+                                f"{child_info.type_spec}, parameter, public :: "
+                                f"{enum_const_name}({len(enum_literals)}) = "
+                                f"[{', '.join(enum_literals)}]"
+                            )
+                        _, enum_missing_condition, _ = _sentinel_expressions(
+                            child_info,
+                            var_ref="val",
+                            len_ref="val",
+                        )
+                        enum_functions.append(
+                            {
+                                "name": constraint_name,
+                                "func_name": f"{constraint_name}_in_enum",
+                                "arg_type_spec": _enum_arg_type_spec(child_info),
+                                "enum_values_name": enum_const_name,
+                                "use_trim": enum_category == "string",
+                                "missing_condition": enum_missing_condition,
+                            }
+                        )
+                        enum_checks.append(
+                            {
+                                "name": constraint_name,
+                                "display_name": f"{display_name}%{child_name}",
+                                "func_name": f"{constraint_name}_in_enum",
+                                "is_array": type_info.category == "array",
+                                "runtime_array": dynamic_array,
+                                "array_ref": component_ref,
+                                "allocation_ref": f"this%{name}",
+                                "element_ref": component_ref,
+                            }
+                        )
+                    bounds_spec = _bounds_spec(child, child_info)
+                    if bounds_spec is not None:
+                        bounds_category = bounds_spec["category"]
+                        min_value = bounds_spec["min_value"]
+                        max_value = bounds_spec["max_value"]
+                        min_exclusive = bounds_spec["min_exclusive"]
+                        max_exclusive = bounds_spec["max_exclusive"]
+                        min_name = None
+                        max_name = None
+                        if min_value is not None:
+                            min_name = (
+                                f"{constraint_name}_min_excl"
+                                if min_exclusive
+                                else f"{constraint_name}_min"
+                            )
+                            min_literal = _format_scalar_default(
+                                min_value, child_info.kind, bounds_category
+                            )
+                            bounds_parameters.append(
+                                f"{child_info.type_spec}, parameter, public :: "
+                                f"{min_name} = {min_literal}"
+                            )
+                        if max_value is not None:
+                            max_name = (
+                                f"{constraint_name}_max_excl"
+                                if max_exclusive
+                                else f"{constraint_name}_max"
+                            )
+                            max_literal = _format_scalar_default(
+                                max_value, child_info.kind, bounds_category
+                            )
+                            bounds_parameters.append(
+                                f"{child_info.type_spec}, parameter, public :: "
+                                f"{max_name} = {max_literal}"
+                            )
+                        _, bounds_missing_condition, child_uses_ieee = _sentinel_expressions(
+                            child_info,
+                            var_ref="val",
+                            len_ref="val",
+                        )
+                        if child_uses_ieee:
+                            requires_ieee = True
+                        bounds_functions.append(
+                            {
+                                "name": constraint_name,
+                                "func_name": f"{constraint_name}_in_bounds",
+                                "arg_type_spec": child_info.arg_type_spec,
+                                "has_min": min_value is not None,
+                                "has_max": max_value is not None,
+                                "min_name": min_name,
+                                "max_name": max_name,
+                                "min_exclusive": min_exclusive,
+                                "max_exclusive": max_exclusive,
+                                "missing_condition": bounds_missing_condition,
+                            }
+                        )
+                        bounds_checks.append(
+                            {
+                                "name": constraint_name,
+                                "display_name": f"{display_name}%{child_name}",
+                                "func_name": f"{constraint_name}_in_bounds",
+                                "is_array": type_info.category == "array",
+                                "runtime_array": dynamic_array,
+                                "array_ref": component_ref,
+                                "allocation_ref": f"this%{name}",
+                                "element_ref": component_ref,
+                            }
+                        )
 
                 arg_dimensions = [":" for _ in type_info.dimensions]
                 argument_decl = _render_argument_declaration(
@@ -1184,6 +1303,7 @@ def _build_context(
                             "is_array": True,
                             "runtime_array": dynamic_array,
                             "array_ref": f"this%{name}",
+                            "allocation_ref": f"this%{name}",
                         }
                     )
                 else:
@@ -1257,6 +1377,7 @@ def _build_context(
                             "is_array": True,
                             "runtime_array": dynamic_array,
                             "array_ref": f"this%{name}",
+                            "allocation_ref": f"this%{name}",
                         }
                     )
                 else:
