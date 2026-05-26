@@ -317,7 +317,10 @@ def _derived_value_entries(
                 raise ValueError(
                     f"derived array template value '{name}[{index}]' must be a table"
                 )
-            value_map = _as_str_keyed_table(value, f"derived array template value '{name}[{index}]'")
+            value_map = _as_str_keyed_table(
+                value,
+                f"derived array template value '{name}[{index}]'",
+            )
             entries.extend(
                 _derived_component_entries(
                     f"{name}({index})",
