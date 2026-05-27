@@ -553,20 +553,6 @@ contains
     end if
 {% endfor %}
 {% endif %}
-{% if derived_required_validations %}
-    ! required derived values
-{% for name in derived_required_validations %}
-    istat = this%is_set("{{ name }}", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
-      if (present(errmsg)) errmsg = "required field not set: {{ name }}"
-      return
-    else if (istat /= NML_OK) then
-      status = istat
-      return
-    end if
-{% endfor %}
-{% endif %}
 {% if required_array_validations %}
     ! required arrays
 {% for entry in required_array_validations %}

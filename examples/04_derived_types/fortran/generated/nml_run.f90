@@ -548,34 +548,6 @@ contains
       status = istat
       return
     end if
-    ! required derived values
-    istat = this%is_set("period", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
-      if (present(errmsg)) errmsg = "required field not set: period"
-      return
-    else if (istat /= NML_OK) then
-      status = istat
-      return
-    end if
-    istat = this%is_set("periods", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
-      if (present(errmsg)) errmsg = "required field not set: periods"
-      return
-    else if (istat /= NML_OK) then
-      status = istat
-      return
-    end if
-    istat = this%is_set("station", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
-      if (present(errmsg)) errmsg = "required field not set: station"
-      return
-    else if (istat /= NML_OK) then
-      status = istat
-      return
-    end if
     ! bounds constraints
     istat = this%is_set("period%start_year", errmsg=errmsg)
     if (istat == NML_OK) then

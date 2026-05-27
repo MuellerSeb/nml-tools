@@ -386,7 +386,6 @@ def _build_context(
     derived_type_imports: list[dict[str, str]] = []
     derived_init_type_fields: list[dict[str, Any]] = []
     derived_presence_blocks: list[str] = []
-    derived_required_validations: list[str] = []
     derived_post_assignment_checks: list[str] = []
     static_constants = normalize_constant_values(constants)
     runtime_dimension_values = normalize_runtime_dimensions(dimensions)
@@ -898,7 +897,6 @@ def _build_context(
                     )
                 )
                 if is_required:
-                    derived_required_validations.append(name)
                     uses_partly_set = uses_partly_set or (
                         len(inner_required) > 1
                         or (type_info.category == "array" and bool(inner_required))
@@ -1628,7 +1626,6 @@ def _build_context(
         "derived_type_imports": derived_type_imports,
         "derived_init_type_fields": derived_init_type_fields,
         "derived_presence_blocks": derived_presence_blocks,
-        "derived_required_validations": derived_required_validations,
         "derived_post_assignment_checks": derived_post_assignment_checks,
         "kind_module": resolved_kind_module,
         "kind_imports": _resolve_kind_imports(
