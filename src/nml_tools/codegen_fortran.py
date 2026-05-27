@@ -16,6 +16,7 @@ from ._utils import (
     reject_constant_dimension_overlap,
     strip_trailing_whitespace,
 )
+from .schema import DERIVED_REF_ORIGIN_KEY
 from .validate import validate_schema_defaults
 
 _TEMPLATE_ENV = Environment(
@@ -92,6 +93,18 @@ class ConstantSpec:
     doc: str | None
 
 
+@dataclass(frozen=True)
+class LocalDerivedTypeSpec:
+    """A reusable locally emitted derived type declaration."""
+
+    identity: tuple[str, str]
+    type_name: str
+    title: str
+    description: str | None
+    declarations: list[str]
+    kind_ids: list[str]
+
+
 def generate_fortran(
     schema: dict[str, Any],
     output: str | Path,
@@ -159,6 +172,10 @@ def generate_helper(
     module_name: str = "nml_helper",
     len_buf: int = 1024,
     constants: list[ConstantSpec] | None = None,
+    local_derived_types: list[LocalDerivedTypeSpec] | None = None,
+    kind_module: str | None = None,
+    kind_map: dict[str, str] | None = None,
+    kind_allowlist: Iterable[str] | None = None,
     module_doc: str | None = None,
     helper_header: str | None = None,
 ) -> None:
@@ -169,6 +186,10 @@ def generate_helper(
         module_name=module_name,
         len_buf=len_buf,
         constants=constants,
+        local_derived_types=local_derived_types,
+        kind_module=kind_module,
+        kind_map=kind_map,
+        kind_allowlist=kind_allowlist,
         module_doc=module_doc,
         helper_header=helper_header,
     )
@@ -182,6 +203,10 @@ def render_helper(
     module_name: str = "nml_helper",
     len_buf: int = 1024,
     constants: list[ConstantSpec] | None = None,
+    local_derived_types: list[LocalDerivedTypeSpec] | None = None,
+    kind_module: str | None = None,
+    kind_map: dict[str, str] | None = None,
+    kind_allowlist: Iterable[str] | None = None,
     module_doc: str | None = None,
     helper_header: str | None = None,
 ) -> str:
@@ -190,16 +215,84 @@ def render_helper(
         raise ValueError("helper module name must be a non-empty string")
     if len_buf <= 0:
         raise ValueError("helper len_buf must be positive")
+    local_types = local_derived_types or []
+    helper_kind_ids = [
+        kind_id for type_spec in local_types for kind_id in type_spec.kind_ids
+    ]
     return _TEMPLATE_ENV.get_template("nml_helper.f90.j2").render(
         {
             "file_name": file_name,
             "module_name": module_name,
             "len_buf": len_buf,
             "constants": constants or [],
+            "local_derived_types": local_types,
+            "kind_module": kind_module or "iso_fortran_env",
+            "kind_imports": _resolve_kind_imports(
+                helper_kind_ids,
+                kind_map=kind_map,
+                kind_allowlist=kind_allowlist,
+            ),
             "module_doc": module_doc,
             "helper_header": helper_header,
         }
     )
+
+
+def collect_local_derived_types(
+    schemas: Iterable[dict[str, Any]],
+    *,
+    constants: dict[str, int] | None = None,
+) -> list[LocalDerivedTypeSpec]:
+    """Collect locally owned derived definitions used by namelist schemas."""
+    static_constants = normalize_constant_values(constants)
+    collected: dict[tuple[str, str], LocalDerivedTypeSpec] = {}
+    type_owners: dict[str, tuple[str, str]] = {}
+    for schema in schemas:
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            continue
+        for prop in properties.values():
+            if not isinstance(prop, dict):
+                continue
+            derived = _derived_schema(prop)
+            if derived is None or derived.get("x-fortran-module") is not None:
+                continue
+            origin = _derived_origin(derived)
+            identity = origin["identity"]
+            definition = origin["definition"]
+            type_name = _derived_type_name(definition)
+            owner = type_owners.get(type_name.lower())
+            if owner is not None and owner != identity:
+                raise ValueError(
+                    f"local derived type name '{type_name}' is used by distinct definitions"
+                )
+            type_owners[type_name.lower()] = identity
+            if identity in collected:
+                continue
+            component_properties = definition.get("properties")
+            if not isinstance(component_properties, dict):
+                raise ValueError(f"derived type '{type_name}' must define properties")
+            declarations: list[str] = []
+            kind_ids: list[str] = []
+            for name, component in component_properties.items():
+                if not isinstance(name, str) or not isinstance(component, dict):
+                    raise ValueError(f"derived type '{type_name}' has invalid components")
+                info = _scalar_type_info(component, static_constants)
+                if info.kind is not None:
+                    kind_ids.append(info.kind)
+                title = component.get("title", name)
+                declarations.append(f"{info.type_spec} :: {name} !< {title}")
+            title = definition.get("title", type_name)
+            description = definition.get("description")
+            collected[identity] = LocalDerivedTypeSpec(
+                identity=identity,
+                type_name=type_name,
+                title=str(title),
+                description=str(description) if description is not None else None,
+                declarations=declarations,
+                kind_ids=kind_ids,
+            )
+    return list(collected.values())
 
 
 def _build_context(
@@ -290,6 +383,10 @@ def _build_context(
     bounds_parameters: list[str] = []
     bounds_functions: list[dict[str, Any]] = []
     bounds_checks: list[dict[str, Any]] = []
+    derived_type_imports: list[dict[str, str]] = []
+    derived_init_type_fields: list[dict[str, Any]] = []
+    derived_presence_blocks: list[str] = []
+    derived_post_assignment_checks: list[str] = []
     static_constants = normalize_constant_values(constants)
     runtime_dimension_values = normalize_runtime_dimensions(dimensions)
     reject_constant_dimension_overlap(static_constants, runtime_dimension_values)
@@ -494,6 +591,337 @@ def _build_context(
             dynamic_array = type_info.category == "array" and is_runtime_sized
 
             is_required = name in required_set
+            derived = _derived_schema(prop)
+            if derived is not None:
+                derived_type_name = _derived_type_name(derived)
+                module = derived.get("x-fortran-module")
+                if module is None:
+                    _add_helper_import(derived_type_name)
+                elif not any(
+                    entry["module"].lower() == str(module).lower()
+                    and entry["type_name"].lower() == derived_type_name.lower()
+                    for entry in derived_type_imports
+                ):
+                    derived_type_imports.append(
+                        {"module": str(module), "type_name": derived_type_name}
+                    )
+
+                components = derived.get("properties")
+                if not isinstance(components, dict) or not components:
+                    raise ValueError("derived object must define properties")
+                inner_required = {
+                    str(component).lower() for component in derived.get("required", [])
+                }
+                leaf_entries: list[dict[str, Any]] = []
+                init_lines: list[str] = []
+                for child_display_name, child in components.items():
+                    if not isinstance(child_display_name, str) or not isinstance(child, dict):
+                        raise ValueError("derived object components must be schema objects")
+                    child_name = child_display_name.lower()
+                    child_info = _field_type_info(child, static_constants)
+                    if child_info.kind:
+                        kind_ids.append(child_info.kind)
+                    if child_info.length_expr and not _is_int_literal(child_info.length_expr):
+                        _add_helper_import(child_info.length_expr)
+                    if (
+                        module is not None
+                        and child_info.category == "string"
+                        and child_info.length_expr is not None
+                    ):
+                        expected_len = child_info.length_expr
+                        parent_storage_ref = f"this%{name}"
+                        if type_info.category == "array":
+                            parent_storage_ref = _array_section_ref(
+                                parent_storage_ref, len(type_info.dimensions)
+                            )
+                        child_storage_ref = f"{parent_storage_ref}%{child_name}"
+                        storage_message = (
+                            f"imported string storage too short: {name}%{child_name}"
+                        )
+                        derived_post_assignment_checks.extend(
+                            [
+                                f"if (len(this%{name}%{child_name}) < {expected_len}) then",
+                                "  status = NML_ERR_BOUNDS",
+                                "  if (present(errmsg)) "
+                                f'errmsg = "{storage_message}"',
+                                "  return",
+                                "end if",
+                                f"if (len(this%{name}%{child_name}) > {expected_len}) "
+                                f"{child_storage_ref}({expected_len} + 1:) = \"\"",
+                            ]
+                        )
+                    child_target = f"this%{name}%{child_name}"
+                    arg_target = f"{name}%{child_name}"
+                    has_default = "default" in child
+                    if has_default:
+                        literal = _format_default(child["default"], child_info, child, constants)
+                        sentinel_assignments.append(f"{child_target} = {literal}")
+                        init_lines.append(f"{arg_target} = {literal}")
+                        missing_condition = None
+                    else:
+                        if child_info.category == "boolean":
+                            raise ValueError(
+                                f"derived boolean component '{child_display_name}' "
+                                "must define a default"
+                            )
+                        value_expr, missing_condition, child_uses_ieee = _sentinel_expressions(
+                            child_info,
+                            var_ref=child_target,
+                        )
+                        sentinel_assignments.append(
+                            _render_sentinel_assignment(
+                                child_info,
+                                target_ref=child_target,
+                                value_expr=value_expr,
+                                comment=f" ! sentinel for derived component {child_name}",
+                            )
+                        )
+                        arg_value_expr, _, _ = _sentinel_expressions(
+                            child_info,
+                            var_ref=arg_target,
+                        )
+                        init_lines.append(
+                            _render_sentinel_assignment(
+                                child_info,
+                                target_ref=arg_target,
+                                value_expr=arg_value_expr,
+                                comment=f" ! sentinel for derived component {child_name}",
+                            )
+                        )
+                        if child_uses_ieee:
+                            requires_ieee = True
+                    leaf_entries.append(
+                        {
+                            "name": child_name,
+                            "display_name": child_display_name,
+                            "missing_condition": missing_condition,
+                            "required": child_name in inner_required,
+                            "has_default": has_default,
+                        }
+                    )
+                    constraint_name = f"{name}_{child_name}"
+                    component_ref = f"this%{name}%{child_name}"
+                    enum_values = _enum_values(child, child_info, constants)
+                    if enum_values is not None:
+                        enum_category = _enum_category(child_info)
+                        enum_const_name = f"{constraint_name}_enum_values"
+                        enum_literals = [
+                            _format_scalar_default(value, child_info.kind, enum_category)
+                            for value in enum_values
+                        ]
+                        if enum_category == "string":
+                            enum_array_literal = (
+                                f"[{child_info.type_spec} :: {', '.join(enum_literals)}]"
+                            )
+                            enum_parameters.append(
+                                f"{child_info.type_spec}, parameter, public :: &\n"
+                                f"    {enum_const_name}({len(enum_literals)}) = "
+                                f"{enum_array_literal}"
+                            )
+                        else:
+                            enum_parameters.append(
+                                f"{child_info.type_spec}, parameter, public :: "
+                                f"{enum_const_name}({len(enum_literals)}) = "
+                                f"[{', '.join(enum_literals)}]"
+                            )
+                        _, enum_missing_condition, _ = _sentinel_expressions(
+                            child_info,
+                            var_ref="val",
+                            len_ref="val",
+                        )
+                        enum_functions.append(
+                            {
+                                "name": constraint_name,
+                                "func_name": f"{constraint_name}_in_enum",
+                                "arg_type_spec": _enum_arg_type_spec(child_info),
+                                "enum_values_name": enum_const_name,
+                                "use_trim": enum_category == "string",
+                                "missing_condition": enum_missing_condition,
+                            }
+                        )
+                        enum_checks.append(
+                            {
+                                "name": constraint_name,
+                                "display_name": f"{display_name}%{child_name}",
+                                "func_name": f"{constraint_name}_in_enum",
+                                "is_array": type_info.category == "array",
+                                "runtime_array": dynamic_array,
+                                "array_ref": component_ref,
+                                "allocation_ref": f"this%{name}",
+                                "element_ref": component_ref,
+                            }
+                        )
+                    bounds_spec = _bounds_spec(child, child_info)
+                    if bounds_spec is not None:
+                        bounds_category = bounds_spec["category"]
+                        min_value = bounds_spec["min_value"]
+                        max_value = bounds_spec["max_value"]
+                        min_exclusive = bounds_spec["min_exclusive"]
+                        max_exclusive = bounds_spec["max_exclusive"]
+                        min_name = None
+                        max_name = None
+                        if min_value is not None:
+                            min_name = (
+                                f"{constraint_name}_min_excl"
+                                if min_exclusive
+                                else f"{constraint_name}_min"
+                            )
+                            min_literal = _format_scalar_default(
+                                min_value, child_info.kind, bounds_category
+                            )
+                            bounds_parameters.append(
+                                f"{child_info.type_spec}, parameter, public :: "
+                                f"{min_name} = {min_literal}"
+                            )
+                        if max_value is not None:
+                            max_name = (
+                                f"{constraint_name}_max_excl"
+                                if max_exclusive
+                                else f"{constraint_name}_max"
+                            )
+                            max_literal = _format_scalar_default(
+                                max_value, child_info.kind, bounds_category
+                            )
+                            bounds_parameters.append(
+                                f"{child_info.type_spec}, parameter, public :: "
+                                f"{max_name} = {max_literal}"
+                            )
+                        _, bounds_missing_condition, child_uses_ieee = _sentinel_expressions(
+                            child_info,
+                            var_ref="val",
+                            len_ref="val",
+                        )
+                        if child_uses_ieee:
+                            requires_ieee = True
+                        bounds_functions.append(
+                            {
+                                "name": constraint_name,
+                                "func_name": f"{constraint_name}_in_bounds",
+                                "arg_type_spec": child_info.arg_type_spec,
+                                "has_min": min_value is not None,
+                                "has_max": max_value is not None,
+                                "min_name": min_name,
+                                "max_name": max_name,
+                                "min_exclusive": min_exclusive,
+                                "max_exclusive": max_exclusive,
+                                "missing_condition": bounds_missing_condition,
+                            }
+                        )
+                        bounds_checks.append(
+                            {
+                                "name": constraint_name,
+                                "display_name": f"{display_name}%{child_name}",
+                                "func_name": f"{constraint_name}_in_bounds",
+                                "is_array": type_info.category == "array",
+                                "runtime_array": dynamic_array,
+                                "array_ref": component_ref,
+                                "allocation_ref": f"this%{name}",
+                                "element_ref": component_ref,
+                            }
+                        )
+
+                arg_dimensions = [":" for _ in type_info.dimensions]
+                argument_decl = _render_argument_declaration(
+                    name=name,
+                    type_info=type_info,
+                    is_required=is_required,
+                    dimensions=arg_dimensions,
+                    doc=title,
+                )
+                local_init_assignments.append(f"{name} = this%{name}")
+                derived_partial_bounds: list[dict[str, Any]] = []
+                set_present_assignment: str | None = None
+                if type_info.category == "array":
+                    for array_dim_index in range(1, len(type_info.dimensions) + 1):
+                        lb_var, ub_var = _flex_bound_vars(array_dim_index)
+                        derived_partial_bounds.append(
+                            {"dim": array_dim_index, "lb_var": lb_var, "ub_var": ub_var}
+                        )
+                        flex_bound_vars.add(lb_var)
+                        flex_bound_vars.add(ub_var)
+                if is_required:
+                    if type_info.category == "array":
+                        set_required_assignments.append(
+                            _render_partial_set_block(
+                                name, len(type_info.dimensions), derived_partial_bounds
+                            )
+                        )
+                    else:
+                        set_required_assignments.append(f"this%{name} = {name}")
+                elif type_info.category == "array":
+                    block = _render_partial_set_block(
+                        name, len(type_info.dimensions), derived_partial_bounds
+                    )
+                    indented_block = "\n".join(f"  {line}" for line in block.splitlines())
+                    set_present_assignment = (
+                        f"if (present({name})) then\n{indented_block}\nend if"
+                    )
+                else:
+                    set_present_assignment = f"if (present({name})) this%{name} = {name}"
+
+                init_argument_declaration = _render_argument_declaration(
+                    name=name,
+                    type_info=type_info,
+                    is_required=False,
+                    dimensions=arg_dimensions,
+                    doc=title,
+                )
+                allocation_lines: list[str] = []
+                if type_info.category == "array":
+                    init_argument_declaration = init_argument_declaration.replace(
+                        ", intent(in), optional", ", allocatable, intent(inout), optional"
+                    )
+                    allocation_lines.append(f"if (allocated({name})) deallocate({name})")
+                    dims = ", ".join(runtime_shape)
+                    allocation_lines.append(f"allocate({name}({dims}))")
+                else:
+                    init_argument_declaration = init_argument_declaration.replace(
+                        "intent(in)", "intent(inout)"
+                    )
+                derived_init_type_fields.append(
+                    {
+                        "name": name,
+                        "declaration": init_argument_declaration,
+                        "allocation_lines": allocation_lines,
+                        "init_lines": init_lines,
+                    }
+                )
+                derived_presence_blocks.extend(
+                    _derived_presence_cases(
+                        name=name,
+                        display_name=display_name,
+                        leaves=leaf_entries,
+                        is_array=type_info.category == "array",
+                        runtime_array=dynamic_array,
+                        rank=len(type_info.dimensions),
+                    )
+                )
+                if is_required:
+                    uses_partly_set = uses_partly_set or (
+                        len(inner_required) > 1
+                        or (type_info.category == "array" and bool(inner_required))
+                    )
+                fields.append(
+                    FieldSpec(
+                        order=index,
+                        name=name,
+                        title=title,
+                        description=description,
+                        declaration=f"{declaration} !< {title}",
+                        local_declaration=local_decl,
+                        required=is_required,
+                        sentinel_assignment=None,
+                        sentinel_check=None,
+                        default_assignment=None,
+                        set_default_assignment=None,
+                        set_present_assignment=set_present_assignment,
+                        argument_declaration=argument_decl,
+                        type_category=type_info.category,
+                        runtime_sized_array=dynamic_array,
+                        rank=len(type_info.dimensions),
+                    )
+                )
+                continue
             if type_info.category == "array":
                 has_default = array_default_info is not None
             else:
@@ -880,6 +1308,7 @@ def _build_context(
                             "is_array": True,
                             "runtime_array": dynamic_array,
                             "array_ref": f"this%{name}",
+                            "allocation_ref": f"this%{name}",
                         }
                     )
                 else:
@@ -953,6 +1382,7 @@ def _build_context(
                             "is_array": True,
                             "runtime_array": dynamic_array,
                             "array_ref": f"this%{name}",
+                            "allocation_ref": f"this%{name}",
                         }
                     )
                 else:
@@ -1193,6 +1623,10 @@ def _build_context(
         "enum_checks": enum_checks,
         "bounds_functions": bounds_functions,
         "bounds_checks": bounds_checks,
+        "derived_type_imports": derived_type_imports,
+        "derived_init_type_fields": derived_init_type_fields,
+        "derived_presence_blocks": derived_presence_blocks,
+        "derived_post_assignment_checks": derived_post_assignment_checks,
         "kind_module": resolved_kind_module,
         "kind_imports": _resolve_kind_imports(
             kind_ids,
@@ -1208,6 +1642,185 @@ def _build_context(
     }
 
     return context
+
+
+def _derived_presence_cases(
+    *,
+    name: str,
+    display_name: str,
+    leaves: list[dict[str, Any]],
+    is_array: bool,
+    runtime_array: bool,
+    rank: int,
+) -> list[str]:
+    blocks: list[str] = []
+    idx_args = ", ".join(f"idx({index})" for index in range(1, rank + 1))
+
+    def append_condition(
+        lines: list[str],
+        *,
+        prefix: str,
+        conditions: list[str],
+        operator: str,
+        suffix: str,
+    ) -> None:
+        if len(conditions) == 1:
+            lines.append(f"{prefix}{conditions[0]}{suffix}")
+            return
+        continuation = " " * (len(prefix) + 2)
+        for index, condition in enumerate(conditions):
+            if index == 0:
+                lines.append(f"{prefix}{condition} {operator} &")
+            elif index == len(conditions) - 1:
+                lines.append(f"{continuation}{condition}{suffix}")
+            else:
+                lines.append(f"{continuation}{condition} {operator} &")
+
+    def array_prefix(lines: list[str]) -> None:
+        if runtime_array:
+            lines.extend(
+                [
+                    f"  if (.not. allocated(this%{name})) then",
+                    "    status = NML_ERR_NOT_SET",
+                    "    return",
+                    "  end if",
+                ]
+            )
+
+    for leaf in leaves:
+        condition = leaf["missing_condition"]
+        lines = [f'case ("{name}%{leaf["name"]}")']
+        if is_array:
+            array_prefix(lines)
+            lines.extend(
+                [
+                    "  if (present(idx)) then",
+                    f"    status = idx_check(idx, lbound(this%{name}), ubound(this%{name}), &",
+                    f'      "{display_name}", errmsg)',
+                    "    if (status /= NML_OK) return",
+                ]
+            )
+            if condition is not None:
+                indexed = str(condition).replace(
+                    f"this%{name}%{leaf['name']}",
+                    f"this%{name}({idx_args})%{leaf['name']}",
+                )
+                lines.append(f"    if ({indexed}) status = NML_ERR_NOT_SET")
+            lines.append("  else")
+            if condition is not None:
+                lines.append(f"    if (all({condition})) status = NML_ERR_NOT_SET")
+            lines.append("  end if")
+        else:
+            lines.extend(
+                [
+                    "  if (present(idx)) then",
+                    "    status = NML_ERR_INVALID_INDEX",
+                    "    if (present(errmsg)) "
+                    f'errmsg = "index not supported for \'{display_name}\'"',
+                    "    return",
+                    "  end if",
+                ]
+            )
+            if condition is not None:
+                lines.append(f"  if ({condition}) status = NML_ERR_NOT_SET")
+        blocks.append("\n".join(lines))
+
+    required_conditions = [
+        str(leaf["missing_condition"])
+        for leaf in leaves
+        if leaf["required"] and leaf["missing_condition"] is not None
+    ]
+    aggregate_conditions = required_conditions or [
+        str(leaf["missing_condition"])
+        for leaf in leaves
+        if leaf["missing_condition"] is not None
+    ]
+    lines = [f'case ("{name}")']
+    if is_array:
+        array_prefix(lines)
+        lines.extend(
+            [
+                "  if (present(idx)) then",
+                f"    status = idx_check(idx, lbound(this%{name}), ubound(this%{name}), &",
+                f'      "{display_name}", errmsg)',
+                "    if (status /= NML_OK) return",
+            ]
+        )
+        indexed_conditions = [
+            condition.replace(f"this%{name}%", f"this%{name}({idx_args})%")
+            for condition in aggregate_conditions
+        ]
+        if indexed_conditions:
+            append_condition(
+                lines,
+                prefix="    if (",
+                conditions=indexed_conditions,
+                operator=".and.",
+                suffix=") then",
+            )
+            lines.append("      status = NML_ERR_NOT_SET")
+            if required_conditions and len(indexed_conditions) > 1:
+                append_condition(
+                    lines,
+                    prefix="    else if (",
+                    conditions=indexed_conditions,
+                    operator=".or.",
+                    suffix=") then",
+                )
+                lines.append("      status = NML_ERR_PARTLY_SET")
+            lines.append("    end if")
+        lines.append("  else")
+        if aggregate_conditions:
+            append_condition(
+                lines,
+                prefix="    if (all(",
+                conditions=aggregate_conditions,
+                operator=".and.",
+                suffix=")) then",
+            )
+            lines.append("      status = NML_ERR_NOT_SET")
+            if required_conditions and (len(aggregate_conditions) > 1 or is_array):
+                append_condition(
+                    lines,
+                    prefix="    else if (any(",
+                    conditions=aggregate_conditions,
+                    operator=".or.",
+                    suffix=")) then",
+                )
+                lines.append("      status = NML_ERR_PARTLY_SET")
+            lines.append("    end if")
+        lines.append("  end if")
+    else:
+        lines.extend(
+            [
+                "  if (present(idx)) then",
+                "    status = NML_ERR_INVALID_INDEX",
+                f'    if (present(errmsg)) errmsg = "index not supported for \'{display_name}\'"',
+                "    return",
+                "  end if",
+            ]
+        )
+        if aggregate_conditions:
+            append_condition(
+                lines,
+                prefix="  if (",
+                conditions=aggregate_conditions,
+                operator=".and.",
+                suffix=") then",
+            )
+            lines.append("    status = NML_ERR_NOT_SET")
+            if len(aggregate_conditions) > 1 and required_conditions:
+                append_condition(
+                    lines,
+                    prefix="  else if (",
+                    conditions=aggregate_conditions,
+                    operator=".or.",
+                    suffix=") then",
+                )
+                lines.append("    status = NML_ERR_PARTLY_SET")
+            lines.append("  end if")
+    blocks.append("\n".join(lines))
+    return blocks
 
 
 def _ordered_unique(values: Iterable[Any]) -> list[Any]:
@@ -1289,6 +1902,16 @@ def _field_type_info(
             if items.get("type") == "array":
                 raise ValueError("nested array properties are not supported; use x-fortran-shape")
             current = items
+        if current.get("type") == "object":
+            type_name = _derived_type_name(current)
+            return FieldTypeInfo(
+                type_spec=f"type({type_name})",
+                arg_type_spec=f"type({type_name})",
+                dimensions=dimensions,
+                kind=None,
+                category="array",
+                element_category="derived",
+            )
         scalar = _scalar_type_info(current, constants)
         return FieldTypeInfo(
             type_spec=scalar.type_spec,
@@ -1300,6 +1923,15 @@ def _field_type_info(
             element_category=scalar.category,
         )
 
+    if prop_type == "object":
+        type_name = _derived_type_name(prop)
+        return FieldTypeInfo(
+            type_spec=f"type({type_name})",
+            arg_type_spec=f"type({type_name})",
+            dimensions=[],
+            kind=None,
+            category="derived",
+        )
     scalar = _scalar_type_info(prop, constants)
     return FieldTypeInfo(
         type_spec=scalar.type_spec,
@@ -1310,6 +1942,39 @@ def _field_type_info(
         length_expr=scalar.length_expr,
         element_category=None,
     )
+
+
+def _derived_schema(prop: dict[str, Any]) -> dict[str, Any] | None:
+    if prop.get("type") == "object":
+        return prop
+    if prop.get("type") == "array":
+        items = prop.get("items")
+        if isinstance(items, dict) and items.get("type") == "object":
+            return items
+    return None
+
+
+def _derived_type_name(schema: dict[str, Any]) -> str:
+    type_name = schema.get("x-fortran-type")
+    if not isinstance(type_name, str) or not type_name.strip():
+        raise ValueError("derived object must define non-empty 'x-fortran-type'")
+    return type_name.strip()
+
+
+def _derived_origin(schema: dict[str, Any]) -> dict[str, Any]:
+    origin = schema.get(DERIVED_REF_ORIGIN_KEY)
+    if not isinstance(origin, dict):
+        raise ValueError("derived object must originate from a normalized definition")
+    raw_identity = origin.get("identity")
+    definition = origin.get("definition")
+    if (
+        not isinstance(raw_identity, list)
+        or len(raw_identity) != 2
+        or not all(isinstance(value, str) for value in raw_identity)
+        or not isinstance(definition, dict)
+    ):
+        raise ValueError("derived object has invalid reference origin metadata")
+    return {"identity": (raw_identity[0], raw_identity[1]), "definition": definition}
 
 
 def _element_type_info(type_info: FieldTypeInfo) -> FieldTypeInfo:

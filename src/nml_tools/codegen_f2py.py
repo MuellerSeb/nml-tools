@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import keyword
 import re
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from .codegen_fortran import (
     FieldSpec,
     FieldTypeInfo,
     _build_context,
+    _derived_schema,
+    _derived_type_name,
     _field_type_info,
     _reject_runtime_dimension_lengths,
 )
@@ -31,6 +34,18 @@ _TEMPLATE_ENV = Environment(
     keep_trailing_newline=True,
     undefined=StrictUndefined,
 )
+
+
+@dataclass
+class F2pyDerivedLeafSpec:
+    """An intrinsic ABI leaf flattened from a derived Python argument."""
+
+    name: str
+    encoded_name: str
+    has_name: str
+    rank: int
+    numpy_dtype: str | None
+    dummy_value: str
 
 
 @dataclass
@@ -48,6 +63,8 @@ class F2pyArgumentSpec:
     has_flag: str | None = None
     fixed_shape: list[int] | None = None
     python_name: str | None = None
+    derived_leaves: list[F2pyDerivedLeafSpec] | None = None
+    derived_type_name: str | None = None
 
 
 @dataclass
@@ -90,6 +107,7 @@ class F2pyNamelistSpec:
     required_args: list[F2pyArgumentSpec]
     optional_args: list[F2pyArgumentSpec]
     all_args: list[F2pyArgumentSpec]
+    derived_type_names: list[str]
 
 
 @dataclass
@@ -226,7 +244,16 @@ def render_python_wrappers(
             )
         )
     rendered = _TEMPLATE_ENV.get_template("python_wrappers.py.j2").render(
-        {"imports": sorted(extension_modules), "classes": classes, "py_style": py_style}
+        {
+            "imports": sorted(extension_modules),
+            "classes": classes,
+            "py_style": py_style,
+            "uses_derived": any(
+                arg.derived_leaves is not None
+                for cls in classes
+                for arg in cls.all_args
+            ),
+        }
     )
     return strip_trailing_whitespace(rendered)
 
@@ -276,8 +303,26 @@ def collect_f2py_kind_usage(
 ) -> F2pyKindUsage:
     """Collect schema kind aliases used in f2py wrapper arguments."""
     usage = F2pyKindUsage(real=set(), integer=set())
+    runtime_dimension_values = normalize_runtime_dimensions(dimensions)
     for schema in schemas:
-        for _, type_info in _iter_field_type_infos(schema, constants, dimensions):
+        properties = _normalized_properties(schema)
+        field_infos = _iter_field_type_infos(schema, constants, dimensions)
+        expanded: list[FieldTypeInfo] = []
+        for name, type_info in field_infos:
+            derived = _derived_schema(properties[name])
+            if derived is None:
+                expanded.append(type_info)
+                continue
+            components = derived.get("properties")
+            if not isinstance(components, dict):
+                continue
+            for component in components.values():
+                if isinstance(component, dict):
+                    _reject_runtime_dimension_lengths(component, runtime_dimension_values)
+                    expanded.append(
+                        _field_type_info(component, normalize_constant_values(constants))
+                    )
+        for type_info in expanded:
             category = (
                 type_info.element_category
                 if type_info.category == "array"
@@ -342,12 +387,10 @@ def build_f2py_namelist_spec(
     set_dims_call_arguments: list[str] = []
     set_dims_args: list[F2pyArgumentSpec] = []
     array_dimensions: list[F2pyArrayDimensionSpec] = []
+    derived_type_names: list[str] = []
 
-    field_argument_names: set[str] = set()
-    for field in fields:
-        field_type_info = type_infos[field.name]
-        field_args, _ = _f2py_field_arguments(field, field_type_info)
-        field_argument_names.update(name.lower() for name in field_args)
+    field_argument_names: set[str] = {"handle", "status", "errmsg"}
+    field_argument_names.update(field.name.lower() for field in fields)
 
     argument_names_in_use: set[str] = set(field_argument_names)
     bridge_names_in_use: set[str] = set(field_argument_names) | {
@@ -360,9 +403,125 @@ def build_f2py_namelist_spec(
     for field in fields:
         type_info = type_infos[field.name]
         rank = len(type_info.dimensions) if type_info.category == "array" else 0
+        prop = _normalized_properties(schema)[field.name]
+        derived = _derived_schema(prop)
+        if derived is not None:
+            dim_names: list[str] = []
+            if rank:
+                for dim_name in _array_dimension_argument_names(field.name, rank):
+                    generated_dim_name = _unique_generated_name(dim_name, argument_names_in_use)
+                    argument_names_in_use.add(generated_dim_name.lower())
+                    dim_names.append(generated_dim_name)
+            derived_type_name = _derived_type_name(derived)
+            if derived_type_name.lower() not in {
+                name.lower() for name in derived_type_names
+            }:
+                derived_type_names.append(derived_type_name)
+            leaves = _f2py_derived_leaves(
+                field.name,
+                derived,
+                type_info,
+                constants,
+                argument_names_in_use,
+            )
+            outer_has_flag: str | None = None
+            if not field.required:
+                outer_has_flag = _unique_generated_name(
+                    f"has__{field.name}", argument_names_in_use
+                )
+                argument_names_in_use.add(outer_has_flag.lower())
+                argument_list.append(outer_has_flag)
+                argument_declarations.append(
+                    f"logical, intent(in) :: {outer_has_flag} "
+                    f"!< whether {field.name} was provided"
+                )
+            spec = F2pyArgumentSpec(
+                name=field.name,
+                title=_one_line(field.title),
+                required=field.required,
+                rank=rank,
+                numpy_dtype=None,
+                dummy_value="None",
+                doc_type=("sequence of mappings" if rank else "mapping"),
+                requirement="required" if field.required else "optional",
+                has_flag=outer_has_flag,
+                derived_leaves=leaves,
+                derived_type_name=derived_type_name,
+            )
+            if field.required:
+                required_args.append(spec)
+            else:
+                optional_args.append(spec)
+            if rank:
+                argument_list.extend(dim_names)
+                argument_declarations.extend(
+                    f"integer, intent(in) :: {dim_name} !< extent for {field.name}"
+                    for dim_name in dim_names
+                )
+                array_dimensions.append(
+                    F2pyArrayDimensionSpec(field_name=field.name, names=dim_names)
+                )
+            for leaf in leaves:
+                argument_list.append(leaf.encoded_name)
+                if rank:
+                    dims = ", ".join(dim_names)
+                    leaf_type = _field_type_info(
+                        cast("dict[str, Any]", derived["properties"][leaf.name]),
+                        normalize_constant_values(constants),
+                    )
+                    argument_declarations.append(
+                        f"{leaf_type.arg_type_spec}, dimension({dims}), intent(in) :: "
+                        f"{leaf.encoded_name} !< {field.name}%{leaf.name}"
+                    )
+                    argument_list.append(leaf.has_name)
+                    argument_declarations.append(
+                        f"logical, dimension({dims}), intent(in) :: {leaf.has_name} "
+                        f"!< provided mask for {field.name}%{leaf.name}"
+                    )
+                else:
+                    leaf_type = _field_type_info(
+                        cast("dict[str, Any]", derived["properties"][leaf.name]),
+                        normalize_constant_values(constants),
+                    )
+                    argument_declarations.append(
+                        f"{leaf_type.arg_type_spec}, intent(in) :: {leaf.encoded_name} "
+                        f"!< {field.name}%{leaf.name}"
+                    )
+                    argument_list.append(leaf.has_name)
+                    argument_declarations.append(
+                        f"logical, intent(in) :: {leaf.has_name} "
+                        f"!< whether {field.name}%{leaf.name} was provided"
+                    )
+            bridge_names_in_use.update(argument_names_in_use)
+            maybe_name = _unique_generated_name(
+                _maybe_bridge_name(field.name), bridge_names_in_use
+            )
+            bridge_names_in_use.add(maybe_name.lower())
+            bridge_declarations.extend(
+                _derived_bridge_declarations(maybe_name, derived_type_name, rank, field.required)
+            )
+            bridge_assignments.extend(
+                _derived_bridge_assignments(
+                    field.name,
+                    maybe_name,
+                    leaves,
+                    rank,
+                    field.required,
+                    outer_has_flag,
+                    dim_names,
+                )
+            )
+            set_call_arguments.append(f"{field.name}={maybe_name}")
+            continue
         has_flag: str | None = None
+        dim_names = []
+        if rank:
+            for dim_name in _array_dimension_argument_names(field.name, rank):
+                generated_dim_name = _unique_generated_name(dim_name, argument_names_in_use)
+                argument_names_in_use.add(generated_dim_name.lower())
+                dim_names.append(generated_dim_name)
         if not field.required:
-            has_base = f"has_{field.name}"
+            has_base = f"has__{field.name}"
             has_flag = _unique_generated_name(has_base, argument_names_in_use)
             argument_names_in_use.add(has_flag.lower())
         spec = F2pyArgumentSpec(
@@ -380,11 +539,12 @@ def build_f2py_namelist_spec(
             required_args.append(spec)
         else:
             optional_args.append(spec)
-        field_arguments, field_declarations = _f2py_field_arguments(field, type_info)
+        field_arguments, field_declarations = _f2py_field_arguments(
+            field, type_info, dim_names=dim_names
+        )
         argument_list.extend(field_arguments)
         argument_declarations.extend(field_declarations)
         if rank > 0:
-            dim_names = _array_dimension_argument_names(field.name, rank)
             array_dimensions.append(
                 F2pyArrayDimensionSpec(field_name=field.name, names=dim_names)
             )
@@ -393,6 +553,7 @@ def build_f2py_namelist_spec(
             argument_declarations.append(
                 f"logical, intent(in) :: {has_flag} !< whether {field.name} was provided"
             )
+            bridge_names_in_use.update(argument_names_in_use)
             maybe_base = _maybe_bridge_name(field.name)
             maybe_name = _unique_generated_name(maybe_base, bridge_names_in_use)
             bridge_names_in_use.add(maybe_name.lower())
@@ -421,7 +582,7 @@ def build_f2py_namelist_spec(
         const_name = entry["name"]
         arg_name = entry["arg_name"]
         python_name = _python_parameter_name(const_name)
-        has_base = f"has_{const_name}"
+        has_base = f"has__{const_name}"
         has_flag = _unique_generated_name(has_base, set_dims_argument_names_in_use)
         set_dims_argument_names_in_use.add(has_flag.lower())
         set_dims_args.append(
@@ -490,6 +651,7 @@ def build_f2py_namelist_spec(
         required_args=required_args,
         optional_args=optional_args,
         all_args=required_args + optional_args,
+        derived_type_names=derived_type_names,
     )
 
 
@@ -612,14 +774,22 @@ def _array_dimension_argument_names(name: str, rank: int) -> list[str]:
 
 
 def _unique_generated_name(base_name: str, taken_names: set[str]) -> str:
-    if base_name.lower() not in taken_names:
-        return base_name
+    candidate = _bounded_generated_name(base_name)
+    if candidate.lower() not in taken_names:
+        return candidate
     index = 1
     while True:
-        candidate = f"{base_name}_{index}"
+        candidate = _bounded_generated_name(f"{base_name}_{index}")
         if candidate.lower() not in taken_names:
             return candidate
         index += 1
+
+
+def _bounded_generated_name(base_name: str) -> str:
+    if len(base_name) <= 63:
+        return base_name
+    suffix = hashlib.sha1(base_name.encode("ascii")).hexdigest()[:10]
+    return f"{base_name[:52]}_{suffix}"
 
 
 def _maybe_bridge_name(name: str) -> str:
@@ -629,6 +799,8 @@ def _maybe_bridge_name(name: str) -> str:
 def _f2py_field_arguments(
     field: FieldSpec,
     type_info: FieldTypeInfo,
+    *,
+    dim_names: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     requirement = "required" if field.required else "optional"
     if type_info.category != "array":
@@ -637,7 +809,8 @@ def _f2py_field_arguments(
             f"!< {_one_line(field.title)} ({requirement})"
         ]
 
-    dim_names = _array_dimension_argument_names(field.name, len(type_info.dimensions))
+    if dim_names is None:
+        dim_names = _array_dimension_argument_names(field.name, len(type_info.dimensions))
     dims = ", ".join(dim_names)
     declarations = [
         f"integer, intent(in) :: {dim_name} !< extent for {field.name}"
@@ -648,6 +821,95 @@ def _f2py_field_arguments(
         f"!< {_one_line(field.title)} ({requirement})"
     )
     return [*dim_names, field.name], declarations
+
+
+def _f2py_derived_leaves(
+    field_name: str,
+    derived: dict[str, Any],
+    type_info: FieldTypeInfo,
+    constants: dict[str, int] | None,
+    argument_names_in_use: set[str],
+) -> list[F2pyDerivedLeafSpec]:
+    properties = derived.get("properties")
+    if not isinstance(properties, dict):
+        raise ValueError(f"derived property '{field_name}' must define properties")
+    rank = len(type_info.dimensions) if type_info.category == "array" else 0
+    static_constants = normalize_constant_values(constants)
+    leaves: list[F2pyDerivedLeafSpec] = []
+    for name, prop in properties.items():
+        if not isinstance(name, str) or not isinstance(prop, dict):
+            raise ValueError(f"derived property '{field_name}' components must be objects")
+        leaf_info = _field_type_info(prop, static_constants)
+        encoded_name = _unique_generated_name(f"{field_name}__{name}", argument_names_in_use)
+        argument_names_in_use.add(encoded_name.lower())
+        has_name = _unique_generated_name(f"has__{encoded_name}", argument_names_in_use)
+        argument_names_in_use.add(has_name.lower())
+        leaves.append(
+            F2pyDerivedLeafSpec(
+                name=name,
+                encoded_name=encoded_name,
+                has_name=has_name,
+                rank=rank,
+                numpy_dtype=_numpy_dtype(leaf_info),
+                dummy_value=_python_dummy_value(leaf_info),
+            )
+        )
+    return leaves
+
+
+def _derived_bridge_declarations(
+    maybe_name: str,
+    type_name: str,
+    rank: int,
+    required: bool,
+) -> list[str]:
+    if rank:
+        dims = ", ".join(":" for _ in range(rank))
+        return [f"type({type_name}), dimension({dims}), allocatable :: {maybe_name}"]
+    if required:
+        return [f"type({type_name}) :: {maybe_name}"]
+    return [f"type({type_name}), allocatable :: {maybe_name}"]
+
+
+def _derived_bridge_assignments(
+    name: str,
+    maybe_name: str,
+    leaves: list[F2pyDerivedLeafSpec],
+    rank: int,
+    required: bool,
+    outer_has_flag: str | None,
+    dim_names: list[str],
+) -> list[str]:
+    lines: list[str] = []
+    gated = not required
+    if gated:
+        if outer_has_flag is None:
+            raise ValueError(f"optional derived property '{name}' is missing presence metadata")
+        lines.append(f"if ({outer_has_flag}) then")
+        indent = "  "
+        if rank == 0:
+            lines.append(f"  allocate({maybe_name})")
+    else:
+        indent = ""
+    lines.append(f"{indent}status = this%init_type({name}={maybe_name}, errmsg=errmsg)")
+    lines.append(f"{indent}if (status /= NML_OK) return")
+    if rank:
+        bounds = ", ".join(f"1:{dim_name}" for dim_name in dim_names)
+        for leaf in leaves:
+            lines.append(f"{indent}where ({leaf.has_name})")
+            lines.append(
+                f"{indent}  {maybe_name}({bounds})%{leaf.name} = {leaf.encoded_name}"
+            )
+            lines.append(f"{indent}end where")
+    else:
+        for leaf in leaves:
+            lines.append(
+                f"{indent}if ({leaf.has_name}) "
+                f"{maybe_name}%{leaf.name} = {leaf.encoded_name}"
+            )
+    if gated:
+        lines.append("end if")
+    return ["\n".join(lines)]
 
 
 def _optional_bridge_declaration(name: str, type_info: FieldTypeInfo, maybe_name: str) -> str:

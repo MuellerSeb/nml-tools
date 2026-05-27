@@ -170,7 +170,7 @@ class Config:
             kwargs["n_weights"] = n_weights
         else:
             kwargs["n_weights"] = 0
-        kwargs["has_n_weights"] = n_weights is not None
+        kwargs["has__n_weights"] = n_weights is not None
         result = self._f2py.config_set_dims_wrapper(
             self.handle,
             **kwargs,
@@ -224,12 +224,12 @@ class Config:
             kwargs["name"] = name
         else:
             kwargs["name"] = ""
-        kwargs["has_name"] = name is not None
+        kwargs["has__name"] = name is not None
         if enabled is not None:
             kwargs["enabled"] = enabled
         else:
             kwargs["enabled"] = False
-        kwargs["has_enabled"] = enabled is not None
+        kwargs["has__enabled"] = enabled is not None
         if weights is not None:
             kwargs["weights"] = _normalize_array(
                 weights,
@@ -243,7 +243,7 @@ class Config:
                 1,
                 dtype="float",
             )
-        kwargs["has_weights"] = weights is not None
+        kwargs["has__weights"] = weights is not None
         result = self._f2py.config_set_wrapper(
             self.handle,
             **kwargs,
@@ -286,7 +286,7 @@ class Config:
             kwargs["has_idx"] = False
         result = self._f2py.config_is_set_wrapper(
             self.handle,
-            name,
+            name.replace(".", "%"),
             **kwargs,
         )
         status, errmsg = _split_result(result)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
@@ -27,6 +28,7 @@ from .codegen_f2py import (
 )
 from .codegen_fortran import (
     ConstantSpec,
+    collect_local_derived_types,
     generate_fortran,
     generate_helper,
     render_fortran,
@@ -43,6 +45,19 @@ else:  # pragma: no cover - python<3.11
     import tomli as tomllib
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_f90nml_values(value: Any) -> Any:
+    """Remove parser bookkeeping while preserving nested derived values."""
+    if isinstance(value, Mapping):
+        return {
+            key: _normalize_f90nml_values(item)
+            for key, item in value.items()
+            if not (isinstance(key, str) and key.lower() == "_start_index")
+        }
+    if isinstance(value, list):
+        return [_normalize_f90nml_values(item) for item in value]
+    return value
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _DEFAULT_CONFIG = Path("nml-config.toml")
 _PYPROJECT_CONFIG = Path("pyproject.toml")
@@ -649,25 +664,6 @@ def _collect_generated_outputs(
     resolver = SchemaResolver()
     outputs: list[GeneratedOutput] = []
 
-    if helper_path is not None:
-        try:
-            logger.debug("Rendering helper module at %s", helper_path)
-            outputs.append(
-                GeneratedOutput(
-                    helper_path,
-                    render_helper(
-                        file_name=helper_path.name,
-                        module_name=helper_module,
-                        len_buf=helper_buffer,
-                        constants=constant_specs + dimension_specs,
-                        module_doc=module_doc,
-                        helper_header=helper_header,
-                    ),
-                )
-            )
-        except ValueError as exc:
-            raise click.ClickException(str(exc)) from exc
-
     entries = _iter_namelists(config, base_dir)
     logger.debug("Found %d schema entries", len(entries))
     loaded_entries: list[dict[str, Any]] = []
@@ -724,6 +720,35 @@ def _collect_generated_outputs(
                 )
             except ValueError as exc:
                 raise click.ClickException(str(exc)) from exc
+
+    try:
+        local_derived_types = collect_local_derived_types(
+            [loaded["schema"] for loaded in loaded_entries],
+            constants=constants,
+        )
+        if local_derived_types and helper_path is None:
+            raise ValueError("locally generated derived types require a configured helper output")
+        if helper_path is not None:
+            logger.debug("Rendering helper module at %s", helper_path)
+            outputs.append(
+                GeneratedOutput(
+                    helper_path,
+                    render_helper(
+                        file_name=helper_path.name,
+                        module_name=helper_module,
+                        len_buf=helper_buffer,
+                        constants=constant_specs + dimension_specs,
+                        local_derived_types=local_derived_types,
+                        kind_module=kind_module,
+                        kind_map=kind_map,
+                        kind_allowlist=kind_allowlist,
+                        module_doc=module_doc,
+                        helper_header=helper_header,
+                    ),
+                )
+            )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     outputs.extend(
         _collect_f2py_outputs(
@@ -1016,20 +1041,6 @@ def gen_fortran(config_path: Path | None) -> None:
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
     resolver = SchemaResolver()
-    if helper_path is not None:
-        try:
-            logger.info("Generating helper module at %s", helper_path)
-            generate_helper(
-                helper_path,
-                module_name=helper_module,
-                len_buf=helper_buffer,
-                constants=constant_specs + dimension_specs,
-                module_doc=module_doc,
-                helper_header=helper_header,
-            )
-        except ValueError as exc:
-            raise click.ClickException(str(exc)) from exc
-
     entries = _iter_namelists(config, base_dir)
     logger.info("Found %d schema entries", len(entries))
     loaded_entries: list[dict[str, Any]] = []
@@ -1062,6 +1073,30 @@ def gen_fortran(config_path: Path | None) -> None:
             )
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
+
+    try:
+        local_derived_types = collect_local_derived_types(
+            [loaded["schema"] for loaded in loaded_entries],
+            constants=constants,
+        )
+        if local_derived_types and helper_path is None:
+            raise ValueError("locally generated derived types require a configured helper output")
+        if helper_path is not None:
+            logger.info("Generating helper module at %s", helper_path)
+            generate_helper(
+                helper_path,
+                module_name=helper_module,
+                len_buf=helper_buffer,
+                constants=constant_specs + dimension_specs,
+                local_derived_types=local_derived_types,
+                kind_module=kind_module,
+                kind_map=kind_map,
+                kind_allowlist=kind_allowlist,
+                module_doc=module_doc,
+                helper_header=helper_header,
+            )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     _generate_f2py_outputs(
         loaded_entries,
@@ -1220,7 +1255,7 @@ def validate(
         try:
             validate_namelist(
                 schema,
-                file_entries[key][1],
+                _normalize_f90nml_values(file_entries[key][1]),
                 constants=constants,
                 dimensions=dimensions,
             )

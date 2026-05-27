@@ -12,15 +12,14 @@ Generate Fortran namelist modules, Markdown docs, and template namelists from a 
 - Core keywords from JSON schema: `type`, `properties`, `required`, `default`, `examples`, `title`, `description`.
 - Fortran extensions: `x-fortran-namelist`, `x-fortran-kind`,
   `x-fortran-len`, `x-fortran-shape`, `x-fortran-flex-tail-dims`,
-  `x-fortran-default-*`.
+  `x-fortran-default-*`, `x-fortran-type`, `x-fortran-module`.
 - Outputs: Fortran module, helper module, Markdown docs, template namelist.
 - Config-driven CLI for batching multiple schemas.
 
 ### Missing Fortran features
 
-- No support for derived types:
-  - Only scalars and arrays of scalars are supported.
-  - Could be emulated with nested objects, but one would need to decide where the respective fortran types are defined or used from.
+- Derived types currently support one level of intrinsic scalar components
+  only; nested derived values and array components are not supported.
 - No support for complex types:
   - JSON doesn't have a native complex type.
   - Could be emulated with:
@@ -96,6 +95,84 @@ values:
   items:
     type: number
     x-fortran-kind: dp
+```
+
+### x-fortran-type and x-fortran-module
+
+- Location: a `type: object` defined inline as a property or array `items`,
+  or a referenced reusable object definition.
+- `x-fortran-type` is required and gives the Fortran derived type name.
+- `x-fortran-module` is optional. If absent, the type is emitted once in the
+  generated helper module. If present, the namelist module imports the type
+  from that application-owned module.
+
+Use an inline object for a single-use derived field:
+
+```yaml
+properties:
+  station:
+    title: Selected station
+    description: Application-owned station descriptor.
+    type: object
+    x-fortran-type: station_t
+    x-fortran-module: application_types
+    properties:
+      code:
+        type: integer
+      label:
+        type: string
+        x-fortran-len: 16
+```
+
+Use `$defs` / `$ref` when a type is reused or when type documentation should
+be separate from field documentation:
+
+```yaml
+$defs:
+  period:
+    title: Time period
+    description: Bounds for one interval.
+    type: object
+    x-fortran-type: period_t
+    properties:
+      start_year:
+        type: integer
+      label:
+        type: string
+        x-fortran-len: 16
+        default: default
+properties:
+  period:
+    $ref: "#/$defs/period"
+  periods:
+    type: array
+    x-fortran-shape: n_periods
+    items:
+      $ref: "#/$defs/period"
+```
+
+Only intrinsic scalar members are supported in the first implementation.
+Object defaults, derived array defaults, derived flexible-tail arrays, nested
+derived members, and array members are rejected. Optional derived fields must
+not declare required inner members. For imported fields with string members,
+including arrays of imported values, generated code verifies that application
+storage is at least `x-fortran-len` characters long and blanks longer trailing
+storage after reads and setters.
+
+Generated native APIs accept typed values and add `init_type`, for example:
+
+```fortran
+type(period_t) :: period
+status = config%init_type(period=period)
+period%start_year = 2001
+status = config%set(period=period)
+```
+
+Namelist and template entries use normal component notation:
+
+```fortran
+period%start_year = 2001
+periods(2)%start_year = 2001
 ```
 
 ### x-fortran-flex-tail-dims
@@ -365,7 +442,7 @@ i4 = "int"
 
 The f2py-visible wrapper procedures avoid Fortran `optional` dummy arguments
 and assumed-shape arrays. Optional Python values are represented by generated
-`has_<name>` flags and harmless dummy values. Inside the Fortran wrapper,
+`has__<name>` flags and harmless dummy values. Inside the Fortran wrapper,
 allocated local variables are passed to the generated type-bound `set` method
 when a value is present; unallocated allocatables are passed otherwise, so the
 type-bound `set` still sees `present(arg) == .false.`. This keeps the f2py ABI
@@ -377,6 +454,21 @@ present.
 For array arguments, the generated Python shim follows the same partial-set
 semantics as the Fortran setter. Scalar inputs become shape `(1, ..., 1)`;
 lower-rank inputs get singleton trailing dimensions before being passed to f2py.
+
+Derived values stay natural at the Python API boundary:
+
+```python
+cfg.set(period={"start_year": 2001})
+cfg.set(periods=[{"start_year": 1980}, {"start_year": 2001}])
+```
+
+Only the internal f2py ABI is flattened: `%` paths are encoded with `__`, for
+example `period__start_year` and `has__period__start_year`. Python
+`is_set("period.start_year")` is translated to the native
+`is_set("period%start_year")` lookup. Nested sequences of mappings are accepted
+for multi-rank derived arrays. Flattened generated names are made unique
+case-insensitively and deterministically shortened when needed to remain valid
+Fortran identifiers.
 
 The f2py wrappers use opaque integer handles for Fortran-owned namelist
 instances. nml-tools assumes that the owning Fortran library creates those
@@ -436,6 +528,19 @@ Optional values can override per-namelist fields for filled modes:
 [templates.values.optimization]
 niterations = 4
 tolerance = 0.1
+```
+
+Derived overrides use nested TOML tables and arrays of tables:
+
+```toml
+[templates.values.run.period]
+start_year = 2001
+
+[[templates.values.run.periods]]
+start_year = 1980
+
+[[templates.values.run.periods]]
+start_year = 2001
 ```
 
 ## CLI
@@ -663,7 +768,8 @@ Main missing features compared to JSON Schema:
 - No numeric or string validation keywords like `multipleOf`, `minLength`,
   `maxLength`, `pattern`, `format` (bounds are supported via `minimum`,
   `maximum`, `exclusiveMinimum`, and `exclusiveMaximum`).
-- No nested object schemas; properties are scalars or arrays of scalars only.
+- Object schemas are supported only as one-level inline or referenced Fortran
+  derived types with intrinsic scalar members.
 
 Use the `x-fortran-*` extensions to express kind, length, and shape information
 needed for code generation.
@@ -700,7 +806,10 @@ representation keywords such as `x-fortran-kind`, `x-fortran-len`, and
 `x-fortran-shape` are rejected. For arrays, a use-site array `default` replaces
 the referenced default together with any `x-fortran-default-*` controls.
 
-Only references within the existing namelist model are supported: namelist
-roots, scalar/scalar-array fields, and array `items`. Derived-type object
-properties, `$id`/`$anchor` resolution, recursive references, `$dynamicRef`,
-legacy `definitions`, and general composition keywords are not supported.
+Object definitions may represent one-level derived-type properties through
+`x-fortran-type` and optional `x-fortran-module`. An inline object is a
+single-use definition; repeated or independently documented types should use
+`$defs` / `$ref`. Referenced type use sites may refine existing scalar
+components but cannot add components or change the Fortran type identity.
+`$id`/`$anchor` resolution, recursive references, `$dynamicRef`, legacy
+`definitions`, and general composition keywords are not supported.

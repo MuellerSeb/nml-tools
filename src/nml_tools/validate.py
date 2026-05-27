@@ -44,9 +44,15 @@ def validate_schema_defaults(
     properties = schema.get("properties")
     if not isinstance(properties, Mapping):
         return
+    required_names = {
+        name.lower()
+        for name in schema.get("required", [])
+        if isinstance(name, str)
+    }
     for name, prop in properties.items():
         if not isinstance(name, str) or not isinstance(prop, Mapping):
             continue
+        _validate_derived_presence_policy(name, prop, name.lower() in required_names)
         _validate_property_defaults(
             name,
             prop,
@@ -122,6 +128,29 @@ def _validate_property_defaults(
     constants: dict[str, int] | None,
     dimensions: dict[str, int] | None,
 ) -> None:
+    if prop.get("type") == "object":
+        _validate_derived_declaration(name, prop)
+        if "default" in prop:
+            raise ValueError(f"derived property '{name}' must not define an object default")
+        properties = prop.get("properties")
+        if not isinstance(properties, Mapping):
+            raise ValueError(f"derived property '{name}' must define object 'properties'")
+        for child_name, child in properties.items():
+            if not isinstance(child_name, str) or not isinstance(child, Mapping) or child.get(
+                "type"
+            ) not in {"integer", "number", "boolean", "string"}:
+                raise ValueError(
+                    f"derived property '{name}' component '{child_name}' "
+                    "must define an intrinsic scalar type"
+                )
+            _validate_property_defaults(
+                f"{name}.{child_name}",
+                child,
+                constants=constants,
+                dimensions=dimensions,
+            )
+        return
+
     if prop.get("type") != "array":
         if "default" in prop:
             _validate_property(
@@ -144,6 +173,20 @@ def _validate_property_defaults(
     if not isinstance(items, Mapping):
         if "default" in prop:
             raise ValueError(f"array property '{name}' with a default must define object 'items'")
+        return
+    if items.get("type") == "object":
+        if "default" in prop or controls.intersection(prop):
+            raise ValueError(f"derived array property '{name}' must not define defaults")
+        if "x-fortran-flex-tail-dims" in prop:
+            raise ValueError(
+                f"derived array property '{name}' must not define x-fortran-flex-tail-dims"
+            )
+        _validate_property_defaults(
+            f"{name}[]",
+            items,
+            constants=constants,
+            dimensions=dimensions,
+        )
         return
     if "default" in prop and "default" in items:
         raise ValueError(
@@ -189,6 +232,22 @@ def _validate_property_defaults(
                 constants=constants,
                 dimensions=dimensions,
             )
+
+
+def _validate_derived_declaration(name: str, prop: Mapping[str, Any]) -> None:
+    type_name = prop.get("x-fortran-type")
+    if not isinstance(type_name, str) or not type_name.strip():
+        raise ValueError(f"derived property '{name}' must define non-empty 'x-fortran-type'")
+    if FORTRAN_IDENTIFIER.match(type_name.strip()) is None:
+        raise ValueError(f"derived property '{name}' x-fortran-type must be a valid identifier")
+    module_name = prop.get("x-fortran-module")
+    if module_name is not None and (
+        not isinstance(module_name, str)
+        or FORTRAN_IDENTIFIER.match(module_name.strip()) is None
+    ):
+        raise ValueError(
+            f"derived property '{name}' x-fortran-module must be a valid identifier"
+        )
 
 
 def _validate_array_default_layout(
@@ -298,6 +357,9 @@ def _validate_property(
     if prop_type == "array":
         _validate_array(name, prop, value, constants, dimensions)
         return
+    if prop_type == "object":
+        _validate_derived_value(name, prop, value, constants, dimensions)
+        return
     if prop_type in {"integer", "number", "boolean", "string"}:
         constraints = _scalar_constraints(name, prop, prop_type, constants, dimensions)
         _validate_scalar_value(name, value, constraints)
@@ -318,12 +380,16 @@ def _validate_array(
     items_type = items.get("type")
     if items_type == "array":
         raise ValueError(f"array property '{name}' must not nest arrays")
-    if items_type not in {"integer", "number", "boolean", "string"}:
+    if items_type not in {"integer", "number", "boolean", "string", "object"}:
         raise ValueError(f"array property '{name}' items must define a scalar type")
 
     shape_constants = {**(constants or {}), **(dimensions or {})}
     shape = _parse_shape(prop.get("x-fortran-shape"), shape_constants, name)
     flex_tail_dims = _parse_flex_tail_dims(prop, len(shape), name, shape)
+    if items_type == "object" and flex_tail_dims:
+        raise ValueError(
+            f"derived array property '{name}' must not define x-fortran-flex-tail-dims"
+        )
 
     array_value = _coerce_array_value(value, name)
     provided_shape = _nested_shape(array_value, name)
@@ -348,9 +414,84 @@ def _validate_array(
                     f"array '{name}' dimension {idx} must be <= {expected}, got {provided}"
                 )
 
+    if items_type == "object":
+        for path, element in _iter_object_elements(array_value, name):
+            _validate_derived_value(path, items, element, constants, dimensions)
+        return
+
     constraints = _scalar_constraints(name, items, items_type, constants, dimensions)
     for element in _iter_scalars(array_value):
         _validate_scalar_value(name, element, constraints)
+
+
+def _validate_derived_presence_policy(
+    name: str,
+    prop: Mapping[str, Any],
+    is_required: bool,
+) -> None:
+    derived = _derived_object_schema(prop)
+    if derived is None or is_required:
+        return
+    inner_required = derived.get("required", [])
+    if isinstance(inner_required, list) and inner_required:
+        raise ValueError(
+            f"optional derived property '{name}' must not define required inner components"
+        )
+
+
+def _derived_object_schema(prop: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    if prop.get("type") == "object":
+        return prop
+    if prop.get("type") == "array":
+        items = prop.get("items")
+        if isinstance(items, Mapping) and items.get("type") == "object":
+            return items
+    return None
+
+
+def _validate_derived_value(
+    name: str,
+    prop: Mapping[str, Any],
+    value: Any,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
+) -> None:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"derived property '{name}' must be an object")
+    properties_raw = prop.get("properties")
+    if not isinstance(properties_raw, Mapping) or not properties_raw:
+        raise ValueError(f"derived property '{name}' must define object 'properties'")
+    properties = _normalize_properties(properties_raw, name)
+    required = _parse_required(prop.get("required", []), properties, name)
+    supplied = _normalize_namelist(value, name)
+    for key, (child_name, _) in supplied.items():
+        if key not in properties:
+            raise ValueError(f"property '{name}.{child_name}' is unknown")
+    for key, (child_name, child) in properties.items():
+        child_path = f"{name}.{child_name}"
+        if key in supplied:
+            _validate_property(
+                child_path,
+                child,
+                supplied[key][1],
+                constants=constants,
+                dimensions=dimensions,
+            )
+        elif key in required:
+            raise ValueError(f"derived property '{name}' is missing required '{child_path}'")
+
+
+def _iter_object_elements(
+    value: Any,
+    name: str,
+    indexes: tuple[int, ...] = (),
+) -> Iterable[tuple[str, Any]]:
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value, start=1):
+            yield from _iter_object_elements(item, name, indexes + (index,))
+        return
+    suffix = ",".join(str(index) for index in indexes)
+    yield f"{name}[{suffix}]", value
 
 
 def _scalar_constraints(

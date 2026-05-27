@@ -12,11 +12,14 @@
 {% endfor %}
 module {{ spec.f2py_module_name }}
   use iso_c_binding, only: c_intptr_t
+{% if spec.derived_type_names %}
+  use {{ spec.helper_module }}, only: NML_OK
+{% endif %}
 {% if spec.kind_imports %}
   use {{ spec.kind_module }}, only: &
     {{ spec.kind_imports | join(', &\n    ') }}
 {% endif %}
-  use {{ spec.module_name }}, only: {{ spec.type_name }}, {{ spec.resolve_handle_name }}
+  use {{ spec.module_name }}, only: {{ spec.type_name }}, {{ spec.resolve_handle_name }}{% for type_name in spec.derived_type_names %}, {{ type_name }}{% endfor %}
 
   implicit none
 

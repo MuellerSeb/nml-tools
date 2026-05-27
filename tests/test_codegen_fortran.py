@@ -36,6 +36,17 @@ def _import_load_schema():
     return module.load_schema
 
 
+def _import_codegen_module():
+    root = Path(__file__).resolve().parents[1]
+    src = root / "src"
+    sys.path.insert(0, str(src))
+    try:
+        module = importlib.import_module("nml_tools.codegen_fortran")
+    finally:
+        sys.path.pop(0)
+    return module
+
+
 def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     fixture_root = root / "tests" / "fixtures" / "01_simple"
@@ -1041,3 +1052,183 @@ def test_generate_fortran_allows_plain_kinds(tmp_path: Path) -> None:
     generated = output.read_text()
     assert "integer :: count" in generated
     assert "real :: ratio" in generated
+
+
+def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
+    from nml_tools.schema import resolve_schema
+
+    codegen = _import_codegen_module()
+    schema = resolve_schema(
+        {
+            "title": "Run",
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "title": "Time period",
+                    "description": "Bounds for one time interval.",
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "start_year": {
+                            "title": "Start year",
+                            "type": "integer",
+                            "x-fortran-kind": "i4",
+                            "minimum": 1900,
+                        },
+                        "end_year": {
+                            "title": "End year",
+                            "type": "integer",
+                            "x-fortran-kind": "i4",
+                        },
+                        "label": {
+                            "title": "Label",
+                            "type": "string",
+                            "x-fortran-len": 16,
+                            "default": "default",
+                            "enum": ["default", "archive"],
+                        },
+                    },
+                    "required": ["start_year", "end_year"],
+                }
+            },
+            "required": ["period", "periods"],
+            "properties": {
+                "period": {"$ref": "#/$defs/period"},
+                "periods": {
+                    "type": "array",
+                    "x-fortran-shape": "n_periods",
+                    "items": {"$ref": "#/$defs/period"},
+                },
+            },
+        }
+    )
+
+    local_types = codegen.collect_local_derived_types([schema])
+    helper = codegen.render_helper(
+        file_name="nml_helper.f90",
+        local_derived_types=local_types,
+        kind_module="iso_fortran_env",
+        kind_map={"i4": "int32"},
+        kind_allowlist={"int32"},
+    )
+    generated = codegen.render_fortran(
+        schema,
+        file_name="nml_run.f90",
+        kind_module="iso_fortran_env",
+        kind_map={"i4": "int32"},
+        kind_allowlist={"int32"},
+        dimensions={"n_periods": 2},
+    )
+
+    assert "!> \\class period_t" in helper
+    assert "!> \\brief Time period" in helper
+    assert "type, public :: period_t" in helper
+    assert "integer(i4) :: start_year !< Start year" in helper
+    assert "use nml_helper, only:" in generated and "period_t" in generated
+    assert "type(period_t) :: period" in generated
+    assert "type(period_t), allocatable, dimension(:) :: periods" in generated
+    assert "procedure :: init_type => nml_run_init_type" in generated
+    assert "this%period%start_year" in generated
+    assert 'case ("period%start_year")' in generated
+    assert 'case ("periods%start_year")' in generated
+    assert "! required parameters" in generated
+    assert "! required derived values" not in generated
+    assert 'istat = this%is_set("period", errmsg=errmsg)' in generated
+    assert 'istat = this%is_set("periods", errmsg=errmsg)' in generated
+    assert generated.count('istat = this%is_set("period", errmsg=errmsg)') == 1
+    assert generated.count('istat = this%is_set("periods", errmsg=errmsg)') == 1
+    assert " .and. &" in generated
+    assert " .or. &" in generated
+    assert "integer(i4), parameter, public :: period_start_year_min = 1900_i4" in generated
+    assert "elemental logical function period_start_year_in_bounds" in generated
+    assert "period_label_in_enum(this%period%label)" in generated
+    assert "periods_start_year_in_bounds(this%periods%start_year" in generated
+    assert "if (allocated(this%periods)) then" in generated
+
+
+def test_generate_fortran_imports_application_owned_derived_type() -> None:
+    from nml_tools.schema import resolve_schema
+
+    codegen = _import_codegen_module()
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "required": ["location", "locations"],
+            "properties": {
+                "location": {
+                    "type": "object",
+                    "x-fortran-type": "location_t",
+                    "x-fortran-module": "application_types",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "x-fortran-len": 8,
+                            "default": "default",
+                        }
+                    },
+                },
+                "locations": {
+                    "type": "array",
+                    "x-fortran-shape": 2,
+                    "items": {
+                        "type": "object",
+                        "x-fortran-type": "location_t",
+                        "x-fortran-module": "application_types",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "x-fortran-len": 8,
+                                "default": "default",
+                            }
+                        },
+                    },
+                },
+            },
+        }
+    )
+
+    generated = codegen.render_fortran(schema, file_name="nml_run.f90")
+
+    assert "use application_types, only: location_t" in generated
+    assert "type(location_t) :: location" in generated
+    assert "if (len(this%location%name) < 8) then" in generated
+    assert 'this%location%name(8 + 1:) = ""' in generated
+    assert "if (len(this%locations%name) < 8) then" in generated
+    assert 'this%locations(:)%name(8 + 1:) = ""' in generated
+
+
+def test_generate_fortran_emits_inline_single_use_local_type() -> None:
+    from nml_tools.schema import resolve_schema
+
+    codegen = _import_codegen_module()
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "period": {
+                    "title": "Inline period",
+                    "description": "Defined only for this field.",
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "year": {"title": "Year", "type": "integer"},
+                    },
+                }
+            },
+        }
+    )
+
+    helper = codegen.render_helper(
+        file_name="nml_helper.f90",
+        local_derived_types=codegen.collect_local_derived_types([schema]),
+    )
+    generated = codegen.render_fortran(schema, file_name="nml_run.f90")
+
+    assert "!> \\class period_t" in helper
+    assert "!> \\brief Inline period" in helper
+    assert "!> \\details Defined only for this field." in helper
+    assert "integer :: year !< Year" in helper
+    assert "type(period_t) :: period" in generated

@@ -17,6 +17,8 @@ from .codegen_fortran import (
     _array_default_value,
     _bounds_spec,
     _collect_dimension_constants,
+    _derived_origin,
+    _derived_schema,
     _enum_category,
     _enum_values,
     _field_type_info,
@@ -199,6 +201,9 @@ def render_docs(
                 examples_text = ", ".join(f"`{value}`" for value in example_values)
                 lines.append(f"- Examples: {examples_text}")
             lines.append("")
+            derived = _derived_schema(prop)
+            if derived is not None:
+                _append_derived_field_components(lines, name, derived, shape_constants)
     except ValueError as exc:
         if current_property is None:
             raise
@@ -206,6 +211,13 @@ def render_docs(
         if f"property '{current_property}'" in msg:
             raise
         raise ValueError(f"property '{current_property}': {msg}") from exc
+
+    derived_types = _collect_documented_derived_types(properties)
+    if derived_types:
+        lines.append("## Derived types")
+        lines.append("")
+        for derived in derived_types:
+            _append_derived_type_documentation(lines, derived, shape_constants)
 
     lines.append("## Example")
     lines.append("")
@@ -236,8 +248,12 @@ def _validate_required(values: list[Any]) -> set[str]:
 
 def _format_table_type(type_info: FieldTypeInfo) -> str:
     if type_info.category == "array":
+        if type_info.element_category == "derived":
+            return f"{type_info.type_spec} array"
         element = _format_scalar_type_name(type_info.element_category)
         return f"{element} array"
+    if type_info.category == "derived":
+        return type_info.type_spec
     return _format_scalar_type_name(type_info.category)
 
 
@@ -258,6 +274,85 @@ def _format_specific_type(type_info: FieldTypeInfo) -> str:
         return type_info.type_spec
     dimensions = ", ".join(type_info.dimensions)
     return f"{type_info.type_spec}, dimension({dimensions})"
+
+
+def _append_derived_field_components(
+    lines: list[str],
+    field_name: str,
+    derived: dict[str, Any],
+    constants: dict[str, int] | None,
+) -> None:
+    components = derived.get("properties")
+    if not isinstance(components, dict):
+        return
+    lines.append("Components:")
+    for child_name, child in components.items():
+        if not isinstance(child_name, str) or not isinstance(child, dict):
+            continue
+        type_info = _field_type_info(child, constants)
+        path = f"{field_name}%{child_name}"
+        details = [f"`{_format_specific_type(type_info)}`"]
+        default = _get_default_value(child, type_info, constants)
+        if isinstance(default, tuple):
+            details.append(f"default `{default[0]}`")
+        elif default is not None:
+            details.append(f"default `{default}`")
+        bounds = _get_bounds_labels(child, type_info)
+        details.extend(label[2:] if label.startswith("- ") else label for label in bounds)
+        enum = _get_enum_values(child, type_info, constants)
+        if enum is not None:
+            details.append(f"allowed values {enum}")
+        lines.append(f"- `{path}`: " + "; ".join(details))
+    lines.append("")
+
+
+def _collect_documented_derived_types(properties: dict[str, Any]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str]] = set()
+    collected: list[dict[str, Any]] = []
+    for prop in properties.values():
+        if not isinstance(prop, dict):
+            continue
+        derived = _derived_schema(prop)
+        if derived is None:
+            continue
+        origin = _derived_origin(derived)
+        identity = origin["identity"]
+        if identity in seen:
+            continue
+        seen.add(identity)
+        collected.append(origin["definition"])
+    return collected
+
+
+def _append_derived_type_documentation(
+    lines: list[str],
+    derived: dict[str, Any],
+    constants: dict[str, int] | None,
+) -> None:
+    type_name = derived.get("x-fortran-type")
+    if not isinstance(type_name, str):
+        return
+    title = derived.get("title", type_name)
+    lines.append(f"### `{type_name}`")
+    lines.append("")
+    if isinstance(title, str) and title != type_name:
+        lines.append(title)
+        lines.append("")
+    description = derived.get("description")
+    if isinstance(description, str) and description.strip():
+        lines.append(description.strip())
+        lines.append("")
+    module = derived.get("x-fortran-module")
+    ownership = f"imported from `{module}`" if isinstance(module, str) else "`nml_helper`"
+    lines.append(f"- Ownership: {ownership}")
+    components = derived.get("properties")
+    if isinstance(components, dict):
+        for child_name, child in components.items():
+            if not isinstance(child_name, str) or not isinstance(child, dict):
+                continue
+            info = _field_type_info(child, constants)
+            lines.append(f"- `{child_name}`: `{_format_specific_type(info)}`")
+    lines.append("")
 
 
 def _get_default_value(

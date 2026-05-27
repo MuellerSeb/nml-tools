@@ -1,0 +1,34 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: Derived-type configuration
+description: Demonstrates referenced reusable and inline imported derived types.
+x-fortran-namelist: run
+type: object
+required: [period, periods, station]
+properties:
+  period:
+    $ref: "definitions.yml#/$defs/period"
+    title: Main simulation period
+  periods:
+    title: Comparison periods
+    type: array
+    x-fortran-shape: n_periods
+    items:
+      $ref: "definitions.yml#/$defs/period"
+  station:
+    title: Selected station
+    description: Application-owned station descriptor with longer label storage.
+    type: object
+    x-fortran-type: station_t
+    x-fortran-module: application_types
+    required: [code]
+    properties:
+      code:
+        title: Station code
+        type: integer
+        x-fortran-kind: i4
+        minimum: 1
+      label:
+        title: Station label
+        type: string
+        x-fortran-len: station_label_len
+        default: unknown

@@ -1,0 +1,24 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+$defs:
+  period:
+    title: Simulation period
+    description: Start and end years for a configured time window.
+    type: object
+    x-fortran-type: period_t
+    required: [start_year, end_year]
+    properties:
+      start_year:
+        title: Start year
+        type: integer
+        x-fortran-kind: i4
+        minimum: 1800
+        maximum: 2200
+      end_year:
+        title: End year
+        type: integer
+        x-fortran-kind: i4
+      label:
+        title: Period label
+        type: string
+        x-fortran-len: period_label_len
+        default: period

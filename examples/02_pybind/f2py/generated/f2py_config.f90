@@ -13,7 +13,6 @@ module f2py_config
     i4=>int32, &
     dp=>real64
   use nml_config, only: nml_config_t, nml_config_resolve_handle
-
   implicit none
 
 contains
@@ -36,25 +35,25 @@ contains
   !> \brief Set config values on the handled instance
   subroutine config_set_wrapper(handle, &
     name, &
-    has_name, &
+    has__name, &
     iterations, &
     tolerance, &
     enabled, &
-    has_enabled, &
+    has__enabled, &
     weights_n1, &
     weights, &
-    has_weights, &
+    has__weights, &
     status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
     character(len=*), intent(in) :: name !< Config name (optional)
-    logical, intent(in) :: has_name !< whether name was provided
+    logical, intent(in) :: has__name !< whether name was provided
     integer(i4), intent(in) :: iterations !< Iterations (required)
     real(dp), intent(in) :: tolerance !< Tolerance (required)
     logical, intent(in) :: enabled !< Enabled (optional)
-    logical, intent(in) :: has_enabled !< whether enabled was provided
+    logical, intent(in) :: has__enabled !< whether enabled was provided
     integer, intent(in) :: weights_n1 !< extent for weights
     real(dp), dimension(weights_n1), intent(in) :: weights !< Weights (optional)
-    logical, intent(in) :: has_weights !< whether weights was provided
+    logical, intent(in) :: has__weights !< whether weights was provided
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_config_t), pointer :: this
@@ -66,14 +65,14 @@ contains
     if (.not. associated(this)) then
       return
     end if
-    if (has_name) then
+    if (has__name) then
       maybe_name = name
     end if
-    if (has_enabled) then
+    if (has__enabled) then
       allocate(maybe_enabled)
       maybe_enabled = enabled
     end if
-    if (has_weights) then
+    if (has__weights) then
       allocate(maybe_weights(weights_n1))
       maybe_weights = weights
     end if
@@ -89,11 +88,11 @@ contains
   !> \brief Set runtime dimensions on the handled config instance
   subroutine config_set_dims_wrapper(handle, &
     n_weights, &
-    has_n_weights, &
+    has__n_weights, &
     status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
     integer, intent(in) :: n_weights !< runtime dimension override for n_weights
-    logical, intent(in) :: has_n_weights !< whether n_weights was provided
+    logical, intent(in) :: has__n_weights !< whether n_weights was provided
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_config_t), pointer :: this
@@ -103,7 +102,7 @@ contains
     if (.not. associated(this)) then
       return
     end if
-    if (has_n_weights) then
+    if (has__n_weights) then
       allocate(maybe_n_weights)
       maybe_n_weights = n_weights
     end if

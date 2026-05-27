@@ -1,23 +1,14 @@
-{% if helper_header %}
-{{ helper_header }}
-
-{% endif %}
-!> \file {{ file_name }}
-!> \copydoc {{ module_name }}
+!> \file nml_helper.f90
+!> \copydoc nml_helper
 
 !> \brief Helper module for namelist file operations
-{% if module_doc %}
-{{ module_doc }}
-{% endif %}
-module {{ module_name }}
-{% if kind_imports %}
+module nml_helper
   ! kind specifiers used by locally generated derived types
-  use {{ kind_module }}, only: &
-    {{ kind_imports | join(', &\n    ') }}
-{% endif %}
+  use iso_fortran_env, only: &
+    i4=>int32
 
   !> \brief Buffer length for reading lines
-  integer, public :: nml_line_buffer = {{ len_buf }}
+  integer, public :: nml_line_buffer = 512
   !> \brief Status code: success
   integer, parameter, public :: NML_OK = 0
   !> \brief Status code: file not found
@@ -49,27 +40,20 @@ module {{ module_name }}
   !> \brief Status code: zero opaque handle
   integer, parameter, public :: NML_ERR_INVALID_HANDLE = 22
 
-{% if constants %}
   !> \brief Shared constants for generated namelist modules
-{% for constant in constants %}
-  {{ constant.type_spec }}, parameter, public :: {{ constant.name }} = {{ constant.value }}{% if constant.doc %} !< {{ constant.doc }}{% endif %}
+  integer, parameter, public :: period_label_len = 12 !< Storage length of labels on locally generated periods.
+  integer, parameter, public :: station_label_len = 8 !< Mapped station label length; application storage may be longer.
+  integer, parameter, public :: n_periods = 2 !< Default number of configured periods.
 
-{% endfor %}
-{% endif %}
+  !> \class period_t
+  !> \brief Simulation period
+  !> \details Start and end years for a configured time window.
+  type, public :: period_t
+    integer(i4) :: start_year !< Start year
+    integer(i4) :: end_year !< End year
+    character(len=period_label_len) :: label !< Period label
+  end type period_t
 
-{% for derived in local_derived_types %}
-  !> \class {{ derived.type_name }}
-  !> \brief {{ derived.title }}
-{% if derived.description %}
-  !> \details {{ derived.description | replace('\n', '\n  !! ') }}
-{% endif %}
-  type, public :: {{ derived.type_name }}
-{% for declaration in derived.declarations %}
-    {{ declaration }}
-{% endfor %}
-  end type {{ derived.type_name }}
-
-{% endfor %}
   !> \class nml_file_t
   !> \brief Type for namelist file operations
   type, public :: nml_file_t
@@ -197,4 +181,4 @@ contains
     end if
   end function idx_check
 
-end module {{ module_name }}
+end module nml_helper
