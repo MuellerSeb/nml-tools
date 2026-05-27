@@ -630,6 +630,12 @@ def _build_context(
                         and child_info.length_expr is not None
                     ):
                         expected_len = child_info.length_expr
+                        parent_storage_ref = f"this%{name}"
+                        if type_info.category == "array":
+                            parent_storage_ref = _array_section_ref(
+                                parent_storage_ref, len(type_info.dimensions)
+                            )
+                        child_storage_ref = f"{parent_storage_ref}%{child_name}"
                         storage_message = (
                             f"imported string storage too short: {name}%{child_name}"
                         )
@@ -642,7 +648,7 @@ def _build_context(
                                 "  return",
                                 "end if",
                                 f"if (len(this%{name}%{child_name}) > {expected_len}) "
-                                f"this%{name}%{child_name}({expected_len} + 1:) = \"\"",
+                                f"{child_storage_ref}({expected_len} + 1:) = \"\"",
                             ]
                         )
                     child_target = f"this%{name}%{child_name}"

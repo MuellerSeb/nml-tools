@@ -1182,4 +1182,4 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
     assert "if (len(this%location%name) < 8) then" in generated
     assert 'this%location%name(8 + 1:) = ""' in generated
     assert "if (len(this%locations%name) < 8) then" in generated
-    assert 'this%locations%name(8 + 1:) = ""' in generated
+    assert 'this%locations(:)%name(8 + 1:) = ""' in generated

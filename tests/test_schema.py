@@ -515,6 +515,10 @@ def test_resolve_schema_rejects_user_authored_derived_origin_marker() -> None:
             {"$ref": "#/$defs/period", "x-fortran-type": "other_t"},
             "conflicting 'x-fortran-type'",
         ),
+        (
+            {"$ref": "#/$defs/invalid_component"},
+            "component 'start-year' must be a valid Fortran identifier",
+        ),
     ],
 )
 def test_referenced_derived_type_rejects_invalid_property_forms(
@@ -534,6 +538,11 @@ def test_referenced_derived_type_rejects_invalid_property_forms(
                         "type": "object",
                         "x-fortran-type": "period_t",
                         "properties": {"year": {"type": "integer"}},
+                    },
+                    "invalid_component": {
+                        "type": "object",
+                        "x-fortran-type": "invalid_t",
+                        "properties": {"start-year": {"type": "integer"}},
                     },
                 },
                 "properties": {"period": property_schema},

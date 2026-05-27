@@ -678,6 +678,10 @@ def _validate_derived_object(schema: Mapping[str, Any]) -> None:
     for name, prop in properties.items():
         if not isinstance(name, str):
             raise ValueError("derived-type component names must be strings")
+        if FORTRAN_IDENTIFIER.match(name) is None:
+            raise ValueError(
+                f"derived-type component '{name}' must be a valid Fortran identifier"
+            )
         key = name.lower()
         if key in canonical:
             raise ValueError(f"derived-type object defines duplicate component '{name}'")

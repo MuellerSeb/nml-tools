@@ -6,6 +6,8 @@ import importlib
 import sys
 from pathlib import Path
 
+import pytest
+
 from nml_tools.schema import resolve_schema
 
 
@@ -185,3 +187,27 @@ def test_render_template_derived_values_use_component_syntax_and_nested_override
     assert "periods(1)%start_year = 1980" in rendered
     assert 'periods(1)%label = "base"' in rendered
     assert 'periods(2)%label = "future"' in rendered
+
+
+def test_render_template_rejects_non_string_derived_override_keys() -> None:
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {"year": {"type": "integer", "default": 1900}},
+                }
+            },
+            "properties": {"period": {"$ref": "#/$defs/period"}},
+        }
+    )
+
+    with pytest.raises(ValueError, match="derived template value 'period' must use string keys"):
+        _import_render_template()(
+            [schema],
+            value_mode="filled",
+            values={"run": {"period": {2001: 2001}}},
+        )
