@@ -271,6 +271,13 @@ def test_collect_f2py_kind_usage_rejects_dimension_as_string_length() -> None:
     with pytest.raises(ValueError, match="cannot be used as x-fortran-len"):
         codegen.collect_f2py_kind_usage([schema], dimensions={"n_weights": 3})
 
+    derived_schema = _derived_schema()
+    derived_schema["properties"]["period"]["properties"]["label"][
+        "x-fortran-len"
+    ] = "n_periods"
+    with pytest.raises(ValueError, match="cannot be used as x-fortran-len"):
+        codegen.collect_f2py_kind_usage([derived_schema], dimensions={"n_periods": 2})
+
 
 def test_generate_f2py_wrappers_supports_multirank_derived_arrays() -> None:
     codegen = _import_codegen_f2py()

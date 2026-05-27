@@ -303,6 +303,7 @@ def collect_f2py_kind_usage(
 ) -> F2pyKindUsage:
     """Collect schema kind aliases used in f2py wrapper arguments."""
     usage = F2pyKindUsage(real=set(), integer=set())
+    runtime_dimension_values = normalize_runtime_dimensions(dimensions)
     for schema in schemas:
         properties = _normalized_properties(schema)
         field_infos = _iter_field_type_infos(schema, constants, dimensions)
@@ -317,6 +318,7 @@ def collect_f2py_kind_usage(
                 continue
             for component in components.values():
                 if isinstance(component, dict):
+                    _reject_runtime_dimension_lengths(component, runtime_dimension_values)
                     expanded.append(
                         _field_type_info(component, normalize_constant_values(constants))
                     )
