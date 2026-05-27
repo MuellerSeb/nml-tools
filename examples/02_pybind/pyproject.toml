@@ -10,8 +10,8 @@ name = "nml-pybind-example"
 version = "0.1.0"
 description = "nml-tools f2py handle-wrapper example"
 readme = "README.md"
-requires-python = ">=3.8"
-dependencies = ["numpy>=1.24,<3"]
+requires-python = ">=3.9"
+dependencies = ["numpy>=2,<3"]
 
 [project.optional-dependencies]
 test = ["pytest"]
