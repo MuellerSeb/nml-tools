@@ -243,7 +243,7 @@ def collect_local_derived_types(
     *,
     constants: dict[str, int] | None = None,
 ) -> list[LocalDerivedTypeSpec]:
-    """Collect locally owned derived definitions referenced by namelist schemas."""
+    """Collect locally owned derived definitions used by namelist schemas."""
     static_constants = normalize_constant_values(constants)
     collected: dict[tuple[str, str], LocalDerivedTypeSpec] = {}
     type_owners: dict[str, tuple[str, str]] = {}
@@ -1966,7 +1966,7 @@ def _derived_type_name(schema: dict[str, Any]) -> str:
 def _derived_origin(schema: dict[str, Any]) -> dict[str, Any]:
     origin = schema.get(DERIVED_REF_ORIGIN_KEY)
     if not isinstance(origin, dict):
-        raise ValueError("derived object must originate from a resolved '$ref'")
+        raise ValueError("derived object must originate from a normalized definition")
     raw_identity = origin.get("identity")
     definition = origin.get("definition")
     if (

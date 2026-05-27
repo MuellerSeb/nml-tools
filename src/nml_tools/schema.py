@@ -7,6 +7,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
+from itertools import count
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import unquote, urlsplit
@@ -18,6 +19,7 @@ from ._utils import FORTRAN_IDENTIFIER
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 _DOCUMENT_SUFFIXES = {".json", ".yml", ".yaml"}
 _WINDOWS_ABSOLUTE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+_MAPPING_IDENTITY_COUNTER = count(1)
 DERIVED_REF_ORIGIN_KEY = "_nml_tools_ref_origin"
 _REPRESENTATION_KEYS = {
     "type",
@@ -71,6 +73,7 @@ class _Document:
 
     data: dict[str, Any]
     path: Path | None
+    mapping_identity: str | None = None
 
     @property
     def label(self) -> str:
@@ -81,7 +84,9 @@ class _Document:
     @property
     def identity(self) -> str:
         if self.path is None:
-            return "<mapping>"
+            if self.mapping_identity is None:
+                raise ValueError("source-less mapping document has no private identity")
+            return self.mapping_identity
         return str(self.path)
 
 
@@ -110,7 +115,8 @@ class SchemaResolver:
         """Resolve an in-memory schema, optionally supplying its filesystem base."""
         data = dict(schema)
         path = Path(source_path).resolve() if source_path is not None else None
-        document = _Document(data, path)
+        mapping_identity = f"<mapping:{next(_MAPPING_IDENTITY_COUNTER)}>" if path is None else None
+        document = _Document(data, path, mapping_identity)
         if path is not None:
             self._documents[path] = document
         _reject_reserved_marker(data, document, "")
@@ -203,13 +209,26 @@ class SchemaResolver:
             result = self._resolve_plain(raw, document, pointer, position=position)
 
         if (
+            position in {"property", "items"}
+            and result.get("type") == "object"
+            and DERIVED_REF_ORIGIN_KEY not in result
+            and not allow_derived_definition
+            and "x-fortran-type" in result
+        ):
+            definition = copy.deepcopy(result)
+            result[DERIVED_REF_ORIGIN_KEY] = {
+                "identity": [document.identity, pointer],
+                "definition": definition,
+            }
+        if (
             position != "root"
             and result.get("type") == "object"
             and DERIVED_REF_ORIGIN_KEY not in result
             and not allow_derived_definition
         ):
             raise ValueError(
-                f"{_location(document, pointer)}: derived-type object properties must use '$ref'"
+                f"{_location(document, pointer)}: object-valued properties and items must "
+                "define 'x-fortran-type' inline or use '$ref'"
             )
         _validate_effective_node(result, position=position)
         return result

@@ -196,3 +196,32 @@ def test_generate_docs_documents_derived_fields_and_reusable_types(tmp_path: Pat
     assert "Bounds for one interval." in rendered
     assert "- Ownership: `nml_helper`" in rendered
     assert "period%start_year = 0" in rendered
+
+
+def test_generate_docs_documents_inline_single_use_derived_type(tmp_path: Path) -> None:
+    schema = resolve_schema(
+        {
+            "title": "Run",
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "station": {
+                    "title": "Selected station",
+                    "description": "Application-owned station.",
+                    "type": "object",
+                    "x-fortran-type": "station_t",
+                    "x-fortran-module": "application_types",
+                    "properties": {"code": {"type": "integer"}},
+                }
+            },
+        }
+    )
+    output = tmp_path / "run.md"
+
+    _import_generate_docs()(schema, output)
+    rendered = output.read_text()
+
+    assert "### `station_t`" in rendered
+    assert "Selected station" in rendered
+    assert "Application-owned station." in rendered
+    assert "- Ownership: imported from `application_types`" in rendered

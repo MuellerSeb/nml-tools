@@ -1149,7 +1149,8 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
         {
             "x-fortran-namelist": "run",
             "type": "object",
-            "$defs": {
+            "required": ["location", "locations"],
+            "properties": {
                 "location": {
                     "type": "object",
                     "x-fortran-type": "location_t",
@@ -1161,15 +1162,22 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
                             "default": "default",
                         }
                     },
-                }
-            },
-            "required": ["location", "locations"],
-            "properties": {
-                "location": {"$ref": "#/$defs/location"},
+                },
                 "locations": {
                     "type": "array",
                     "x-fortran-shape": 2,
-                    "items": {"$ref": "#/$defs/location"},
+                    "items": {
+                        "type": "object",
+                        "x-fortran-type": "location_t",
+                        "x-fortran-module": "application_types",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "x-fortran-len": 8,
+                                "default": "default",
+                            }
+                        },
+                    },
                 },
             },
         }
@@ -1183,3 +1191,38 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
     assert 'this%location%name(8 + 1:) = ""' in generated
     assert "if (len(this%locations%name) < 8) then" in generated
     assert 'this%locations(:)%name(8 + 1:) = ""' in generated
+
+
+def test_generate_fortran_emits_inline_single_use_local_type() -> None:
+    from nml_tools.schema import resolve_schema
+
+    codegen = _import_codegen_module()
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "period": {
+                    "title": "Inline period",
+                    "description": "Defined only for this field.",
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "year": {"title": "Year", "type": "integer"},
+                    },
+                }
+            },
+        }
+    )
+
+    helper = codegen.render_helper(
+        file_name="nml_helper.f90",
+        local_derived_types=codegen.collect_local_derived_types([schema]),
+    )
+    generated = codegen.render_fortran(schema, file_name="nml_run.f90")
+
+    assert "!> \\class period_t" in helper
+    assert "!> \\brief Inline period" in helper
+    assert "!> \\details Defined only for this field." in helper
+    assert "integer :: year !< Year" in helper
+    assert "type(period_t) :: period" in generated
