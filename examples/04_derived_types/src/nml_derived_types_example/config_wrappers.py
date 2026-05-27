@@ -101,6 +101,18 @@ def _dummy_array(rank: int, dtype: Any = None) -> np.ndarray:
     return np.asfortranarray(np.zeros(target_shape, dtype=dtype))
 
 
+def _validate_derived_members(
+    value: Mapping[Any, Any],
+    path: str,
+    members: set[str],
+) -> None:
+    if any(not isinstance(member, str) for member in value):
+        raise ValueError(f"{path} has non-string member names")
+    unknown = set(value) - members
+    if unknown:
+        raise ValueError(f"{path} has unknown members: " + ", ".join(sorted(unknown)))
+
+
 def _derived_array(
     value: Any,
     name: str,
@@ -119,12 +131,7 @@ def _derived_array(
         path = "".join(f"[{part + 1}]" for part in index)
         if not isinstance(item, Mapping):
             raise ValueError(f"derived array argument '{name}'{path} must be a mapping")
-        unknown = set(item) - members
-        if unknown:
-            raise ValueError(
-                f"derived array argument '{name}'{path} has unknown members: "
-                + ", ".join(sorted(unknown))
-            )
+        _validate_derived_members(item, f"derived array argument '{name}'{path}", members)
     return array
 
 
@@ -252,16 +259,11 @@ class Run:
         if period is not None:
             if not isinstance(period, Mapping):
                 raise ValueError("derived argument 'period' must be a mapping")
-            unknown = set(period) - {
+            _validate_derived_members(period, "derived argument 'period'", {
                 "start_year",
                 "end_year",
                 "label",
-            }
-            if unknown:
-                raise ValueError(
-                    "derived argument 'period' has unknown members: "
-                    + ", ".join(sorted(unknown))
-                )
+            })
             kwargs["period__start_year"] = period.get("start_year", 0)
             kwargs["has__period__start_year"] = "start_year" in period
             kwargs["period__end_year"] = period.get("end_year", 0)
@@ -356,15 +358,10 @@ class Run:
         if station is not None:
             if not isinstance(station, Mapping):
                 raise ValueError("derived argument 'station' must be a mapping")
-            unknown = set(station) - {
+            _validate_derived_members(station, "derived argument 'station'", {
                 "code",
                 "label",
-            }
-            if unknown:
-                raise ValueError(
-                    "derived argument 'station' has unknown members: "
-                    + ", ".join(sorted(unknown))
-                )
+            })
             kwargs["station__code"] = station.get("code", 0)
             kwargs["has__station__code"] = "code" in station
             kwargs["station__label"] = station.get("label", "")

@@ -123,6 +123,18 @@ def _dummy_array(rank: int, dtype: Any = None) -> np.ndarray:
 
 
 {% if uses_derived %}
+def _validate_derived_members(
+    value: Mapping[Any, Any],
+    path: str,
+    members: set[str],
+) -> None:
+    if any(not isinstance(member, str) for member in value):
+        raise ValueError(f"{path} has non-string member names")
+    unknown = set(value) - members
+    if unknown:
+        raise ValueError(f"{path} has unknown members: " + ", ".join(sorted(unknown)))
+
+
 def _derived_array(
     value: Any,
     name: str,
@@ -141,12 +153,7 @@ def _derived_array(
         path = "".join(f"[{part + 1}]" for part in index)
         if not isinstance(item, Mapping):
             raise ValueError(f"derived array argument '{name}'{path} must be a mapping")
-        unknown = set(item) - members
-        if unknown:
-            raise ValueError(
-                f"derived array argument '{name}'{path} has unknown members: "
-                + ", ".join(sorted(unknown))
-            )
+        _validate_derived_members(item, f"derived array argument '{name}'{path}", members)
     return array
 
 
@@ -350,16 +357,11 @@ class {{ cls.class_name }}:
         if {{ arg.name }} is not None:
             if not isinstance({{ arg.name }}, Mapping):
                 raise ValueError("derived argument '{{ arg.name }}' must be a mapping")
-            unknown = set({{ arg.name }}) - {
+            _validate_derived_members({{ arg.name }}, "derived argument '{{ arg.name }}'", {
 {% for leaf in arg.derived_leaves %}
                 "{{ leaf.name }}",
 {% endfor %}
-            }
-            if unknown:
-                raise ValueError(
-                    "derived argument '{{ arg.name }}' has unknown members: "
-                    + ", ".join(sorted(unknown))
-                )
+            })
 {% for leaf in arg.derived_leaves %}
             kwargs["{{ leaf.encoded_name }}"] = {{ arg.name }}.get("{{ leaf.name }}", {{ leaf.dummy_value }})
             kwargs["{{ leaf.has_name }}"] = "{{ leaf.name }}" in {{ arg.name }}

@@ -573,6 +573,12 @@ def test_generate_python_wrapper_flattens_derived_mappings(
     with pytest.raises(ValueError, match="unknown members"):
         cfg.set(period={"bad": 1}, periods=[])
 
+    with pytest.raises(ValueError, match="non-string member names"):
+        cfg.set(period={1: 2001}, periods=[])
+
+    with pytest.raises(ValueError, match=r"periods.*\[1\].*non-string member names"):
+        cfg.set(period={"start_year": 2001}, periods=[{b"start_year": 1980}])
+
 
 def test_generate_python_wrapper_flattens_multirank_derived_mappings(
     tmp_path: Path,
