@@ -99,12 +99,33 @@ values:
 
 ### x-fortran-type and x-fortran-module
 
-- Location: a referenced `type: object` definition used as a property or as
-  array `items`.
+- Location: a `type: object` defined inline as a property or array `items`,
+  or a referenced reusable object definition.
 - `x-fortran-type` is required and gives the Fortran derived type name.
 - `x-fortran-module` is optional. If absent, the type is emitted once in the
   generated helper module. If present, the namelist module imports the type
   from that application-owned module.
+
+Use an inline object for a single-use derived field:
+
+```yaml
+properties:
+  station:
+    title: Selected station
+    description: Application-owned station descriptor.
+    type: object
+    x-fortran-type: station_t
+    x-fortran-module: application_types
+    properties:
+      code:
+        type: integer
+      label:
+        type: string
+        x-fortran-len: 16
+```
+
+Use `$defs` / `$ref` when a type is reused or when type documentation should
+be separate from field documentation:
 
 ```yaml
 $defs:
@@ -747,8 +768,8 @@ Main missing features compared to JSON Schema:
 - No numeric or string validation keywords like `multipleOf`, `minLength`,
   `maxLength`, `pattern`, `format` (bounds are supported via `minimum`,
   `maximum`, `exclusiveMinimum`, and `exclusiveMaximum`).
-- Object schemas are supported only as one-level referenced Fortran derived
-  types with intrinsic scalar members.
+- Object schemas are supported only as one-level inline or referenced Fortran
+  derived types with intrinsic scalar members.
 
 Use the `x-fortran-*` extensions to express kind, length, and shape information
 needed for code generation.
@@ -785,9 +806,10 @@ representation keywords such as `x-fortran-kind`, `x-fortran-len`, and
 `x-fortran-shape` are rejected. For arrays, a use-site array `default` replaces
 the referenced default together with any `x-fortran-default-*` controls.
 
-Referenced named object definitions may also represent one-level derived-type
-properties through `x-fortran-type` and optional `x-fortran-module`. Type use
-sites may refine existing scalar components but cannot add components or change
-the Fortran type identity. `$id`/`$anchor` resolution, recursive references,
-`$dynamicRef`, legacy `definitions`, and general composition keywords are not
-supported.
+Object definitions may represent one-level derived-type properties through
+`x-fortran-type` and optional `x-fortran-module`. An inline object is a
+single-use definition; repeated or independently documented types should use
+`$defs` / `$ref`. Referenced type use sites may refine existing scalar
+components but cannot add components or change the Fortran type identity.
+`$id`/`$anchor` resolution, recursive references, `$dynamicRef`, legacy
+`definitions`, and general composition keywords are not supported.

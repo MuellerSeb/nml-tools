@@ -1,6 +1,6 @@
 # Derived-type configuration
 
-Demonstrates locally generated and imported reusable derived types.
+Demonstrates referenced reusable and inline imported derived types.
 
 **Namelist**: `run`
 
@@ -71,7 +71,7 @@ Start and end years for a configured time window.
 
 ### `station_t`
 
-Imported station
+Selected station
 
 Application-owned station descriptor with longer label storage.
 

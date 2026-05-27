@@ -2,7 +2,7 @@
 !> \copydoc nml_run
 
 !> \brief Derived-type configuration
-!> \details Demonstrates locally generated and imported reusable derived types.
+!> \details Demonstrates referenced reusable and inline imported derived types.
 module nml_run
   use nml_helper, only: &
     nml_file_t, &
@@ -45,7 +45,7 @@ module nml_run
 
   !> \class nml_run_t
   !> \brief Derived-type configuration
-  !> \details Demonstrates locally generated and imported reusable derived types.
+  !> \details Demonstrates referenced reusable and inline imported derived types.
   type, public :: nml_run_t
     logical :: is_configured = .false. !< whether the namelist has been configured
     integer :: dim_n_periods = n_periods_default !< runtime dimension for n_periods

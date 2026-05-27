@@ -1,9 +1,10 @@
 # nml-tools derived-types example
 
 This package demonstrates one-level derived-type namelist fields. The main schema
-references object definitions from `schema/definitions.yml`: `period_t` is generated
-once in `nml_helper`, while `station_t` is imported from the application-owned
-`fortran/application_types.f90` module.
+references reusable `period_t` from `schema/definitions.yml`, which is generated
+once in `nml_helper`, and declares its single-use `station_t` field inline while
+importing the type from the application-owned `fortran/application_types.f90`
+module.
 
 The generated namelist has a required scalar period, a runtime-sized period array,
 and a required imported station. The imported `station_t%label` storage is longer

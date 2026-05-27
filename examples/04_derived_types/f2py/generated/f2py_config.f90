@@ -3,7 +3,7 @@
 !> \copydoc f2py_run
 
 !> \brief Derived-type configuration
-!> \details Demonstrates locally generated and imported reusable derived types.
+!> \details Demonstrates referenced reusable and inline imported derived types.
 module f2py_run
   use iso_c_binding, only: c_intptr_t
   use nml_helper, only: NML_OK
