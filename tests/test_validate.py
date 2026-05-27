@@ -363,6 +363,30 @@ def test_validate_schema_defaults_traverses_derived_members() -> None:
             },
             "x-fortran-module must be a valid identifier",
         ),
+        (
+            {
+                "type": "object",
+                "x-fortran-type": "period_t",
+                "properties": {
+                    "years": {"type": "array", "items": {"type": "integer"}}
+                },
+            },
+            "component 'years' must define an intrinsic scalar type",
+        ),
+        (
+            {
+                "type": "object",
+                "x-fortran-type": "period_t",
+                "properties": {
+                    "child": {
+                        "type": "object",
+                        "x-fortran-type": "child_t",
+                        "properties": {"year": {"type": "integer"}},
+                    }
+                },
+            },
+            "component 'child' must define an intrinsic scalar type",
+        ),
     ],
 )
 def test_validation_rejects_invalid_raw_derived_declarations(

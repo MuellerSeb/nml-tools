@@ -136,13 +136,19 @@ def _validate_property_defaults(
         if not isinstance(properties, Mapping):
             raise ValueError(f"derived property '{name}' must define object 'properties'")
         for child_name, child in properties.items():
-            if isinstance(child_name, str) and isinstance(child, Mapping):
-                _validate_property_defaults(
-                    f"{name}.{child_name}",
-                    child,
-                    constants=constants,
-                    dimensions=dimensions,
+            if not isinstance(child_name, str) or not isinstance(child, Mapping) or child.get(
+                "type"
+            ) not in {"integer", "number", "boolean", "string"}:
+                raise ValueError(
+                    f"derived property '{name}' component '{child_name}' "
+                    "must define an intrinsic scalar type"
                 )
+            _validate_property_defaults(
+                f"{name}.{child_name}",
+                child,
+                constants=constants,
+                dimensions=dimensions,
+            )
         return
 
     if prop.get("type") != "array":
