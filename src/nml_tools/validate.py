@@ -129,6 +129,7 @@ def _validate_property_defaults(
     dimensions: dict[str, int] | None,
 ) -> None:
     if prop.get("type") == "object":
+        _validate_derived_declaration(name, prop)
         if "default" in prop:
             raise ValueError(f"derived property '{name}' must not define an object default")
         properties = prop.get("properties")
@@ -225,6 +226,22 @@ def _validate_property_defaults(
                 constants=constants,
                 dimensions=dimensions,
             )
+
+
+def _validate_derived_declaration(name: str, prop: Mapping[str, Any]) -> None:
+    type_name = prop.get("x-fortran-type")
+    if not isinstance(type_name, str) or not type_name.strip():
+        raise ValueError(f"derived property '{name}' must define non-empty 'x-fortran-type'")
+    if FORTRAN_IDENTIFIER.match(type_name.strip()) is None:
+        raise ValueError(f"derived property '{name}' x-fortran-type must be a valid identifier")
+    module_name = prop.get("x-fortran-module")
+    if module_name is not None and (
+        not isinstance(module_name, str)
+        or FORTRAN_IDENTIFIER.match(module_name.strip()) is None
+    ):
+        raise ValueError(
+            f"derived property '{name}' x-fortran-module must be a valid identifier"
+        )
 
 
 def _validate_array_default_layout(

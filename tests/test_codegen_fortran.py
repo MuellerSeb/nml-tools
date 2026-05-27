@@ -1132,6 +1132,9 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
     assert "this%period%start_year" in generated
     assert 'case ("period%start_year")' in generated
     assert 'case ("periods%start_year")' in generated
+    assert "! required derived values" in generated
+    assert 'istat = this%is_set("period", errmsg=errmsg)' in generated
+    assert 'istat = this%is_set("periods", errmsg=errmsg)' in generated
     assert " .and. &" in generated
     assert " .or. &" in generated
     assert "integer(i4), parameter, public :: period_start_year_min = 1900_i4" in generated

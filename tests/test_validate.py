@@ -337,3 +337,42 @@ def test_validate_schema_defaults_traverses_derived_members() -> None:
 
     with pytest.raises(ValueError, match=r"period\.label.*exceeds length"):
         validate_schema_defaults(schema)
+
+
+@pytest.mark.parametrize(
+    ("prop", "match"),
+    [
+        (
+            {"type": "object", "properties": {"year": {"type": "integer"}}},
+            "must define non-empty 'x-fortran-type'",
+        ),
+        (
+            {
+                "type": "object",
+                "x-fortran-type": "not-a-type",
+                "properties": {"year": {"type": "integer"}},
+            },
+            "x-fortran-type must be a valid identifier",
+        ),
+        (
+            {
+                "type": "object",
+                "x-fortran-type": "period_t",
+                "x-fortran-module": "not-a-module",
+                "properties": {"year": {"type": "integer"}},
+            },
+            "x-fortran-module must be a valid identifier",
+        ),
+    ],
+)
+def test_validation_rejects_invalid_raw_derived_declarations(
+    prop: dict[str, object], match: str
+) -> None:
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {"period": prop},
+    }
+
+    with pytest.raises(ValueError, match=match):
+        validate_namelist(schema, {})

@@ -669,6 +669,10 @@ def test_resolve_schema_rejects_user_authored_derived_origin_marker() -> None:
             "conflicting 'x-fortran-type'",
         ),
         (
+            {"$ref": "#/$defs/period", "x-fortran-module": "application_types"},
+            "must be declared on the referenced derived definition",
+        ),
+        (
             {"$ref": "#/$defs/invalid_component"},
             "component 'start-year' must be a valid Fortran identifier",
         ),

@@ -435,6 +435,15 @@ def _compose_nodes(
         representation_keys.add("x-fortran-namelist")
     for key in representation_keys:
         if key in local:
+            if (
+                key == "x-fortran-module"
+                and position in {"property", "items"}
+                and referenced.get("type") == "object"
+                and key not in referenced
+            ):
+                raise ValueError(
+                    "'x-fortran-module' must be declared on the referenced derived definition"
+                )
             if key in referenced and referenced[key] != local[key]:
                 raise ValueError(f"conflicting '{key}' in referenced and local schema")
             result[key] = copy.deepcopy(local[key])

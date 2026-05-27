@@ -898,6 +898,7 @@ def _build_context(
                     )
                 )
                 if is_required:
+                    derived_required_validations.append(name)
                     uses_partly_set = uses_partly_set or (
                         len(inner_required) > 1
                         or (type_info.category == "array" and bool(inner_required))
