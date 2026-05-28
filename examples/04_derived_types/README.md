@@ -51,6 +51,11 @@ period%start_year = 2001
 periods(1)%start_year = 1980
 ```
 
+For helper-owned generated types, buffer-style values such as
+`period = 2001, 2010, "main"` follow the schema component order. Imported
+types follow the application type declaration order, so component notation is
+the recommended form.
+
 ## Python
 
 The Python API preserves nested structure while the intrinsic-only f2py layer

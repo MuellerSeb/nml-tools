@@ -184,6 +184,13 @@ period%start_year = 2001
 periods(2)%start_year = 2001
 ```
 
+Fortran also accepts buffer-style derived values, for example
+`period = 2001, "main"`. For helper-owned generated types, that positional
+order follows the reusable or inline object definition's schema `properties`
+order. For imported application-owned types, the schema order must match the
+actual Fortran type declaration order if buffer-style input is used. Component
+notation is preferred because it is explicit and robust to layout changes.
+
 ### x-fortran-flex-tail-dims
 
 - Location: array properties.
