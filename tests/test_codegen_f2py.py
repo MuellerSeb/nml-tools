@@ -159,6 +159,34 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     assert "subroutine optimization_is_valid_wrapper" in generated
 
 
+def test_collect_f2py_kind_usage_rejects_reserved_property_separator() -> None:
+    codegen = _import_codegen_f2py()
+    schema = _schema()
+    schema["properties"]["seed__value"] = {"type": "integer"}
+
+    with pytest.raises(ValueError, match="property 'seed__value' must not contain"):
+        codegen.collect_f2py_kind_usage([schema])
+
+
+@pytest.mark.parametrize(
+    ("properties", "match"),
+    [
+        ({1: {"type": "integer"}}, "property names must be strings"),
+        ({"seed": 1}, "property 'seed' must be an object"),
+        ({"seed": {"type": "integer"}, "Seed": {"type": "integer"}}, "duplicate property"),
+    ],
+)
+def test_collect_f2py_kind_usage_rejects_invalid_property_tables(
+    properties: dict[Any, Any], match: str
+) -> None:
+    codegen = _import_codegen_f2py()
+    schema = _schema()
+    schema["properties"] = properties
+
+    with pytest.raises(ValueError, match=match):
+        codegen.collect_f2py_kind_usage([schema])
+
+
 def test_generate_f2py_wrappers_uses_deferred_length_for_string_array_bridges(
     tmp_path: Path,
 ) -> None:

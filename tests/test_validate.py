@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from nml_tools._utils import normalize_constant_values, normalize_runtime_dimensions
 from nml_tools.validate import validate_namelist, validate_schema_defaults
 
 
@@ -18,6 +19,20 @@ def test_validate_namelist_rejects_unknown_property() -> None:
     namelist = {"foo": 1, "bar": 2}
     with pytest.raises(ValueError, match="unknown property"):
         validate_namelist(schema, namelist)
+
+
+def test_normalize_config_values_accept_none_and_reject_empty_names() -> None:
+    assert normalize_constant_values(None) == {}
+    assert normalize_runtime_dimensions(None) == {}
+
+    with pytest.raises(ValueError, match="constant names must be non-empty"):
+        normalize_constant_values({"": 1})
+
+    with pytest.raises(ValueError, match="runtime dimension names must be non-empty"):
+        normalize_runtime_dimensions({"": 1})
+
+    with pytest.raises(ValueError, match="duplicates another dimension"):
+        normalize_runtime_dimensions({"n": 1, "N": 2})
 
 
 def test_validate_namelist_rejects_invalid_schema_defaults() -> None:

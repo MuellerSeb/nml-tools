@@ -910,3 +910,52 @@ def test_schema_rejects_reserved_double_underscore_identifiers(
                 "properties": property_schema,
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("property_schema", "match"),
+    [
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": 1,
+                    "properties": {"year": {"type": "integer"}},
+                }
+            },
+            "'x-fortran-type' must be a valid Fortran identifier",
+        ),
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "x-fortran-module": 1,
+                    "properties": {"year": {"type": "integer"}},
+                }
+            },
+            "'x-fortran-module' must be a valid Fortran identifier",
+        ),
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {1: {"type": "integer"}},
+                }
+            },
+            "property names must be strings",
+        ),
+    ],
+)
+def test_schema_rejects_invalid_identifier_container_values(
+    property_schema: dict[str, object], match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": property_schema,
+            }
+        )
