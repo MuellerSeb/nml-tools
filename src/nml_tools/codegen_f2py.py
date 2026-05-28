@@ -509,6 +509,7 @@ def build_f2py_namelist_spec(
                     field.required,
                     outer_has_flag,
                     dim_names,
+                    init_allocates_array=field.runtime_sized_array,
                 )
             )
             set_call_arguments.append(f"{field.name}={maybe_name}")
@@ -770,7 +771,7 @@ def _one_line(value: str) -> str:
 
 
 def _array_dimension_argument_names(name: str, rank: int) -> list[str]:
-    return [f"{name}_n{idx}" for idx in range(1, rank + 1)]
+    return [f"{name}__n{idx}" for idx in range(1, rank + 1)]
 
 
 def _unique_generated_name(base_name: str, taken_names: set[str]) -> str:
@@ -793,7 +794,7 @@ def _bounded_generated_name(base_name: str) -> str:
 
 
 def _maybe_bridge_name(name: str) -> str:
-    return f"maybe_{name}"
+    return f"maybe__{name}"
 
 
 def _f2py_field_arguments(
@@ -879,6 +880,8 @@ def _derived_bridge_assignments(
     required: bool,
     outer_has_flag: str | None,
     dim_names: list[str],
+    *,
+    init_allocates_array: bool,
 ) -> list[str]:
     lines: list[str] = []
     gated = not required
@@ -891,9 +894,23 @@ def _derived_bridge_assignments(
             lines.append(f"  allocate({maybe_name})")
     else:
         indent = ""
+    if rank and not init_allocates_array:
+        dims = ", ".join(dim_names)
+        lines.append(f"{indent}allocate({maybe_name}({dims}))")
     lines.append(f"{indent}status = this%init_type({name}={maybe_name}, errmsg=errmsg)")
     lines.append(f"{indent}if (status /= NML_OK) return")
     if rank:
+        if init_allocates_array:
+            for dim_index, dim_name in enumerate(dim_names, start=1):
+                lines.extend(
+                    [
+                        f"{indent}if ({dim_name} > size({maybe_name}, {dim_index})) then",
+                        f"{indent}  status = NML_ERR_INVALID_INDEX",
+                        f'{indent}  errmsg = "dimension {dim_index} exceeds bounds for \'{name}\'"',
+                        f"{indent}  return",
+                        f"{indent}end if",
+                    ]
+                )
         bounds = ", ".join(f"1:{dim_name}" for dim_name in dim_names)
         for leaf in leaves:
             lines.append(f"{indent}where ({leaf.has_name})")

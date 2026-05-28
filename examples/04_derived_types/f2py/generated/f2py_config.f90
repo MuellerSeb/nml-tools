@@ -6,7 +6,7 @@
 !> \details Demonstrates referenced reusable and inline imported derived types.
 module f2py_run
   use iso_c_binding, only: c_intptr_t
-  use nml_helper, only: NML_OK
+  use nml_helper, only: NML_OK, NML_ERR_INVALID_INDEX
   use iso_fortran_env, only: &
     i4=>int32
   use nml_run, only: nml_run_t, nml_run_resolve_handle, period_t, station_t
@@ -37,7 +37,7 @@ contains
     has__period__end_year, &
     period__label, &
     has__period__label, &
-    periods_n1, &
+    periods__n1, &
     periods__start_year, &
     has__periods__start_year, &
     periods__end_year, &
@@ -56,13 +56,13 @@ contains
     logical, intent(in) :: has__period__end_year !< whether period%end_year was provided
     character(len=*), intent(in) :: period__label !< period%label
     logical, intent(in) :: has__period__label !< whether period%label was provided
-    integer, intent(in) :: periods_n1 !< extent for periods
-    integer(i4), dimension(periods_n1), intent(in) :: periods__start_year !< periods%start_year
-    logical, dimension(periods_n1), intent(in) :: has__periods__start_year !< provided mask for periods%start_year
-    integer(i4), dimension(periods_n1), intent(in) :: periods__end_year !< periods%end_year
-    logical, dimension(periods_n1), intent(in) :: has__periods__end_year !< provided mask for periods%end_year
-    character(len=*), dimension(periods_n1), intent(in) :: periods__label !< periods%label
-    logical, dimension(periods_n1), intent(in) :: has__periods__label !< provided mask for periods%label
+    integer, intent(in) :: periods__n1 !< extent for periods
+    integer(i4), dimension(periods__n1), intent(in) :: periods__start_year !< periods%start_year
+    logical, dimension(periods__n1), intent(in) :: has__periods__start_year !< provided mask for periods%start_year
+    integer(i4), dimension(periods__n1), intent(in) :: periods__end_year !< periods%end_year
+    logical, dimension(periods__n1), intent(in) :: has__periods__end_year !< provided mask for periods%end_year
+    character(len=*), dimension(periods__n1), intent(in) :: periods__label !< periods%label
+    logical, dimension(periods__n1), intent(in) :: has__periods__label !< provided mask for periods%label
     integer(i4), intent(in) :: station__code !< station%code
     logical, intent(in) :: has__station__code !< whether station%code was provided
     character(len=*), intent(in) :: station__label !< station%label
@@ -70,38 +70,43 @@ contains
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_run_t), pointer :: this
-    type(period_t) :: maybe_period
-    type(period_t), dimension(:), allocatable :: maybe_periods
-    type(station_t) :: maybe_station
+    type(period_t) :: maybe__period
+    type(period_t), dimension(:), allocatable :: maybe__periods
+    type(station_t) :: maybe__station
 
     call nml_run_resolve_handle(handle, this, status, errmsg)
     if (.not. associated(this)) then
       return
     end if
-    status = this%init_type(period=maybe_period, errmsg=errmsg)
+    status = this%init_type(period=maybe__period, errmsg=errmsg)
     if (status /= NML_OK) return
-    if (has__period__start_year) maybe_period%start_year = period__start_year
-    if (has__period__end_year) maybe_period%end_year = period__end_year
-    if (has__period__label) maybe_period%label = period__label
-    status = this%init_type(periods=maybe_periods, errmsg=errmsg)
+    if (has__period__start_year) maybe__period%start_year = period__start_year
+    if (has__period__end_year) maybe__period%end_year = period__end_year
+    if (has__period__label) maybe__period%label = period__label
+    status = this%init_type(periods=maybe__periods, errmsg=errmsg)
     if (status /= NML_OK) return
+    if (periods__n1 > size(maybe__periods, 1)) then
+      status = NML_ERR_INVALID_INDEX
+      errmsg = "dimension 1 exceeds bounds for 'periods'"
+      return
+    end if
     where (has__periods__start_year)
-      maybe_periods(1:periods_n1)%start_year = periods__start_year
+      maybe__periods(1:periods__n1)%start_year = periods__start_year
     end where
     where (has__periods__end_year)
-      maybe_periods(1:periods_n1)%end_year = periods__end_year
+      maybe__periods(1:periods__n1)%end_year = periods__end_year
     end where
     where (has__periods__label)
-      maybe_periods(1:periods_n1)%label = periods__label
+      maybe__periods(1:periods__n1)%label = periods__label
     end where
-    status = this%init_type(station=maybe_station, errmsg=errmsg)
+    status = this%init_type(station=maybe__station, errmsg=errmsg)
     if (status /= NML_OK) return
-    if (has__station__code) maybe_station%code = station__code
-    if (has__station__label) maybe_station%label = station__label
+    if (has__station__code) maybe__station%code = station__code
+    if (has__station__label) maybe__station%label = station__label
     status = this%set( &
-      period=maybe_period, &
-      periods=maybe_periods, &
-      station=maybe_station, &
+      period=maybe__period, &
+      periods=maybe__periods, &
+      station=maybe__station, &
       errmsg=errmsg)
   end subroutine run_set_wrapper
 
@@ -116,43 +121,43 @@ contains
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_run_t), pointer :: this
-    integer, allocatable :: maybe_n_periods
+    integer, allocatable :: maybe__n_periods
 
     call nml_run_resolve_handle(handle, this, status, errmsg)
     if (.not. associated(this)) then
       return
     end if
     if (has__n_periods) then
-      allocate(maybe_n_periods)
-      maybe_n_periods = n_periods
+      allocate(maybe__n_periods)
+      maybe__n_periods = n_periods
     end if
     status = this%set_dims( &
-      n_periods=maybe_n_periods, &
+      n_periods=maybe__n_periods, &
       errmsg=errmsg)
   end subroutine run_set_dims_wrapper
 
 
   !> \brief Check whether a run field is set
-  subroutine run_is_set_wrapper(handle, name, idx_n1, idx, has_idx, status, errmsg)
+  subroutine run_is_set_wrapper(handle, name, idx__n1, idx, has__idx, status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_run_t instance
     character(len=*), intent(in) :: name !< field name
-    integer, intent(in) :: idx_n1 !< extent for idx
-    integer, dimension(idx_n1), intent(in) :: idx !< optional field index values
-    logical, intent(in) :: has_idx !< whether idx was provided
+    integer, intent(in) :: idx__n1 !< extent for idx
+    integer, dimension(idx__n1), intent(in) :: idx !< optional field index values
+    logical, intent(in) :: has__idx !< whether idx was provided
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_run_t), pointer :: this
-    integer, dimension(:), allocatable :: maybe_idx
+    integer, dimension(:), allocatable :: maybe__idx
 
     call nml_run_resolve_handle(handle, this, status, errmsg)
     if (.not. associated(this)) then
       return
     end if
-    if (has_idx) then
-      allocate(maybe_idx(idx_n1))
-      maybe_idx = idx
+    if (has__idx) then
+      allocate(maybe__idx(idx__n1))
+      maybe__idx = idx
     end if
-    status = this%is_set(name, idx=maybe_idx, errmsg=errmsg)
+    status = this%is_set(name, idx=maybe__idx, errmsg=errmsg)
   end subroutine run_is_set_wrapper
 
   !> \brief Validate the handled run instance

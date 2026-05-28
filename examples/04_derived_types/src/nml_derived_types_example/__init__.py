@@ -46,7 +46,7 @@ def get_station_code() -> int:
 
 
 def get_station_label() -> str:
-    """Return the canonical mapped portion of the imported label."""
+    """Return the imported station label."""
     value = _f2py_config.f2py_config_store.run_get_station_label_wrapper()
     if isinstance(value, bytes):
         return value.decode("utf-8").rstrip()

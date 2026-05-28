@@ -181,8 +181,8 @@ def test_generate_fortran_allows_items_default(tmp_path: Path) -> None:
     generate_fortran(schema, output, kind_module="mo_kind")
 
     generated = output.read_text()
-    assert "integer(i4), parameter, public :: values_default = 2_i4" in generated
-    assert "this%values = values_default" in generated
+    assert "integer(i4), parameter, public :: values__default = 2_i4" in generated
+    assert "this%values = values__default" in generated
 
 
 def test_generate_fortran_accepts_static_shape_constants(tmp_path: Path) -> None:
@@ -209,14 +209,14 @@ def test_generate_fortran_accepts_static_shape_constants(tmp_path: Path) -> None
     )
 
     generated = output.read_text()
-    assert "integer :: dim_max_layers" not in generated
+    assert "integer :: dim__max_layers" not in generated
     assert "integer(i4), dimension(max_layers) :: values" in generated
     assert "procedure :: set_dims" not in generated
     assert "allocate(this%values" not in generated
     assert "use nml_helper, only:" in generated
     assert "max_layers" in generated
-    assert "integer(i4), parameter, public :: values_default = 1_i4" in generated
-    assert "this%values = values_default" in generated
+    assert "integer(i4), parameter, public :: values__default = 1_i4" in generated
+    assert "this%values = values__default" in generated
 
 
 def test_generate_fortran_matches_constants_case_insensitively(tmp_path: Path) -> None:
@@ -299,14 +299,14 @@ def test_generate_fortran_accepts_runtime_dimensions(tmp_path: Path) -> None:
     )
 
     generated = output.read_text()
-    assert "integer :: dim_max_layers = max_layers_default" in generated
+    assert "integer :: dim__max_layers = max_layers__default" in generated
     assert "integer(i4), allocatable, dimension(:) :: values" in generated
     assert "procedure :: set_dims => nml_test_nml_set_dims" in generated
-    assert "allocate(this%values(this%dim_max_layers))" in generated
+    assert "allocate(this%values(this%dim__max_layers))" in generated
     assert "use nml_helper, only:" in generated
-    assert "max_layers_default=>max_layers" in generated
-    assert "integer(i4), parameter, public :: values_default = 1_i4" in generated
-    assert "this%values = values_default" in generated
+    assert "max_layers__default=>max_layers" in generated
+    assert "integer(i4), parameter, public :: values__default = 1_i4" in generated
+    assert "this%values = values__default" in generated
 
 
 def test_generate_fortran_normalizes_runtime_dimension_names(tmp_path: Path) -> None:
@@ -333,8 +333,8 @@ def test_generate_fortran_normalizes_runtime_dimension_names(tmp_path: Path) -> 
     )
 
     generated = output.read_text()
-    assert "integer :: dim_max_layers = max_layers_default" in generated
-    assert "max_layers_default=>max_layers" in generated
+    assert "integer :: dim__max_layers = max_layers__default" in generated
+    assert "max_layers__default=>max_layers" in generated
 
 
 def test_generate_fortran_renames_runtime_dimension_field_collisions(
@@ -345,7 +345,7 @@ def test_generate_fortran_renames_runtime_dimension_field_collisions(
         "x-fortran-namelist": "test_nml",
         "type": "object",
         "properties": {
-            "dim_max_layers": {"type": "integer", "x-fortran-kind": "i4"},
+            "dim__max_layers": {"type": "integer", "x-fortran-kind": "i4"},
             "values": {
                 "type": "array",
                 "items": {"type": "integer", "x-fortran-kind": "i4"},
@@ -364,7 +364,7 @@ def test_generate_fortran_renames_runtime_dimension_field_collisions(
     )
 
     generated = output.read_text()
-    assert "integer :: dim_max_layers_1 = max_layers_default" in generated
+    assert "integer :: dim__max_layers_1 = max_layers__default" in generated
 
 
 def test_generate_fortran_renames_runtime_dimension_default_aliases(
@@ -377,7 +377,7 @@ def test_generate_fortran_renames_runtime_dimension_default_aliases(
         "properties": {
             "name": {
                 "type": "string",
-                "x-fortran-len": "max_layers_default",
+                "x-fortran-len": "max_layers__default",
             },
             "values": {
                 "type": "array",
@@ -393,14 +393,14 @@ def test_generate_fortran_renames_runtime_dimension_default_aliases(
         schema,
         output,
         kind_module="mo_kind",
-        constants={"max_layers_default": 32},
+        constants={"max_layers__default": 32},
         dimensions={"max_layers": 3},
     )
 
     generated = output.read_text()
-    assert "max_layers_default, &" in generated
-    assert "max_layers_default_1=>max_layers" in generated
-    assert "integer :: dim_max_layers = max_layers_default_1" in generated
+    assert "max_layers__default, &" in generated
+    assert "max_layers__default_1=>max_layers" in generated
+    assert "integer :: dim__max_layers = max_layers__default_1" in generated
 
 
 def test_generate_fortran_renames_runtime_dimension_alias_when_property_default_exists(
@@ -434,10 +434,10 @@ def test_generate_fortran_renames_runtime_dimension_alias_when_property_default_
     )
 
     generated = output.read_text()
-    assert "integer(i4), parameter, public :: max_layers_default = 2_i4" in generated
-    assert "max_layers_default=>max_layers" not in generated
-    assert "max_layers_default_1=>max_layers" in generated
-    assert "integer :: dim_max_layers = max_layers_default_1" in generated
+    assert "integer(i4), parameter, public :: max_layers__default = 2_i4" in generated
+    assert "max_layers__default=>max_layers" not in generated
+    assert "max_layers__default_1=>max_layers" in generated
+    assert "integer :: dim__max_layers = max_layers__default_1" in generated
 
 
 def test_generate_fortran_does_not_alias_runtime_dimension_names_in_type_specs(
@@ -471,8 +471,8 @@ def test_generate_fortran_does_not_alias_runtime_dimension_names_in_type_specs(
     )
 
     generated = output.read_text()
-    assert "real(dp), parameter, public :: values_default = 1.0_dp" in generated
-    assert "real(dp), parameter, public :: limit_min = 0.0_dp" in generated
+    assert "real(dp), parameter, public :: values__default = 1.0_dp" in generated
+    assert "real(dp), parameter, public :: limit__min = 0.0_dp" in generated
     assert "real(dp_default)" not in generated
 
 
@@ -645,12 +645,12 @@ def test_generate_fortran_emits_bounds_helpers(tmp_path: Path) -> None:
     generate_fortran(schema, output, kind_module="mo_kind")
 
     generated = output.read_text()
-    assert "real(dp), parameter, public :: tolerance_min = 0.0_dp" in generated
-    assert "real(dp), parameter, public :: tolerance_max_excl = 1.0_dp" in generated
-    assert "integer(i4), parameter, public :: counts_min = 1_i4" in generated
-    assert "elemental logical function tolerance_in_bounds" in generated
-    assert "elemental logical function counts_in_bounds" in generated
-    assert "all(counts_in_bounds(this%counts, allow_missing=.true.))" in generated
+    assert "real(dp), parameter, public :: tolerance__min = 0.0_dp" in generated
+    assert "real(dp), parameter, public :: tolerance__max_excl = 1.0_dp" in generated
+    assert "integer(i4), parameter, public :: counts__min = 1_i4" in generated
+    assert "elemental logical function tolerance__in_bounds" in generated
+    assert "elemental logical function counts__in_bounds" in generated
+    assert "all(counts__in_bounds(this%counts, allow_missing=.true.))" in generated
 
 
 def test_generate_fortran_rejects_flex_dim_boolean_array(tmp_path: Path) -> None:
@@ -872,7 +872,7 @@ def test_generate_fortran_set_dims_validates_before_assignment(tmp_path: Path) -
     )
 
     generated = output.read_text()
-    assert "if (candidate_max_layers < 4) then" in generated
+    assert "if (candidate__max_layers < 4) then" in generated
     assert "shape constants for 'values' must allow at least 4 default values" in generated
     assert "namelist not configured; call set or from_file" in generated
 
@@ -881,8 +881,8 @@ def test_generate_fortran_set_dims_validates_before_assignment(tmp_path: Path) -
     generated.index("if (.not. this%is_configured) then", is_set_idx)
     generated.index("if (.not. this%is_configured) then", is_valid_idx)
 
-    validate_idx = generated.index("if (candidate_max_layers <= 0) then")
-    assign_idx = generated.index("this%dim_max_layers = candidate_max_layers")
+    validate_idx = generated.index("if (candidate__max_layers <= 0) then")
+    assign_idx = generated.index("this%dim__max_layers = candidate__max_layers")
     assert assign_idx > validate_idx
 
 
@@ -912,7 +912,7 @@ def test_generate_fortran_runtime_sized_array_with_default_uses_partial_set(tmp_
 
     generated = output.read_text()
     assert "if (size(values, 1) > size(this%values, 1)) then" in generated
-    assert "this%values(lb_1:ub_1) = values" in generated
+    assert "this%values(lb__1:ub__1) = values" in generated
     assert "dimension 1 mismatch for 'values'" not in generated
 
 
@@ -939,7 +939,7 @@ def test_generate_fortran_fixed_array_setters_use_assumed_shape(
     generated = output.read_text()
     assert "integer(i4), dimension(:), intent(in), optional :: values" in generated
     assert "if (size(values, 1) > size(this%values, 1)) then" in generated
-    assert "this%values(lb_1:ub_1) = values" in generated
+    assert "this%values(lb__1:ub__1) = values" in generated
     assert "dimension(3), intent(in), optional :: values" not in generated
 
 
@@ -971,7 +971,7 @@ def test_generate_fortran_runtime_sized_string_array_uses_static_length(
 
     generated = output.read_text()
     assert "character(len=name_len), allocatable, dimension(:) :: names" in generated
-    assert "allocate(character(len=name_len) :: this%names(this%dim_max_names))" in generated
+    assert "allocate(character(len=name_len) :: this%names(this%dim__max_names))" in generated
     assert "character(len=:), allocatable" not in generated
     assert "this%names = names" in generated
 
@@ -1028,10 +1028,10 @@ def test_generate_fortran_array_default_pad_order(tmp_path: Path) -> None:
     generate_fortran(schema, output, kind_module="mo_kind")
 
     generated = output.read_text()
-    assert "matrix_default(3) = [1_i4, 2_i4, 3_i4]" in generated
-    assert "matrix_pad = 0_i4" in generated
+    assert "matrix__default(3) = [1_i4, 2_i4, 3_i4]" in generated
+    assert "matrix__pad = 0_i4" in generated
     assert "order=[2, 1]" in generated
-    assert "pad=[matrix_pad]" in generated
+    assert "pad=[matrix__pad]" in generated
 
 
 def test_generate_fortran_allows_plain_kinds(tmp_path: Path) -> None:
@@ -1129,6 +1129,13 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
     assert "type(period_t) :: period" in generated
     assert "type(period_t), allocatable, dimension(:) :: periods" in generated
     assert "procedure :: init_type => nml_run_init_type" in generated
+    assert "status = this%init_type( &" in generated
+    assert "period=this%period" in generated
+    assert "periods=this%periods" in generated
+    assert "init_type requires exactly one" not in generated
+    assert "init_type requires at least one" not in generated
+    assert "integer :: selected" not in generated
+    assert "selected = selected + 1" not in generated
     assert "this%period%start_year" in generated
     assert 'case ("period%start_year")' in generated
     assert 'case ("periods%start_year")' in generated
@@ -1140,11 +1147,47 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
     assert generated.count('istat = this%is_set("periods", errmsg=errmsg)') == 1
     assert " .and. &" in generated
     assert " .or. &" in generated
-    assert "integer(i4), parameter, public :: period_start_year_min = 1900_i4" in generated
-    assert "elemental logical function period_start_year_in_bounds" in generated
-    assert "period_label_in_enum(this%period%label)" in generated
-    assert "periods_start_year_in_bounds(this%periods%start_year" in generated
+    assert "integer(i4), parameter, public :: period__start_year__min = 1900_i4" in generated
+    assert "elemental logical function period__start_year__in_bounds" in generated
+    assert "period__label__in_enum(this%period%label)" in generated
+    assert "periods__start_year__in_bounds(this%periods%start_year" in generated
     assert "if (allocated(this%periods)) then" in generated
+
+
+def test_generate_fortran_init_type_accepts_fixed_derived_arrays() -> None:
+    from nml_tools.schema import resolve_schema
+
+    codegen = _import_codegen_module()
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "year": {"type": "integer", "default": 2001},
+                    },
+                }
+            },
+            "properties": {
+                "periods": {
+                    "type": "array",
+                    "x-fortran-shape": 2,
+                    "items": {"$ref": "#/$defs/period"},
+                },
+            },
+        }
+    )
+
+    generated = codegen.render_fortran(schema, file_name="nml_run.f90")
+
+    assert "type(period_t), dimension(2) :: periods" in generated
+    assert "type(period_t), dimension(:), intent(inout), optional :: periods" in generated
+    assert "allocatable, intent(inout), optional :: periods" not in generated
+    assert "periods=this%periods" in generated
+    assert "periods%year = 2001" in generated
 
 
 def test_generate_fortran_imports_application_owned_derived_type() -> None:
@@ -1193,10 +1236,10 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
 
     assert "use application_types, only: location_t" in generated
     assert "type(location_t) :: location" in generated
-    assert "if (len(this%location%name) < 8) then" in generated
-    assert 'this%location%name(8 + 1:) = ""' in generated
-    assert "if (len(this%locations%name) < 8) then" in generated
-    assert 'this%locations(:)%name(8 + 1:) = ""' in generated
+    assert "if (len(location%name) /= 8) then" in generated
+    assert "if (len(locations%name) /= 8) then" in generated
+    assert "imported string storage length mismatch: location%name" in generated
+    assert '+ 1:) = ""' not in generated
 
 
 def test_generate_fortran_emits_inline_single_use_local_type() -> None:

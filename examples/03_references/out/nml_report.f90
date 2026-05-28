@@ -32,16 +32,16 @@ module nml_report
   implicit none
 
   ! default values
-  character(len=label_len), parameter, public :: label_default = "station-summary"
-  integer(i4), parameter, public :: level_default = 1_i4
-  real(dp), parameter, public :: acceptance_fraction_default = 0.75_dp
+  character(len=label_len), parameter, public :: label__default = "station-summary"
+  integer(i4), parameter, public :: level__default = 1_i4
+  real(dp), parameter, public :: acceptance_fraction__default = 0.75_dp
 
   ! enum values
-  integer(i4), parameter, public :: level_enum_values(3) = [0_i4, 1_i4, 2_i4]
+  integer(i4), parameter, public :: level__enum_values(3) = [0_i4, 1_i4, 2_i4]
 
   ! bounds values
-  real(dp), parameter, public :: acceptance_fraction_min = 0.5_dp
-  real(dp), parameter, public :: acceptance_fraction_max = 1.0_dp
+  real(dp), parameter, public :: acceptance_fraction__min = 0.5_dp
+  real(dp), parameter, public :: acceptance_fraction__max = 1.0_dp
 
   !> \class nml_report_t
   !> \brief Reference-driven report configuration
@@ -62,7 +62,7 @@ module nml_report
 contains
 
   !> \brief Check whether a value is part of an enum
-  elemental logical function level_in_enum(val, allow_missing) result(in_enum)
+  elemental logical function level__in_enum(val, allow_missing) result(in_enum)
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -74,11 +74,11 @@ contains
         end if
       end if
     end if
-    in_enum = any(val == level_enum_values)
-  end function level_in_enum
+    in_enum = any(val == level__enum_values)
+  end function level__in_enum
 
   !> \brief Check whether a value is within bounds
-  elemental logical function acceptance_fraction_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function acceptance_fraction__in_bounds(val, allow_missing) result(in_bounds)
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -92,9 +92,9 @@ contains
     end if
 
     in_bounds = .true.
-    if (val < acceptance_fraction_min) in_bounds = .false.
-    if (val > acceptance_fraction_max) in_bounds = .false.
-  end function acceptance_fraction_in_bounds
+    if (val < acceptance_fraction__min) in_bounds = .false.
+    if (val > acceptance_fraction__max) in_bounds = .false.
+  end function acceptance_fraction__in_bounds
 
   !> \brief Initialize defaults and sentinels for report
   integer function nml_report_init(this, errmsg) result(status)
@@ -105,11 +105,10 @@ contains
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
 
-
     ! default values
-    this%label = label_default
-    this%level = level_default
-    this%acceptance_fraction = acceptance_fraction_default
+    this%label = label__default
+    this%level = level__default
+    this%acceptance_fraction = acceptance_fraction__default
   end function nml_report_init
 
 
@@ -258,7 +257,7 @@ contains
     ! enum constraints
     istat = this%is_set("level", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. level_in_enum(this%level)) then
+      if (.not. level__in_enum(this%level)) then
         status = NML_ERR_ENUM
         if (present(errmsg)) errmsg = "enum constraint failed: level"
         return
@@ -270,7 +269,7 @@ contains
     ! bounds constraints
     istat = this%is_set("acceptance_fraction", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. acceptance_fraction_in_bounds(this%acceptance_fraction)) then
+      if (.not. acceptance_fraction__in_bounds(this%acceptance_fraction)) then
         status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: acceptance_fraction"
         return

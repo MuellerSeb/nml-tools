@@ -24,7 +24,7 @@ module nml_optimization
     idx_check, &
     to_lower, &
     buf, &
-    max_iter_default=>max_iter, &
+    max_iter__default=>max_iter, &
     NML_ERR_PARTLY_SET
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
@@ -35,30 +35,30 @@ module nml_optimization
   implicit none
 
   ! default values
-  integer(i4), parameter, public :: seed_default = -9_i4
-  real(dp), parameter, public :: dds_r_default = 0.2_dp
-  logical, parameter, public :: mcmc_opti_default = .true.
-  logical, parameter, public :: include_parameters_default = .true.
+  integer(i4), parameter, public :: seed__default = -9_i4
+  real(dp), parameter, public :: dds_r__default = 0.2_dp
+  logical, parameter, public :: mcmc_opti__default = .true.
+  logical, parameter, public :: include_parameters__default = .true.
 
   ! enum values
   character(len=buf), parameter, public :: &
-    method_enum_values(3) = [character(len=buf) :: "DDS", "MCMC", "SCE"]
+    method__enum_values(3) = [character(len=buf) :: "DDS", "MCMC", "SCE"]
   character(len=buf), parameter, public :: &
-    try_methods_enum_values(3) = [character(len=buf) :: "DDS", "MCMC", "SCE"]
-  integer(i4), parameter, public :: complex_sizes_enum_values(5) = [5_i4, 10_i4, 15_i4, 20_i4, 30_i4]
+    try_methods__enum_values(3) = [character(len=buf) :: "DDS", "MCMC", "SCE"]
+  integer(i4), parameter, public :: complex_sizes__enum_values(5) = [5_i4, 10_i4, 15_i4, 20_i4, 30_i4]
 
   ! bounds values
-  integer(i4), parameter, public :: niterations_min = 10_i4
-  real(dp), parameter, public :: tolerance_min_excl = 0.0_dp
-  real(dp), parameter, public :: dds_r_min_excl = 0.0_dp
-  real(dp), parameter, public :: mcmc_error_params_min = 0.0_dp
+  integer(i4), parameter, public :: niterations__min = 10_i4
+  real(dp), parameter, public :: tolerance__min_excl = 0.0_dp
+  real(dp), parameter, public :: dds_r__min_excl = 0.0_dp
+  real(dp), parameter, public :: mcmc_error_params__min = 0.0_dp
 
   !> \class nml_optimization_t
   !> \brief Optimization configurations
   !> \details All relevant configurations for the optimization parameters.
   type, public :: nml_optimization_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: dim_max_iter = max_iter_default !< runtime dimension for max_iter
+    integer :: dim__max_iter = max_iter__default !< runtime dimension for max_iter
     character(len=buf) :: name !< Optimization name
     character(len=buf) :: method !< Optimization method
     character(len=buf), dimension(3) :: try_methods !< Try alternative methods
@@ -83,7 +83,7 @@ module nml_optimization
 contains
 
   !> \brief Check whether a value is part of an enum
-  elemental logical function method_in_enum(val, allow_missing) result(in_enum)
+  elemental logical function method__in_enum(val, allow_missing) result(in_enum)
     character(len=*), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -95,11 +95,11 @@ contains
         end if
       end if
     end if
-    in_enum = any(trim(val) == method_enum_values)
-  end function method_in_enum
+    in_enum = any(trim(val) == method__enum_values)
+  end function method__in_enum
 
   !> \brief Check whether a value is part of an enum
-  elemental logical function try_methods_in_enum(val, allow_missing) result(in_enum)
+  elemental logical function try_methods__in_enum(val, allow_missing) result(in_enum)
     character(len=*), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -111,11 +111,11 @@ contains
         end if
       end if
     end if
-    in_enum = any(trim(val) == try_methods_enum_values)
-  end function try_methods_in_enum
+    in_enum = any(trim(val) == try_methods__enum_values)
+  end function try_methods__in_enum
 
   !> \brief Check whether a value is part of an enum
-  elemental logical function complex_sizes_in_enum(val, allow_missing) result(in_enum)
+  elemental logical function complex_sizes__in_enum(val, allow_missing) result(in_enum)
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -127,11 +127,11 @@ contains
         end if
       end if
     end if
-    in_enum = any(val == complex_sizes_enum_values)
-  end function complex_sizes_in_enum
+    in_enum = any(val == complex_sizes__enum_values)
+  end function complex_sizes__in_enum
 
   !> \brief Check whether a value is within bounds
-  elemental logical function niterations_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function niterations__in_bounds(val, allow_missing) result(in_bounds)
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -145,11 +145,11 @@ contains
     end if
 
     in_bounds = .true.
-    if (val < niterations_min) in_bounds = .false.
-  end function niterations_in_bounds
+    if (val < niterations__min) in_bounds = .false.
+  end function niterations__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function tolerance_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function tolerance__in_bounds(val, allow_missing) result(in_bounds)
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -163,11 +163,11 @@ contains
     end if
 
     in_bounds = .true.
-    if (val <= tolerance_min_excl) in_bounds = .false.
-  end function tolerance_in_bounds
+    if (val <= tolerance__min_excl) in_bounds = .false.
+  end function tolerance__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function dds_r_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function dds_r__in_bounds(val, allow_missing) result(in_bounds)
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -181,11 +181,11 @@ contains
     end if
 
     in_bounds = .true.
-    if (val <= dds_r_min_excl) in_bounds = .false.
-  end function dds_r_in_bounds
+    if (val <= dds_r__min_excl) in_bounds = .false.
+  end function dds_r__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function mcmc_error_params_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function mcmc_error_params__in_bounds(val, allow_missing) result(in_bounds)
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -199,8 +199,8 @@ contains
     end if
 
     in_bounds = .true.
-    if (val < mcmc_error_params_min) in_bounds = .false.
-  end function mcmc_error_params_in_bounds
+    if (val < mcmc_error_params__min) in_bounds = .false.
+  end function mcmc_error_params__in_bounds
 
   !> \brief Initialize defaults and sentinels for optimization
   integer function nml_optimization_init(this, errmsg) result(status)
@@ -213,7 +213,7 @@ contains
 
     ! allocate runtime-sized fields
     if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
-    allocate(this%mcmc_error_params(3, 2, this%dim_max_iter))
+    allocate(this%mcmc_error_params(3, 2, this%dim__max_iter))
 
     ! sentinel values for required/optional parameters
     this%name = achar(0) ! sentinel for optional string
@@ -224,10 +224,10 @@ contains
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
     this%mcmc_error_params = ieee_value(this%mcmc_error_params, ieee_quiet_nan) ! sentinel for required real array
     ! default values
-    this%seed = seed_default
-    this%dds_r = dds_r_default
-    this%mcmc_opti = mcmc_opti_default ! bool values always need a default
-    this%include_parameters = include_parameters_default
+    this%seed = seed__default
+    this%dds_r = dds_r__default
+    this%mcmc_opti = mcmc_opti__default ! bool values always need a default
+    this%include_parameters = include_parameters__default
   end function nml_optimization_init
 
   !> \brief Reset runtime dimensions for optimization
@@ -236,22 +236,22 @@ contains
     errmsg) result(status)
     class(nml_optimization_t), intent(inout) :: this !< namelist instance
     integer, intent(in), optional :: max_iter !< runtime dimension override for max_iter
-    integer :: candidate_max_iter
+    integer :: candidate__max_iter
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(max_iter)) then
-      candidate_max_iter = max_iter
+      candidate__max_iter = max_iter
     else
-      candidate_max_iter = max_iter_default
+      candidate__max_iter = max_iter__default
     end if
-    if (candidate_max_iter <= 0) then
+    if (candidate__max_iter <= 0) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'max_iter' must be positive"
       return
     end if
-    this%dim_max_iter = candidate_max_iter
+    this%dim__max_iter = candidate__max_iter
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
@@ -299,7 +299,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(mcmc_error_params)) deallocate(mcmc_error_params)
-    allocate(mcmc_error_params(3, 2, this%dim_max_iter))
+    allocate(mcmc_error_params(3, 2, this%dim__max_iter))
     name = this%name
     method = this%method
     try_methods = this%try_methods
@@ -382,12 +382,12 @@ contains
     logical, intent(in), optional :: mcmc_opti !< MCMC optimization
     logical, dimension(:), intent(in), optional :: include_parameters !< Include parameters
     integer :: &
-      lb_1, &
-      lb_2, &
-      lb_3, &
-      ub_1, &
-      ub_2, &
-      ub_3
+      lb__1, &
+      lb__2, &
+      lb__3, &
+      ub__1, &
+      ub__2, &
+      ub__3
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -401,23 +401,23 @@ contains
       if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'mcmc_error_params'"
       return
     end if
-    lb_1 = lbound(this%mcmc_error_params, 1)
-    ub_1 = lb_1 + size(mcmc_error_params, 1) - 1
+    lb__1 = lbound(this%mcmc_error_params, 1)
+    ub__1 = lb__1 + size(mcmc_error_params, 1) - 1
     if (size(mcmc_error_params, 2) > size(this%mcmc_error_params, 2)) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'mcmc_error_params'"
       return
     end if
-    lb_2 = lbound(this%mcmc_error_params, 2)
-    ub_2 = lb_2 + size(mcmc_error_params, 2) - 1
+    lb__2 = lbound(this%mcmc_error_params, 2)
+    ub__2 = lb__2 + size(mcmc_error_params, 2) - 1
     if (size(mcmc_error_params, 3) > size(this%mcmc_error_params, 3)) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 3 exceeds bounds for 'mcmc_error_params'"
       return
     end if
-    lb_3 = lbound(this%mcmc_error_params, 3)
-    ub_3 = lb_3 + size(mcmc_error_params, 3) - 1
-    this%mcmc_error_params(lb_1:ub_1, lb_2:ub_2, lb_3:ub_3) = mcmc_error_params
+    lb__3 = lbound(this%mcmc_error_params, 3)
+    ub__3 = lb__3 + size(mcmc_error_params, 3) - 1
+    this%mcmc_error_params(lb__1:ub__1, lb__2:ub__2, lb__3:ub__3) = mcmc_error_params
     ! override with provided values
     if (present(name)) this%name = name
     if (present(try_methods)) then
@@ -426,9 +426,9 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'try_methods'"
         return
       end if
-      lb_1 = lbound(this%try_methods, 1)
-      ub_1 = lb_1 + size(try_methods, 1) - 1
-      this%try_methods(lb_1:ub_1) = try_methods
+      lb__1 = lbound(this%try_methods, 1)
+      ub__1 = lb__1 + size(try_methods, 1) - 1
+      this%try_methods(lb__1:ub__1) = try_methods
     end if
     if (present(complex_sizes)) then
       if (size(complex_sizes, 1) > size(this%complex_sizes, 1)) then
@@ -436,9 +436,9 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'complex_sizes'"
         return
       end if
-      lb_1 = lbound(this%complex_sizes, 1)
-      ub_1 = lb_1 + size(complex_sizes, 1) - 1
-      this%complex_sizes(lb_1:ub_1) = complex_sizes
+      lb__1 = lbound(this%complex_sizes, 1)
+      ub__1 = lb__1 + size(complex_sizes, 1) - 1
+      this%complex_sizes(lb__1:ub__1) = complex_sizes
     end if
     if (present(seed)) this%seed = seed
     if (present(dds_r)) this%dds_r = dds_r
@@ -449,9 +449,9 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'include_parameters'"
         return
       end if
-      lb_1 = lbound(this%include_parameters, 1)
-      ub_1 = lb_1 + size(include_parameters, 1) - 1
-      this%include_parameters(lb_1:ub_1) = include_parameters
+      lb__1 = lbound(this%include_parameters, 1)
+      ub__1 = lb__1 + size(include_parameters, 1) - 1
+      this%include_parameters(lb__1:ub__1) = include_parameters
     end if
 
     ! mark as configured
@@ -576,12 +576,12 @@ contains
     integer :: idx
     integer :: dim
     integer :: &
-      lb_1, &
-      lb_2, &
-      lb_3, &
-      ub_1, &
-      ub_2, &
-      ub_3
+      lb__1, &
+      lb__2, &
+      lb__3, &
+      ub__1, &
+      ub__2, &
+      ub__3
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -616,11 +616,11 @@ contains
         end if
       end do
       if (minval(filled) > 0) then
-        lb_2 = lbound(this%mcmc_error_params, 2)
-        ub_2 = lb_2 + filled(2) - 1
-        lb_3 = lbound(this%mcmc_error_params, 3)
-        ub_3 = lb_3 + filled(3) - 1
-        if (any(ieee_is_nan(this%mcmc_error_params(:, lb_2:ub_2, lb_3:ub_3)))) then
+        lb__2 = lbound(this%mcmc_error_params, 2)
+        ub__2 = lb__2 + filled(2) - 1
+        lb__3 = lbound(this%mcmc_error_params, 3)
+        ub__3 = lb__3 + filled(3) - 1
+        if (any(ieee_is_nan(this%mcmc_error_params(:, lb__2:ub__2, lb__3:ub__3)))) then
           status = NML_ERR_PARTLY_SET
           if (present(errmsg)) errmsg = "array partly set: mcmc_error_params"
           return
@@ -716,7 +716,7 @@ contains
     ! enum constraints
     istat = this%is_set("method", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. method_in_enum(this%method)) then
+      if (.not. method__in_enum(this%method)) then
         status = NML_ERR_ENUM
         if (present(errmsg)) errmsg = "enum constraint failed: method"
         return
@@ -725,12 +725,12 @@ contains
       status = istat
       return
     end if
-    if (.not. all(try_methods_in_enum(this%try_methods, allow_missing=.true.))) then
+    if (.not. all(try_methods__in_enum(this%try_methods, allow_missing=.true.))) then
       status = NML_ERR_ENUM
       if (present(errmsg)) errmsg = "enum constraint failed: try_methods"
       return
     end if
-    if (.not. all(complex_sizes_in_enum(this%complex_sizes, allow_missing=.true.))) then
+    if (.not. all(complex_sizes__in_enum(this%complex_sizes, allow_missing=.true.))) then
       status = NML_ERR_ENUM
       if (present(errmsg)) errmsg = "enum constraint failed: complex_sizes"
       return
@@ -738,7 +738,7 @@ contains
     ! bounds constraints
     istat = this%is_set("niterations", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. niterations_in_bounds(this%niterations)) then
+      if (.not. niterations__in_bounds(this%niterations)) then
         status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: niterations"
         return
@@ -749,7 +749,7 @@ contains
     end if
     istat = this%is_set("tolerance", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. tolerance_in_bounds(this%tolerance)) then
+      if (.not. tolerance__in_bounds(this%tolerance)) then
         status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: tolerance"
         return
@@ -760,7 +760,7 @@ contains
     end if
     istat = this%is_set("dds_r", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. dds_r_in_bounds(this%dds_r)) then
+      if (.not. dds_r__in_bounds(this%dds_r)) then
         status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: dds_r"
         return
@@ -770,7 +770,7 @@ contains
       return
     end if
     if (allocated(this%mcmc_error_params)) then
-    if (.not. all(mcmc_error_params_in_bounds(this%mcmc_error_params, allow_missing=.true.))) then
+    if (.not. all(mcmc_error_params__in_bounds(this%mcmc_error_params, allow_missing=.true.))) then
       status = NML_ERR_BOUNDS
       if (present(errmsg)) errmsg = "bounds constraint failed: mcmc_error_params"
       return

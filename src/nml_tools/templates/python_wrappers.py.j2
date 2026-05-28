@@ -491,10 +491,10 @@ class {{ cls.class_name }}:
             elif idx_array.ndim != 1:
                 raise ValueError("idx must be a scalar or rank-1 array")
             kwargs["idx"] = np.asfortranarray(idx_array)
-            kwargs["has_idx"] = True
+            kwargs["has__idx"] = True
         else:
             kwargs["idx"] = np.asfortranarray(np.zeros((1,), dtype=int))
-            kwargs["has_idx"] = False
+            kwargs["has__idx"] = False
         result = self._f2py.{{ cls.namelist_name }}_is_set_wrapper(
             self.handle,
             name.replace(".", "%"),

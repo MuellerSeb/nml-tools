@@ -11,10 +11,10 @@ module application_types
   public :: station_t
 
   !> \brief Application-owned station storage.
-  !> \details The label is longer than the eight-character schema contract.
+  !> \details The label length matches the eight-character schema contract.
   type :: station_t
     integer(i4) :: code
-    character(len=24) :: label
+    character(len=8) :: label
   end type station_t
 
 end module application_types

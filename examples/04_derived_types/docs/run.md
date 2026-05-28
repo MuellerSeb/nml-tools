@@ -27,7 +27,7 @@ Summary:
 Components:
 - `period%start_year`: `integer(i4)`; Minimum: `>= 1800`; Maximum: `<= 2200`
 - `period%end_year`: `integer(i4)`
-- `period%label`: `character(len=period_label_len)`; default `"period"`
+- `period%label`: `character(len=period_label_len)`; default `"main"`
 
 ### periods
 
@@ -46,7 +46,7 @@ Components:
 
 Selected station `station`
 
-Application-owned station descriptor with longer label storage.
+Application-owned station descriptor with schema-matched label storage.
 
 Summary:
 - Type: `type(station_t)`
@@ -73,7 +73,7 @@ Start and end years for a configured time window.
 
 Selected station
 
-Application-owned station descriptor with longer label storage.
+Application-owned station descriptor with schema-matched label storage.
 
 - Ownership: imported from `application_types`
 - `code`: `integer(i4)`
@@ -85,7 +85,7 @@ Application-owned station descriptor with longer label storage.
 &run
   period%start_year = 0
   period%end_year = 0
-  period%label = "period"
+  period%label = "main"
   periods(:)%start_year = 0
   periods(:)%end_year = 0
   periods(:)%label = "period"

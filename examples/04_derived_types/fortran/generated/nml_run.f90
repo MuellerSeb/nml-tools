@@ -25,7 +25,7 @@ module nml_run
     NML_ERR_INVALID_HANDLE, &
     period_t, &
     period_label_len, &
-    n_periods_default=>n_periods, &
+    n_periods__default=>n_periods, &
     station_label_len, &
     NML_ERR_PARTLY_SET
   ! kind specifiers listed in the nml-tools configuration file
@@ -37,18 +37,18 @@ module nml_run
   implicit none
 
   ! bounds values
-  integer(i4), parameter, public :: period_start_year_min = 1800_i4
-  integer(i4), parameter, public :: period_start_year_max = 2200_i4
-  integer(i4), parameter, public :: periods_start_year_min = 1800_i4
-  integer(i4), parameter, public :: periods_start_year_max = 2200_i4
-  integer(i4), parameter, public :: station_code_min = 1_i4
+  integer(i4), parameter, public :: period__start_year__min = 1800_i4
+  integer(i4), parameter, public :: period__start_year__max = 2200_i4
+  integer(i4), parameter, public :: periods__start_year__min = 1800_i4
+  integer(i4), parameter, public :: periods__start_year__max = 2200_i4
+  integer(i4), parameter, public :: station__code__min = 1_i4
 
   !> \class nml_run_t
   !> \brief Derived-type configuration
   !> \details Demonstrates referenced reusable and inline imported derived types.
   type, public :: nml_run_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: dim_n_periods = n_periods_default !< runtime dimension for n_periods
+    integer :: dim__n_periods = n_periods__default !< runtime dimension for n_periods
     type(period_t) :: period !< Main simulation period
     type(period_t), allocatable, dimension(:) :: periods !< Comparison periods
     type(station_t) :: station !< Selected station
@@ -65,7 +65,7 @@ module nml_run
 contains
 
   !> \brief Check whether a value is within bounds
-  elemental logical function period_start_year_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function period__start_year__in_bounds(val, allow_missing) result(in_bounds)
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -79,12 +79,12 @@ contains
     end if
 
     in_bounds = .true.
-    if (val < period_start_year_min) in_bounds = .false.
-    if (val > period_start_year_max) in_bounds = .false.
-  end function period_start_year_in_bounds
+    if (val < period__start_year__min) in_bounds = .false.
+    if (val > period__start_year__max) in_bounds = .false.
+  end function period__start_year__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function periods_start_year_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function periods__start_year__in_bounds(val, allow_missing) result(in_bounds)
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -98,12 +98,12 @@ contains
     end if
 
     in_bounds = .true.
-    if (val < periods_start_year_min) in_bounds = .false.
-    if (val > periods_start_year_max) in_bounds = .false.
-  end function periods_start_year_in_bounds
+    if (val < periods__start_year__min) in_bounds = .false.
+    if (val > periods__start_year__max) in_bounds = .false.
+  end function periods__start_year__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function station_code_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function station__code__in_bounds(val, allow_missing) result(in_bounds)
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -117,8 +117,8 @@ contains
     end if
 
     in_bounds = .true.
-    if (val < station_code_min) in_bounds = .false.
-  end function station_code_in_bounds
+    if (val < station__code__min) in_bounds = .false.
+  end function station__code__in_bounds
 
   !> \brief Resolve an opaque C pointer handle to a nml_run_t pointer
   subroutine nml_run_resolve_handle(handle, this, status, errmsg)
@@ -149,22 +149,16 @@ contains
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
 
-    ! allocate runtime-sized fields
-    if (allocated(this%periods)) deallocate(this%periods)
-    allocate(this%periods(this%dim_n_periods))
-
-    ! sentinel values for required/optional parameters
-    this%period%start_year = -huge(this%period%start_year) ! sentinel for derived component start_year
-    this%period%end_year = -huge(this%period%end_year) ! sentinel for derived component end_year
-    this%period%label = "period"
-    this%periods%start_year = -huge(this%periods%start_year) ! sentinel for derived component start_year
-    this%periods%end_year = -huge(this%periods%end_year) ! sentinel for derived component end_year
-    this%periods%label = "period"
-    this%station%code = -huge(this%station%code) ! sentinel for derived component code
-    this%station%label = "unknown"
+    ! derived values
+    status = this%init_type( &
+      period=this%period, &
+      periods=this%periods, &
+      station=this%station, &
+      errmsg=errmsg)
+    if (status /= NML_OK) return
   end function nml_run_init
 
-  !> \brief Initialize one concrete derived value with its field-specific defaults
+  !> \brief Initialize derived values with their field-specific defaults
   integer function nml_run_init_type(this, &
     period, &
     periods, &
@@ -175,33 +169,28 @@ contains
     type(period_t), dimension(:), allocatable, intent(inout), optional :: periods !< Comparison periods
     type(station_t), intent(inout), optional :: station !< Selected station
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: selected
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    selected = 0
-    if (present(period)) selected = selected + 1
-    if (present(periods)) selected = selected + 1
-    if (present(station)) selected = selected + 1
-    if (selected /= 1) then
-      status = NML_ERR_INVALID_NAME
-      if (present(errmsg)) errmsg = "init_type requires exactly one derived field argument"
-      return
-    end if
     if (present(period)) then
       period%start_year = -huge(period%start_year) ! sentinel for derived component start_year
       period%end_year = -huge(period%end_year) ! sentinel for derived component end_year
-      period%label = "period"
+      period%label = "main"
     end if
     if (present(periods)) then
       if (allocated(periods)) deallocate(periods)
-      allocate(periods(this%dim_n_periods))
+      allocate(periods(this%dim__n_periods))
       periods%start_year = -huge(periods%start_year) ! sentinel for derived component start_year
       periods%end_year = -huge(periods%end_year) ! sentinel for derived component end_year
       periods%label = "period"
     end if
     if (present(station)) then
       station%code = -huge(station%code) ! sentinel for derived component code
+      if (len(station%label) /= station_label_len) then
+        status = NML_ERR_BOUNDS
+        if (present(errmsg)) errmsg = "imported string storage length mismatch: station%label"
+        return
+      end if
       station%label = "unknown"
     end if
   end function nml_run_init_type
@@ -212,22 +201,22 @@ contains
     errmsg) result(status)
     class(nml_run_t), intent(inout) :: this !< namelist instance
     integer, intent(in), optional :: n_periods !< runtime dimension override for n_periods
-    integer :: candidate_n_periods
+    integer :: candidate__n_periods
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(n_periods)) then
-      candidate_n_periods = n_periods
+      candidate__n_periods = n_periods
     else
-      candidate_n_periods = n_periods_default
+      candidate__n_periods = n_periods__default
     end if
-    if (candidate_n_periods <= 0) then
+    if (candidate__n_periods <= 0) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'n_periods' must be positive"
       return
     end if
-    this%dim_n_periods = candidate_n_periods
+    this%dim__n_periods = candidate__n_periods
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%periods)) deallocate(this%periods)
@@ -259,7 +248,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(periods)) deallocate(periods)
-    allocate(periods(this%dim_n_periods))
+    allocate(periods(this%dim__n_periods))
     period = this%period
     periods = this%periods
     station = this%station
@@ -291,13 +280,6 @@ contains
     this%period = period
     this%periods = periods
     this%station = station
-    ! validate and canonicalize imported character components
-    if (len(this%station%label) < station_label_len) then
-      status = NML_ERR_BOUNDS
-      if (present(errmsg)) errmsg = "imported string storage too short: station%label"
-      return
-    end if
-    if (len(this%station%label) > station_label_len) this%station%label(station_label_len + 1:) = ""
 
     ! mark as configured
     this%is_configured = .true.
@@ -317,8 +299,8 @@ contains
     type(period_t), dimension(:), intent(in) :: periods !< Comparison periods
     type(station_t), intent(in) :: station !< Selected station
     integer :: &
-      lb_1, &
-      ub_1
+      lb__1, &
+      ub__1
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -330,17 +312,10 @@ contains
       if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'periods'"
       return
     end if
-    lb_1 = lbound(this%periods, 1)
-    ub_1 = lb_1 + size(periods, 1) - 1
-    this%periods(lb_1:ub_1) = periods
+    lb__1 = lbound(this%periods, 1)
+    ub__1 = lb__1 + size(periods, 1) - 1
+    this%periods(lb__1:ub__1) = periods
     this%station = station
-    ! validate and canonicalize imported character components
-    if (len(this%station%label) < station_label_len) then
-      status = NML_ERR_BOUNDS
-      if (present(errmsg)) errmsg = "imported string storage too short: station%label"
-      return
-    end if
-    if (len(this%station%label) > station_label_len) this%station%label(station_label_len + 1:) = ""
 
     ! mark as configured
     this%is_configured = .true.
@@ -551,7 +526,7 @@ contains
     ! bounds constraints
     istat = this%is_set("period%start_year", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. period_start_year_in_bounds(this%period%start_year)) then
+      if (.not. period__start_year__in_bounds(this%period%start_year)) then
         status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: period%start_year"
         return
@@ -561,7 +536,7 @@ contains
       return
     end if
     if (allocated(this%periods)) then
-    if (.not. all(periods_start_year_in_bounds(this%periods%start_year, allow_missing=.true.))) then
+    if (.not. all(periods__start_year__in_bounds(this%periods%start_year, allow_missing=.true.))) then
       status = NML_ERR_BOUNDS
       if (present(errmsg)) errmsg = "bounds constraint failed: periods%start_year"
       return
@@ -569,7 +544,7 @@ contains
     end if
     istat = this%is_set("station%code", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. station_code_in_bounds(this%station%code)) then
+      if (.not. station__code__in_bounds(this%station%code)) then
         status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: station%code"
         return

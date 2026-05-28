@@ -36,7 +36,7 @@ doc = "Storage length of labels on locally generated periods."
 
 [tool.nml-tools.constants.station_label_len]
 value = 8
-doc = "Mapped station label length; application storage may be longer."
+doc = "Mapped station label length; imported application storage must match."
 
 [tool.nml-tools.dimensions.n_periods]
 value = 2

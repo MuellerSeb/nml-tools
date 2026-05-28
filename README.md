@@ -144,6 +144,9 @@ $defs:
 properties:
   period:
     $ref: "#/$defs/period"
+    properties:
+      label:
+        default: main
   periods:
     type: array
     x-fortran-shape: n_periods
@@ -151,19 +154,25 @@ properties:
       $ref: "#/$defs/period"
 ```
 
+The `properties` block on a derived-type `$ref` use site may refine existing
+scalar members, including `default`, `title`, `description`, bounds, and enums.
+It may not add new members, because the referenced type definition owns the
+Fortran layout. In the example above, `period%label` defaults to `main`, while
+`periods%label` keeps the reusable definition default `default`.
+
 Only intrinsic scalar members are supported in the first implementation.
 Object defaults, derived array defaults, derived flexible-tail arrays, nested
 derived members, and array members are rejected. Optional derived fields must
 not declare required inner members. For imported fields with string members,
 including arrays of imported values, generated code verifies that application
-storage is at least `x-fortran-len` characters long and blanks longer trailing
-storage after reads and setters.
+storage length exactly matches `x-fortran-len`.
 
 Generated native APIs accept typed values and add `init_type`, for example:
 
 ```fortran
 type(period_t) :: period
-status = config%init_type(period=period)
+type(period_t), allocatable :: periods(:)
+status = config%init_type(period=period, periods=periods)
 period%start_year = 2001
 status = config%set(period=period)
 ```
@@ -174,6 +183,13 @@ Namelist and template entries use normal component notation:
 period%start_year = 2001
 periods(2)%start_year = 2001
 ```
+
+Fortran also accepts buffer-style derived values, for example
+`period = 2001, "main"`. For helper-owned generated types, that positional
+order follows the reusable or inline object definition's schema `properties`
+order. For imported application-owned types, the schema order must match the
+actual Fortran type declaration order if buffer-style input is used. Component
+notation is preferred because it is explicit and robust to layout changes.
 
 ### x-fortran-flex-tail-dims
 
@@ -287,8 +303,8 @@ Enums are supported for strings and integers only.
 For arrays, enums are defined on `items` (not on the array itself).
 
 - Keywords: `enum`
-- The generated Fortran module exposes public `*_enum_values` arrays and
-  elemental `*_in_enum` helpers.
+- The generated Fortran module exposes public `*__enum_values` arrays and
+  elemental `*__in_enum` helpers.
 - String enums compare against `trim(value)`; enum literals are stored with the
   field length.
 
@@ -463,12 +479,15 @@ cfg.set(periods=[{"start_year": 1980}, {"start_year": 2001}])
 ```
 
 Only the internal f2py ABI is flattened: `%` paths are encoded with `__`, for
-example `period__start_year` and `has__period__start_year`. Python
-`is_set("period.start_year")` is translated to the native
-`is_set("period%start_year")` lookup. Nested sequences of mappings are accepted
-for multi-rank derived arrays. Flattened generated names are made unique
-case-insensitively and deterministically shortened when needed to remain valid
-Fortran identifiers.
+example `period__start_year` and `has__period__start_year`. Generated Fortran
+support identifiers also use `__` as an internal separator, for example
+`seed__default`, `method__enum_values`, and `dim__n_periods`. Avoid `__` in
+schema property, component, and runtime dimension names to keep generated names
+readable and minimize collision fallback. Python `is_set("period.start_year")`
+is translated to the native `is_set("period%start_year")` lookup. Nested
+sequences of mappings are accepted for multi-rank derived arrays. Flattened
+generated f2py names are made unique case-insensitively and deterministically
+shortened when needed to remain valid Fortran identifiers.
 
 The f2py wrappers use opaque integer handles for Fortran-owned namelist
 instances. nml-tools assumes that the owning Fortran library creates those
