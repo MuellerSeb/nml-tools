@@ -20,7 +20,7 @@ properties:
       $ref: "definitions.yml#/$defs/period"
   station:
     title: Selected station
-    description: Application-owned station descriptor with longer label storage.
+    description: Application-owned station descriptor with schema-matched label storage.
     type: object
     x-fortran-type: station_t
     x-fortran-module: application_types

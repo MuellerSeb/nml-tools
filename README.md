@@ -165,8 +165,7 @@ Object defaults, derived array defaults, derived flexible-tail arrays, nested
 derived members, and array members are rejected. Optional derived fields must
 not declare required inner members. For imported fields with string members,
 including arrays of imported values, generated code verifies that application
-storage is at least `x-fortran-len` characters long and blanks longer trailing
-storage after reads and setters.
+storage length exactly matches `x-fortran-len`.
 
 Generated native APIs accept typed values and add `init_type`, for example:
 

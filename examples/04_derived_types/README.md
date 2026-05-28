@@ -9,9 +9,9 @@ module.
 The generated namelist has a required scalar period, a runtime-sized period array,
 and a required imported station. The scalar `period` refines the referenced
 `period_t%label` default to `main`, while the `periods` array keeps the reusable
-definition default `period`. The imported `station_t%label` storage is longer
-than its schema contract; generated code checks that storage and blanks content
-beyond the mapped eight-character value after assignments.
+definition default `period`. The imported `station_t%label` storage length
+matches its schema contract; generated code checks that equality during
+initialization.
 
 ## Regenerate
 

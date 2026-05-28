@@ -46,7 +46,7 @@ Components:
 
 Selected station `station`
 
-Application-owned station descriptor with longer label storage.
+Application-owned station descriptor with schema-matched label storage.
 
 Summary:
 - Type: `type(station_t)`
@@ -73,7 +73,7 @@ Start and end years for a configured time window.
 
 Selected station
 
-Application-owned station descriptor with longer label storage.
+Application-owned station descriptor with schema-matched label storage.
 
 - Ownership: imported from `application_types`
 - `code`: `integer(i4)`

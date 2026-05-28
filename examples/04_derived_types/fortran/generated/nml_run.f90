@@ -186,9 +186,9 @@ contains
     end if
     if (present(station)) then
       station%code = -huge(station%code) ! sentinel for derived component code
-      if (len(station%label) < station_label_len) then
+      if (len(station%label) /= station_label_len) then
         status = NML_ERR_BOUNDS
-        if (present(errmsg)) errmsg = "imported string storage too short: station%label"
+        if (present(errmsg)) errmsg = "imported string storage length mismatch: station%label"
         return
       end if
       station%label = "unknown"
@@ -280,8 +280,6 @@ contains
     this%period = period
     this%periods = periods
     this%station = station
-    ! canonicalize imported character storage to schema lengths
-    if (len(this%station%label) > station_label_len) this%station%label(station_label_len + 1:) = ""
 
     ! mark as configured
     this%is_configured = .true.
@@ -318,8 +316,6 @@ contains
     ub__1 = lb__1 + size(periods, 1) - 1
     this%periods(lb__1:ub__1) = periods
     this%station = station
-    ! canonicalize imported character storage to schema lengths
-    if (len(this%station%label) > station_label_len) this%station%label(station_label_len + 1:) = ""
 
     ! mark as configured
     this%is_configured = .true.
