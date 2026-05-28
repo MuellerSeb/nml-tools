@@ -1239,7 +1239,9 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
     assert "if (len(location%name) < 8) then" in generated
     assert "if (len(locations%name) < 8) then" in generated
     assert "validate and canonicalize imported character components" not in generated
-    assert '+ 1:) = ""' not in generated
+    assert "canonicalize imported character storage to schema lengths" in generated
+    assert 'this%location%name(8 + 1:) = ""' in generated
+    assert 'this%locations%name(:)(8 + 1:) = ""' in generated
 
 
 def test_generate_fortran_emits_inline_single_use_local_type() -> None:

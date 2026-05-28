@@ -280,6 +280,8 @@ contains
     this%period = period
     this%periods = periods
     this%station = station
+    ! canonicalize imported character storage to schema lengths
+    if (len(this%station%label) > station_label_len) this%station%label(station_label_len + 1:) = ""
 
     ! mark as configured
     this%is_configured = .true.
@@ -316,6 +318,8 @@ contains
     ub__1 = lb__1 + size(periods, 1) - 1
     this%periods(lb__1:ub__1) = periods
     this%station = station
+    ! canonicalize imported character storage to schema lengths
+    if (len(this%station%label) > station_label_len) this%station%label(station_label_len + 1:) = ""
 
     ! mark as configured
     this%is_configured = .true.

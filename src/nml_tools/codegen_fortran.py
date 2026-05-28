@@ -390,6 +390,7 @@ def _build_context(
     derived_type_imports: list[dict[str, str]] = []
     derived_init_type_fields: list[dict[str, Any]] = []
     derived_presence_blocks: list[str] = []
+    imported_string_canonicalizations: list[str] = []
     static_constants = normalize_constant_values(constants)
     runtime_dimension_values = normalize_runtime_dimensions(dimensions)
     reject_constant_dimension_overlap(static_constants, runtime_dimension_values)
@@ -645,6 +646,15 @@ def _build_context(
                                 "  return",
                                 "end if",
                             ]
+                        )
+                        imported_string_canonicalizations.append(
+                            _render_imported_string_canonicalization(
+                                f"this%{name}%{child_name}",
+                                rank=len(type_info.dimensions)
+                                if type_info.category == "array"
+                                else 0,
+                                expected_len=expected_len,
+                            )
                         )
                     has_default = "default" in child
                     if has_default:
@@ -1602,6 +1612,7 @@ def _build_context(
         "required_array_validations": required_array_validations,
         "flex_arrays": flex_arrays,
         "assignments": [f"this%{field.name} = {field.name}" for field in fields],
+        "imported_string_canonicalizations": imported_string_canonicalizations,
         "argument_list": [field.name for field in required_fields_specs + optional_fields_specs],
         "required_argument_declarations": [
             field.argument_declaration for field in required_fields_specs
@@ -2485,6 +2496,23 @@ def _render_partial_set_block(
     target_ref = _slice_ref_bounds(name, rank, dims_all, lb_vars, ub_vars)
     lines.append(f"{target_ref} = {name}")
     return "\n".join(lines)
+
+
+def _render_imported_string_canonicalization(
+    target_ref: str,
+    *,
+    rank: int,
+    expected_len: str,
+) -> str:
+    if rank > 0:
+        section = ", ".join(":" for _ in range(rank))
+        substring_ref = f"{target_ref}({section})({expected_len} + 1:)"
+    else:
+        substring_ref = f"{target_ref}({expected_len} + 1:)"
+    return (
+        f"if (len({target_ref}) > {expected_len}) "
+        f'{substring_ref} = ""'
+    )
 
 
 def _sort_bound_vars(values: set[str]) -> list[str]:
