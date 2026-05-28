@@ -1,6 +1,6 @@
 program main
   use iso_fortran_env, only: error_unit, int32, real64
-  use nml_helper, only: buf, max_iter, NML_OK
+  use nml_helper, only: buf, NML_OK
   use nml_optimization, only: nml_optimization_t
 
   implicit none
