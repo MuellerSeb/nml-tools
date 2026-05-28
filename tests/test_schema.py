@@ -718,27 +718,30 @@ def test_resolve_schema_validates_identifiers_in_combinator_containers(container
 def test_referenced_derived_type_rejects_invalid_property_forms(
     property_schema: dict[str, object], match: str
 ) -> None:
+    definitions: dict[str, dict[str, object]] = {
+        "missing_type": {
+            "type": "object",
+            "properties": {"year": {"type": "integer"}},
+        },
+        "period": {
+            "type": "object",
+            "x-fortran-type": "period_t",
+            "properties": {"year": {"type": "integer"}},
+        },
+    }
+    if property_schema.get("$ref") == "#/$defs/invalid_component":
+        definitions["invalid_component"] = {
+            "type": "object",
+            "x-fortran-type": "invalid_t",
+            "properties": {"start-year": {"type": "integer"}},
+        }
+
     with pytest.raises(ValueError, match=match):
         resolve_schema(
             {
                 "x-fortran-namelist": "run",
                 "type": "object",
-                "$defs": {
-                    "missing_type": {
-                        "type": "object",
-                        "properties": {"year": {"type": "integer"}},
-                    },
-                    "period": {
-                        "type": "object",
-                        "x-fortran-type": "period_t",
-                        "properties": {"year": {"type": "integer"}},
-                    },
-                    "invalid_component": {
-                        "type": "object",
-                        "x-fortran-type": "invalid_t",
-                        "properties": {"start-year": {"type": "integer"}},
-                    },
-                },
+                "$defs": definitions,
                 "properties": {"period": property_schema},
             }
         )
