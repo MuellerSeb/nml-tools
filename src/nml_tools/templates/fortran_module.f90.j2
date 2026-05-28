@@ -341,12 +341,6 @@ contains
 {% for stmt in assignments %}
 {{ stmt | indent(4, True) }}
 {% endfor %}
-{% if derived_post_assignment_checks %}
-    ! validate and canonicalize imported character components
-{% for stmt in derived_post_assignment_checks %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-{% endif %}
 
     ! mark as configured
     this%is_configured = .true.
@@ -385,12 +379,6 @@ contains
 {% if set_optional_present %}
     ! override with provided values
 {% for stmt in set_optional_present %}
-{{ stmt | indent(4, True) }}
-{% endfor %}
-{% endif %}
-{% if derived_post_assignment_checks %}
-    ! validate and canonicalize imported character components
-{% for stmt in derived_post_assignment_checks %}
 {{ stmt | indent(4, True) }}
 {% endfor %}
 {% endif %}

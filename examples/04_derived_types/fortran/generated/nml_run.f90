@@ -186,6 +186,11 @@ contains
     end if
     if (present(station)) then
       station%code = -huge(station%code) ! sentinel for derived component code
+      if (len(station%label) < station_label_len) then
+        status = NML_ERR_BOUNDS
+        if (present(errmsg)) errmsg = "imported string storage too short: station%label"
+        return
+      end if
       station%label = "unknown"
     end if
   end function nml_run_init_type
@@ -275,13 +280,6 @@ contains
     this%period = period
     this%periods = periods
     this%station = station
-    ! validate and canonicalize imported character components
-    if (len(this%station%label) < station_label_len) then
-      status = NML_ERR_BOUNDS
-      if (present(errmsg)) errmsg = "imported string storage too short: station%label"
-      return
-    end if
-    if (len(this%station%label) > station_label_len) this%station%label(station_label_len + 1:) = ""
 
     ! mark as configured
     this%is_configured = .true.
@@ -318,13 +316,6 @@ contains
     ub_1 = lb_1 + size(periods, 1) - 1
     this%periods(lb_1:ub_1) = periods
     this%station = station
-    ! validate and canonicalize imported character components
-    if (len(this%station%label) < station_label_len) then
-      status = NML_ERR_BOUNDS
-      if (present(errmsg)) errmsg = "imported string storage too short: station%label"
-      return
-    end if
-    if (len(this%station%label) > station_label_len) this%station%label(station_label_len + 1:) = ""
 
     ! mark as configured
     this%is_configured = .true.

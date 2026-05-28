@@ -386,7 +386,6 @@ def _build_context(
     derived_type_imports: list[dict[str, str]] = []
     derived_init_type_fields: list[dict[str, Any]] = []
     derived_presence_blocks: list[str] = []
-    derived_post_assignment_checks: list[str] = []
     static_constants = normalize_constant_values(constants)
     runtime_dimension_values = normalize_runtime_dimensions(dimensions)
     reject_constant_dimension_overlap(static_constants, runtime_dimension_values)
@@ -622,35 +621,27 @@ def _build_context(
                         kind_ids.append(child_info.kind)
                     if child_info.length_expr and not _is_int_literal(child_info.length_expr):
                         _add_helper_import(child_info.length_expr)
+                    child_target = f"this%{name}%{child_name}"
+                    arg_target = f"{name}%{child_name}"
                     if (
                         module is not None
                         and child_info.category == "string"
                         and child_info.length_expr is not None
                     ):
                         expected_len = child_info.length_expr
-                        parent_storage_ref = f"this%{name}"
-                        if type_info.category == "array":
-                            parent_storage_ref = _array_section_ref(
-                                parent_storage_ref, len(type_info.dimensions)
-                            )
-                        child_storage_ref = f"{parent_storage_ref}%{child_name}"
                         storage_message = (
                             f"imported string storage too short: {name}%{child_name}"
                         )
-                        derived_post_assignment_checks.extend(
+                        init_lines.extend(
                             [
-                                f"if (len(this%{name}%{child_name}) < {expected_len}) then",
+                                f"if (len({arg_target}) < {expected_len}) then",
                                 "  status = NML_ERR_BOUNDS",
                                 "  if (present(errmsg)) "
                                 f'errmsg = "{storage_message}"',
                                 "  return",
                                 "end if",
-                                f"if (len(this%{name}%{child_name}) > {expected_len}) "
-                                f"{child_storage_ref}({expected_len} + 1:) = \"\"",
                             ]
                         )
-                    child_target = f"this%{name}%{child_name}"
-                    arg_target = f"{name}%{child_name}"
                     has_default = "default" in child
                     if has_default:
                         literal = _format_default(child["default"], child_info, child, constants)
@@ -1622,7 +1613,6 @@ def _build_context(
         "derived_type_imports": derived_type_imports,
         "derived_init_type_fields": derived_init_type_fields,
         "derived_presence_blocks": derived_presence_blocks,
-        "derived_post_assignment_checks": derived_post_assignment_checks,
         "kind_module": resolved_kind_module,
         "kind_imports": _resolve_kind_imports(
             kind_ids,
