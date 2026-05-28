@@ -140,31 +140,40 @@ def test_load_constants_normalizes_names_case_insensitively() -> None:
 def test_load_dimensions_validates_values_and_duplicate_names() -> None:
     constants = {"BUF": 128}
     dimensions, specs = cli_module._load_dimensions(
-        {"dimensions": {"n_cells": {"value": 3, "doc": "Number of cells."}}},
+        {"dimensions": {"n_cells": {"default": 3, "doc": "Number of cells."}}},
         constants,
     )
 
     assert dimensions == {"n_cells": 3}
-    assert specs[0].name == "n_cells"
+    assert specs[0].name == "n_cells__default"
     assert specs[0].value == "3"
     assert specs[0].doc == "Number of cells."
 
     with pytest.raises(click.ClickException, match="duplicates a constant"):
-        cli_module._load_dimensions({"dimensions": {"BUF": {"value": 3}}}, constants)
+        cli_module._load_dimensions({"dimensions": {"BUF": {"default": 3}}}, constants)
+
+    with pytest.raises(click.ClickException, match="default name duplicates a constant"):
+        cli_module._load_dimensions(
+            {"dimensions": {"n_cells": {"default": 3}}},
+            {"n_cells__default": 3},
+        )
 
     with pytest.raises(click.ClickException, match="duplicates another dimension"):
         cli_module._load_dimensions(
             {
                 "dimensions": {
-                    "n_cells": {"value": 3},
-                    "N_CELLS": {"value": 4},
+                    "n_cells": {"default": 3},
+                    "N_CELLS": {"default": 4},
                 }
             },
             {},
         )
 
     with pytest.raises(click.ClickException, match="must be positive"):
-        cli_module._load_dimensions({"dimensions": {"n_cells": {"value": 0}}}, {})
+        cli_module._load_dimensions({"dimensions": {"n_cells": {"default": 0}}}, {})
+
+    with pytest.raises(click.ClickException, match="must use 'default', not 'value'"):
+        cli_module._load_dimensions({"dimensions": {"n_cells": {"value": 3}}}, {})
 
 
 def test_named_integer_type_validates_dimension_values() -> None:
@@ -377,7 +386,7 @@ def test_validate_cli_dimensions_override_config_dimensions(tmp_path: Path) -> N
                 minimum-version = "0"
 
                 [tool.nml-tools.dimensions.n_values]
-                value = 2
+                default = 2
 
                 [[tool.nml-tools.namelists]]
                 schema = "schema.yml"

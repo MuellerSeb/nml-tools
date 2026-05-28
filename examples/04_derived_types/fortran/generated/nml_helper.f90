@@ -43,7 +43,7 @@ module nml_helper
   !> \brief Shared constants for generated namelist modules
   integer, parameter, public :: period_label_len = 12 !< Storage length of labels on locally generated periods.
   integer, parameter, public :: station_label_len = 8 !< Mapped station label length; imported application storage must match.
-  integer, parameter, public :: n_periods = 2 !< Default number of configured periods.
+  integer, parameter, public :: n_periods__default = 2 !< Default number of configured periods.
 
   !> \class period_t
   !> \brief Simulation period

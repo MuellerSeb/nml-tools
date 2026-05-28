@@ -42,7 +42,7 @@ module nml_helper
 
   !> \brief Shared constants for generated namelist modules
   integer, parameter, public :: buf = 256 !< Buffer length for character strings.
-  integer, parameter, public :: max_iter = 4 !< Maximum number of iterations.
+  integer, parameter, public :: max_iter__default = 4 !< Maximum number of iterations.
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations

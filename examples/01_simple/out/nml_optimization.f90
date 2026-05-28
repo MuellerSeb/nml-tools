@@ -24,7 +24,7 @@ module nml_optimization
     idx_check, &
     to_lower, &
     buf, &
-    max_iter__default=>max_iter, &
+    max_iter__default, &
     NML_ERR_PARTLY_SET
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
@@ -58,7 +58,7 @@ module nml_optimization
   !> \details All relevant configurations for the optimization parameters.
   type, public :: nml_optimization_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: dim__max_iter = max_iter__default !< runtime dimension for max_iter
+    integer :: max_iter = max_iter__default !< runtime dimension for max_iter
     character(len=buf) :: name !< Optimization name
     character(len=buf) :: method !< Optimization method
     character(len=buf), dimension(3) :: try_methods !< Try alternative methods
@@ -213,7 +213,7 @@ contains
 
     ! allocate runtime-sized fields
     if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
-    allocate(this%mcmc_error_params(3, 2, this%dim__max_iter))
+    allocate(this%mcmc_error_params(3, 2, this%max_iter))
 
     ! sentinel values for required/optional parameters
     this%name = achar(0) ! sentinel for optional string
@@ -251,7 +251,7 @@ contains
       if (present(errmsg)) errmsg = "dimension 'max_iter' must be positive"
       return
     end if
-    this%dim__max_iter = candidate__max_iter
+    this%max_iter = candidate__max_iter
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
@@ -299,7 +299,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(mcmc_error_params)) deallocate(mcmc_error_params)
-    allocate(mcmc_error_params(3, 2, this%dim__max_iter))
+    allocate(mcmc_error_params(3, 2, this%max_iter))
     name = this%name
     method = this%method
     try_methods = this%try_methods

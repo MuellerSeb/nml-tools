@@ -25,7 +25,7 @@ module nml_run
     NML_ERR_INVALID_HANDLE, &
     period_t, &
     period_label_len, &
-    n_periods__default=>n_periods, &
+    n_periods__default, &
     station_label_len, &
     NML_ERR_PARTLY_SET
   ! kind specifiers listed in the nml-tools configuration file
@@ -48,7 +48,7 @@ module nml_run
   !> \details Demonstrates referenced reusable and inline imported derived types.
   type, public :: nml_run_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: dim__n_periods = n_periods__default !< runtime dimension for n_periods
+    integer :: n_periods = n_periods__default !< runtime dimension for n_periods
     type(period_t) :: period !< Main simulation period
     type(period_t), allocatable, dimension(:) :: periods !< Comparison periods
     type(station_t) :: station !< Selected station
@@ -179,7 +179,7 @@ contains
     end if
     if (present(periods)) then
       if (allocated(periods)) deallocate(periods)
-      allocate(periods(this%dim__n_periods))
+      allocate(periods(this%n_periods))
       periods%start_year = -huge(periods%start_year) ! sentinel for derived component start_year
       periods%end_year = -huge(periods%end_year) ! sentinel for derived component end_year
       periods%label = "period"
@@ -216,7 +216,7 @@ contains
       if (present(errmsg)) errmsg = "dimension 'n_periods' must be positive"
       return
     end if
-    this%dim__n_periods = candidate__n_periods
+    this%n_periods = candidate__n_periods
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%periods)) deallocate(this%periods)
@@ -248,7 +248,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(periods)) deallocate(periods)
-    allocate(periods(this%dim__n_periods))
+    allocate(periods(this%n_periods))
     period = this%period
     periods = this%periods
     station = this%station

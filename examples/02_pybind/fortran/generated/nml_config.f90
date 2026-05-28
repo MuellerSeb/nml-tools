@@ -28,7 +28,7 @@ module nml_config
     to_lower, &
     NML_ERR_INVALID_HANDLE, &
     str_len, &
-    n_weights__default=>n_weights
+    n_weights__default
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -56,7 +56,7 @@ module nml_config
   !!
   type, public :: nml_config_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: dim__n_weights = n_weights__default !< runtime dimension for n_weights
+    integer :: n_weights = n_weights__default !< runtime dimension for n_weights
     character(len=str_len) :: name !< Config name
     integer(i4) :: iterations !< Iterations
     real(dp) :: tolerance !< Tolerance
@@ -140,7 +140,7 @@ contains
 
     ! allocate runtime-sized fields
     if (allocated(this%weights)) deallocate(this%weights)
-    allocate(this%weights(this%dim__n_weights))
+    allocate(this%weights(this%n_weights))
 
     ! sentinel values for required/optional parameters
     this%iterations = -huge(this%iterations) ! sentinel for required integer
@@ -172,7 +172,7 @@ contains
       if (present(errmsg)) errmsg = "dimension 'n_weights' must be positive"
       return
     end if
-    this%dim__n_weights = candidate__n_weights
+    this%n_weights = candidate__n_weights
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%weights)) deallocate(this%weights)
@@ -208,7 +208,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(weights)) deallocate(weights)
-    allocate(weights(this%dim__n_weights))
+    allocate(weights(this%n_weights))
     name = this%name
     iterations = this%iterations
     tolerance = this%tolerance

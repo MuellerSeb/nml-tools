@@ -39,7 +39,7 @@ value = 8
 doc = "Mapped station label length; imported application storage must match."
 
 [tool.nml-tools.dimensions.n_periods]
-value = 2
+default = 2
 doc = "Default number of configured periods."
 
 [tool.nml-tools.kinds]

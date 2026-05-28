@@ -11,7 +11,7 @@ value = 32
 doc = "Length of labels referenced from shared definitions."
 
 [dimensions.n_stations]
-value = 4
+default = 4
 doc = "Number of station weights in the run configuration."
 
 [kinds]

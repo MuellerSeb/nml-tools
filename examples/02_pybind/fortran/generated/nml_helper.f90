@@ -39,7 +39,7 @@ module nml_helper
 
   !> \brief Shared constants for generated namelist modules
   integer, parameter, public :: str_len = 128 !< String buffer length for the pybind example.
-  integer, parameter, public :: n_weights = 3 !< Default number of weights.
+  integer, parameter, public :: n_weights__default = 3 !< Default number of weights.
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations

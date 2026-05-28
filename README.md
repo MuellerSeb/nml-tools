@@ -396,8 +396,10 @@ doc = "String buffer length."
 
 Named runtime array dimension defaults.
 
-- Each entry is a table with positive integer `value` and optional `doc`.
+- Each entry is a table with positive integer `default` and optional `doc`.
 - Names must be unique across `[constants]` and `[dimensions]`.
+- Names must not collide with namelist property names, because generated
+  Fortran stores the current runtime extent as a field with the dimension name.
 - Entries may be used in `x-fortran-shape`, but not in `x-fortran-len`.
 - Arrays whose shape contains a `[dimensions]` name are generated as
   allocatable runtime-sized arrays.
@@ -410,7 +412,7 @@ Example:
 
 ```toml
 [dimensions.max_iter]
-value = 4
+default = 4
 doc = "Maximum number of iterations."
 ```
 
@@ -481,7 +483,7 @@ cfg.set(periods=[{"start_year": 1980}, {"start_year": 2001}])
 Only the internal f2py ABI is flattened: `%` paths are encoded with `__`, for
 example `period__start_year` and `has__period__start_year`. Generated Fortran
 support identifiers also use `__` as an internal separator, for example
-`seed__default`, `method__enum_values`, and `dim__n_periods`. Avoid `__` in
+`seed__default`, `method__enum_values`, and `n_periods__default`. Avoid `__` in
 schema property, component, and runtime dimension names to keep generated names
 readable and minimize collision fallback. Python `is_set("period.start_year")`
 is translated to the native `is_set("period%start_year")` lookup. Nested

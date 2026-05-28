@@ -438,15 +438,24 @@ def _load_dimensions(
             raise click.ClickException(
                 f"config dimension '{name}' duplicates another dimension name"
             )
+        default_name = f"{canonical_name}__default"
+        if default_name in constant_names:
+            raise click.ClickException(
+                f"config dimension '{name}' default name duplicates a constant name"
+            )
         if not isinstance(entry, dict):
-            raise click.ClickException(f"config dimension '{name}' must be a table with 'value'")
-        if "value" not in entry:
-            raise click.ClickException(f"config dimension '{name}' must define 'value'")
-        value = entry.get("value")
+            raise click.ClickException(f"config dimension '{name}' must be a table with 'default'")
+        if "value" in entry:
+            raise click.ClickException(
+                f"config dimension '{name}' must use 'default', not 'value'"
+            )
+        if "default" not in entry:
+            raise click.ClickException(f"config dimension '{name}' must define 'default'")
+        value = entry.get("default")
         if isinstance(value, bool) or not isinstance(value, int):
-            raise click.ClickException(f"config dimension '{name}' value must be an integer")
+            raise click.ClickException(f"config dimension '{name}' default must be an integer")
         if value <= 0:
-            raise click.ClickException(f"config dimension '{name}' value must be positive")
+            raise click.ClickException(f"config dimension '{name}' default must be positive")
         doc = entry.get("doc")
         if doc is not None:
             if not isinstance(doc, str):
@@ -454,7 +463,7 @@ def _load_dimensions(
             doc = " ".join(doc.splitlines()).strip() or None
         specs.append(
             ConstantSpec(
-                name=canonical_name,
+                name=default_name,
                 type_spec="integer",
                 value=str(value),
                 doc=doc,
