@@ -6,7 +6,7 @@
 !> \details Demonstrates referenced reusable and inline imported derived types.
 module f2py_run
   use iso_c_binding, only: c_intptr_t
-  use nml_helper, only: NML_OK
+  use nml_helper, only: NML_OK, NML_ERR_INVALID_INDEX
   use iso_fortran_env, only: &
     i4=>int32
   use nml_run, only: nml_run_t, nml_run_resolve_handle, period_t, station_t
@@ -85,6 +85,11 @@ contains
     if (has__period__label) maybe__period%label = period__label
     status = this%init_type(periods=maybe__periods, errmsg=errmsg)
     if (status /= NML_OK) return
+    if (periods__n1 > size(maybe__periods, 1)) then
+      status = NML_ERR_INVALID_INDEX
+      errmsg = "dimension 1 exceeds bounds for 'periods'"
+      return
+    end if
     where (has__periods__start_year)
       maybe__periods(1:periods__n1)%start_year = periods__start_year
     end where

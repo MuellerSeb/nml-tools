@@ -245,7 +245,12 @@ def test_generate_f2py_wrappers_flattens_derived_values_to_intrinsic_arguments()
     assert "type(period_t) :: maybe__period" in generated
     assert "type(period_t), dimension(:), allocatable :: maybe__periods" in generated
     assert "status = this%init_type(period=maybe__period, errmsg=errmsg)" in generated
+    assert "if (periods__n1 > size(maybe__periods, 1)) then" in generated
+    assert 'errmsg = "dimension 1 exceeds bounds for \'periods\'"' in generated
     assert "where (has__periods__start_year)" in generated
+    assert generated.index("if (periods__n1 > size(maybe__periods, 1)) then") < (
+        generated.index("where (has__periods__start_year)")
+    )
     assert "status = this%set(" in generated
     assert "period=maybe__period" in generated
     assert "periods=maybe__periods" in generated
@@ -293,6 +298,7 @@ def test_generate_f2py_wrappers_supports_multirank_derived_arrays() -> None:
     ) in generated
     assert "type(period_t), dimension(:, :), allocatable :: maybe__periods" in generated
     assert "allocate(maybe__periods(periods__n1, periods__n2))" in generated
+    assert "periods__n1 > size(maybe__periods, 1)" not in generated
     assert "maybe__periods(1:periods__n1, 1:periods__n2)%start_year" in generated
 
 

@@ -13,7 +13,7 @@
 module {{ spec.f2py_module_name }}
   use iso_c_binding, only: c_intptr_t
 {% if spec.derived_type_names %}
-  use {{ spec.helper_module }}, only: NML_OK
+  use {{ spec.helper_module }}, only: NML_OK, NML_ERR_INVALID_INDEX
 {% endif %}
 {% if spec.kind_imports %}
   use {{ spec.kind_module }}, only: &

@@ -900,6 +900,17 @@ def _derived_bridge_assignments(
     lines.append(f"{indent}status = this%init_type({name}={maybe_name}, errmsg=errmsg)")
     lines.append(f"{indent}if (status /= NML_OK) return")
     if rank:
+        if init_allocates_array:
+            for dim_index, dim_name in enumerate(dim_names, start=1):
+                lines.extend(
+                    [
+                        f"{indent}if ({dim_name} > size({maybe_name}, {dim_index})) then",
+                        f"{indent}  status = NML_ERR_INVALID_INDEX",
+                        f'{indent}  errmsg = "dimension {dim_index} exceeds bounds for \'{name}\'"',
+                        f"{indent}  return",
+                        f"{indent}end if",
+                    ]
+                )
         bounds = ", ".join(f"1:{dim_name}" for dim_name in dim_names)
         for leaf in leaves:
             lines.append(f"{indent}where ({leaf.has_name})")
