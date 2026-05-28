@@ -302,22 +302,8 @@ def test_generate_f2py_wrappers_supports_multirank_derived_arrays() -> None:
     assert "maybe__periods(1:periods__n1, 1:periods__n2)%start_year" in generated
 
 
-def test_derived_abi_names_avoid_intrinsic_collisions_and_identifier_overflow() -> None:
+def test_derived_abi_names_avoid_identifier_overflow() -> None:
     codegen = _import_codegen_f2py()
-    collision_schema = _derived_schema()
-    collision_schema["required"].append("period__start_year")
-    collision_schema["properties"]["period__start_year"] = {"type": "integer"}
-
-    collision_spec = codegen.build_f2py_namelist_spec(
-        collision_schema,
-        dimensions={"n_periods": 2},
-    )
-    period = next(arg for arg in collision_spec.required_args if arg.name == "period")
-    assert period.derived_leaves is not None
-    start_year = next(leaf for leaf in period.derived_leaves if leaf.name == "start_year")
-    assert start_year.encoded_name == "period__start_year_1"
-    assert start_year.has_name == "has__period__start_year_1"
-
     long_field = "configured_period_field_with_a_long_descriptive_name"
     long_member = "start_year_attribute_with_a_long_descriptive_name"
     long_schema = resolve_schema(

@@ -674,7 +674,7 @@ def test_resolve_schema_rejects_user_authored_derived_origin_marker() -> None:
         ),
         (
             {"$ref": "#/$defs/invalid_component"},
-            "component 'start-year' must be a valid Fortran identifier",
+            "property 'start-year' must be a valid Fortran identifier",
         ),
     ],
 )
@@ -815,5 +815,58 @@ def test_inline_derived_types_reject_unsupported_v1_layouts(
                 "x-fortran-namelist": "run",
                 "type": "object",
                 "properties": {"value": property_schema},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("property_schema", "match"),
+    [
+        (
+            {"value__generated": {"type": "integer"}},
+            "property 'value__generated' must not contain",
+        ),
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period__t",
+                    "properties": {"year": {"type": "integer"}},
+                }
+            },
+            "'x-fortran-type' must not contain",
+        ),
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "x-fortran-module": "app__types",
+                    "properties": {"year": {"type": "integer"}},
+                }
+            },
+            "'x-fortran-module' must not contain",
+        ),
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {"start__year": {"type": "integer"}},
+                }
+            },
+            "property 'start__year' must not contain",
+        ),
+    ],
+)
+def test_schema_rejects_reserved_double_underscore_identifiers(
+    property_schema: dict[str, object], match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": property_schema,
             }
         )

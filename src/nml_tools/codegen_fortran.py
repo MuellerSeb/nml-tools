@@ -15,6 +15,7 @@ from ._utils import (
     normalize_runtime_dimensions,
     reject_constant_dimension_overlap,
     strip_trailing_whitespace,
+    validate_user_fortran_identifier,
 )
 from .schema import DERIVED_REF_ORIGIN_KEY
 from .validate import validate_schema_defaults
@@ -331,6 +332,7 @@ def _build_context(
     for prop_name, prop in properties.items():
         if not isinstance(prop_name, str) or not prop_name.strip():
             raise ValueError("property names must be non-empty strings")
+        validate_user_fortran_identifier(prop_name, label=f"property '{prop_name}'")
         key = prop_name.lower()
         if key in property_name_map:
             raise ValueError(
@@ -1937,7 +1939,9 @@ def _derived_type_name(schema: dict[str, Any]) -> str:
     type_name = schema.get("x-fortran-type")
     if not isinstance(type_name, str) or not type_name.strip():
         raise ValueError("derived object must define non-empty 'x-fortran-type'")
-    return type_name.strip()
+    stripped = type_name.strip()
+    validate_user_fortran_identifier(stripped, label="'x-fortran-type'")
+    return stripped
 
 
 def _derived_origin(schema: dict[str, Any]) -> dict[str, Any]:

@@ -388,7 +388,7 @@ def test_generate_fortran_rejects_runtime_dimension_default_constant_collisions(
 
     output = tmp_path / "nml_test.f90"
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match="runtime dimension default name 'max_layers__default'"):
+    with pytest.raises(ValueError, match="constant 'max_layers__default' must not contain"):
         generate_fortran(
             schema,
             output,

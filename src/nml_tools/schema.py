@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
-from ._utils import FORTRAN_IDENTIFIER
+from ._utils import validate_user_fortran_identifier
 
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 _DOCUMENT_SUFFIXES = {".json", ".yml", ".yaml"}
@@ -101,6 +101,7 @@ class SchemaResolver:
         """Load and resolve a file-backed schema document."""
         document = self._load_document(Path(path))
         _reject_reserved_marker(document.data, document, "")
+        _validate_user_identifiers(document.data, document, "")
         if not _requires_normalization(document.data, position="root"):
             return copy.deepcopy(document.data)
         self._validate_document_metadata(document)
@@ -120,6 +121,7 @@ class SchemaResolver:
         if path is not None:
             self._documents[path] = document
         _reject_reserved_marker(data, document, "")
+        _validate_user_identifiers(data, document, "")
         if not _requires_normalization(data, position="root"):
             return copy.deepcopy(data)
         self._validate_document_metadata(document)
@@ -275,6 +277,10 @@ class SchemaResolver:
     ) -> dict[str, Any]:
         if not isinstance(name, str):
             raise ValueError(f"{_location(document, pointer)}: property names must be strings")
+        try:
+            validate_user_fortran_identifier(name, label=f"property '{name}'")
+        except ValueError as exc:
+            raise ValueError(f"{_location(document, pointer)}: {exc}") from exc
         if not isinstance(value, Mapping):
             property_pointer = _child_pointer(_child_pointer(pointer, "properties"), name)
             raise ValueError(
@@ -417,6 +423,62 @@ def _reject_reserved_marker(raw: Any, document: _Document, pointer: str) -> None
     if isinstance(raw, list):
         for index, value in enumerate(raw):
             _reject_reserved_marker(value, document, _child_pointer(pointer, str(index)))
+
+
+def _validate_user_identifiers(raw: Any, document: _Document, pointer: str) -> None:
+    if isinstance(raw, Mapping):
+        type_name = raw.get("x-fortran-type")
+        if type_name is not None:
+            if not isinstance(type_name, str):
+                raise ValueError(
+                    f"{_location(document, pointer)}: 'x-fortran-type' must be a valid "
+                    "Fortran identifier"
+                )
+            try:
+                validate_user_fortran_identifier(type_name.strip(), label="'x-fortran-type'")
+            except ValueError as exc:
+                raise ValueError(f"{_location(document, pointer)}: {exc}") from exc
+        module_name = raw.get("x-fortran-module")
+        if module_name is not None:
+            if not isinstance(module_name, str):
+                raise ValueError(
+                    f"{_location(document, pointer)}: 'x-fortran-module' must be a valid "
+                    "Fortran identifier"
+                )
+            try:
+                validate_user_fortran_identifier(
+                    module_name.strip(), label="'x-fortran-module'"
+                )
+            except ValueError as exc:
+                raise ValueError(f"{_location(document, pointer)}: {exc}") from exc
+
+        properties = raw.get("properties")
+        if isinstance(properties, Mapping):
+            for name, prop in properties.items():
+                if not isinstance(name, str):
+                    raise ValueError(
+                        f"{_location(document, _child_pointer(pointer, 'properties'))}: "
+                        "property names must be strings"
+                    )
+                try:
+                    validate_user_fortran_identifier(name, label=f"property '{name}'")
+                except ValueError as exc:
+                    raise ValueError(
+                        f"{_location(document, _child_pointer(pointer, 'properties'))}: {exc}"
+                    ) from exc
+                _validate_user_identifiers(
+                    prop,
+                    document,
+                    _child_pointer(_child_pointer(pointer, "properties"), name),
+                )
+
+        items = raw.get("items")
+        if isinstance(items, Mapping):
+            _validate_user_identifiers(items, document, _child_pointer(pointer, "items"))
+        return
+    if isinstance(raw, list):
+        for index, value in enumerate(raw):
+            _validate_user_identifiers(value, document, _child_pointer(pointer, str(index)))
 
 
 def _compose_nodes(
@@ -688,15 +750,12 @@ def _validate_derived_object(schema: Mapping[str, Any]) -> None:
     type_name = schema.get("x-fortran-type")
     if not isinstance(type_name, str) or not type_name.strip():
         raise ValueError("derived-type object must define non-empty 'x-fortran-type'")
-    if FORTRAN_IDENTIFIER.match(type_name.strip()) is None:
-        raise ValueError("'x-fortran-type' must be a valid Fortran identifier")
+    validate_user_fortran_identifier(type_name.strip(), label="'x-fortran-type'")
     module_name = schema.get("x-fortran-module")
     if module_name is not None:
-        if (
-            not isinstance(module_name, str)
-            or FORTRAN_IDENTIFIER.match(module_name.strip()) is None
-        ):
+        if not isinstance(module_name, str):
             raise ValueError("'x-fortran-module' must be a valid Fortran identifier")
+        validate_user_fortran_identifier(module_name.strip(), label="'x-fortran-module'")
     if "default" in schema:
         raise ValueError("derived-type object must not define a default")
     properties = schema.get("properties")
@@ -706,10 +765,7 @@ def _validate_derived_object(schema: Mapping[str, Any]) -> None:
     for name, prop in properties.items():
         if not isinstance(name, str):
             raise ValueError("derived-type component names must be strings")
-        if FORTRAN_IDENTIFIER.match(name) is None:
-            raise ValueError(
-                f"derived-type component '{name}' must be a valid Fortran identifier"
-            )
+        validate_user_fortran_identifier(name, label=f"derived-type component '{name}'")
         key = name.lower()
         if key in canonical:
             raise ValueError(f"derived-type object defines duplicate component '{name}'")

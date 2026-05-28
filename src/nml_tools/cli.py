@@ -15,7 +15,7 @@ import f90nml  # type: ignore
 from click.exceptions import Exit
 from packaging.version import InvalidVersion, Version
 
-from ._utils import constant_dimension_overlap, is_fortran_identifier
+from ._utils import constant_dimension_overlap, validate_user_fortran_identifier
 from ._version import __version__
 from .codegen_f2py import (
     F2pyCTypeMap,
@@ -87,8 +87,10 @@ class NamedIntegerType(_NamedIntegerTypeBase):  # type: ignore[valid-type, misc]
         name = raw_name.strip()
         if not name:
             self.fail("must use non-empty names", param, ctx)
-        if not is_fortran_identifier(name):
-            self.fail(f"{self._label} '{name}' must be a valid identifier", param, ctx)
+        try:
+            validate_user_fortran_identifier(name, label=f"{self._label} '{name}'")
+        except ValueError as exc:
+            self.fail(str(exc), param, ctx)
 
         value_text = raw_value.strip()
         if not value_text:
@@ -372,10 +374,10 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int], list[Consta
         name = name_raw.strip()
         if not name:
             raise click.ClickException("config constants must have non-empty names")
-        if not is_fortran_identifier(name):
-            raise click.ClickException(
-                f"config constant '{name}' must be a valid Fortran identifier"
-            )
+        try:
+            validate_user_fortran_identifier(name, label=f"config constant '{name}'")
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
         canonical_name = name.lower()
         if canonical_name in constants:
             raise click.ClickException(
@@ -425,10 +427,10 @@ def _load_dimensions(
         name = name_raw.strip()
         if not name:
             raise click.ClickException("config dimensions must have non-empty names")
-        if not is_fortran_identifier(name):
-            raise click.ClickException(
-                f"config dimension '{name}' must be a valid Fortran identifier"
-            )
+        try:
+            validate_user_fortran_identifier(name, label=f"config dimension '{name}'")
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
         canonical_name = name.lower()
         if canonical_name in constant_names:
             raise click.ClickException(

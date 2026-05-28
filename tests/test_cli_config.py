@@ -136,6 +136,9 @@ def test_load_constants_normalizes_names_case_insensitively() -> None:
     with pytest.raises(click.ClickException, match="must be integers"):
         cli_module._load_constants({"constants": {"ratio": {"value": 1.5}}})
 
+    with pytest.raises(click.ClickException, match="must not contain '__'"):
+        cli_module._load_constants({"constants": {"buf__len": {"value": 128}}})
+
 
 def test_load_dimensions_validates_values_and_duplicate_names() -> None:
     constants = {"BUF": 128}
@@ -175,6 +178,9 @@ def test_load_dimensions_validates_values_and_duplicate_names() -> None:
     with pytest.raises(click.ClickException, match="must use 'default', not 'value'"):
         cli_module._load_dimensions({"dimensions": {"n_cells": {"value": 3}}}, {})
 
+    with pytest.raises(click.ClickException, match="must not contain '__'"):
+        cli_module._load_dimensions({"dimensions": {"n__cells": {"default": 3}}}, {})
+
 
 def test_named_integer_type_validates_dimension_values() -> None:
     dimension_type = cli_module.NamedIntegerType(label="dimension", positive=True)
@@ -184,8 +190,11 @@ def test_named_integer_type_validates_dimension_values() -> None:
     with pytest.raises(click.BadParameter, match="NAME=INT"):
         dimension_type.convert("n_cells", None, None)
 
-    with pytest.raises(click.BadParameter, match="valid identifier"):
+    with pytest.raises(click.BadParameter, match="valid Fortran identifier"):
         dimension_type.convert("1bad=3", None, None)
+
+    with pytest.raises(click.BadParameter, match="must not contain '__'"):
+        dimension_type.convert("n__cells=3", None, None)
 
     with pytest.raises(click.BadParameter, match="integer"):
         dimension_type.convert("n_cells=3.5", None, None)
