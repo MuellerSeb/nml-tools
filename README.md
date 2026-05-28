@@ -38,6 +38,10 @@ identifiers and must not contain `__`. Double underscores are reserved for
 generated support names such as `seed__default`, `method__enum_values`, and
 `period__start_year__min`.
 
+Schema property names and runtime dimension names must also avoid generated
+namelist type member names: `is_configured`, `init`, `init_type`, `set_dims`,
+`from_file`, `set`, `is_set`, `is_valid`, and `filled_shape`.
+
 ### x-fortran-namelist
 
 - Location: schema root.
@@ -411,6 +415,8 @@ Named runtime array dimension defaults.
   generated helper identifiers.
 - Names must not collide with namelist property names, because generated
   Fortran stores the current runtime extent as a field with the dimension name.
+- Names must not collide with generated namelist type members such as `init`,
+  `set_dims`, or `is_valid`.
 - Entries may be used in `x-fortran-shape`, but not in `x-fortran-len`.
 - Arrays whose shape contains a `[dimensions]` name are generated as
   allocatable runtime-sized arrays.
