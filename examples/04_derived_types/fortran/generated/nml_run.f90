@@ -149,7 +149,6 @@ contains
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
 
-
     ! derived values
     status = this%init_type( &
       period=this%period, &
@@ -170,19 +169,9 @@ contains
     type(period_t), dimension(:), allocatable, intent(inout), optional :: periods !< Comparison periods
     type(station_t), intent(inout), optional :: station !< Selected station
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: selected
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    selected = 0
-    if (present(period)) selected = selected + 1
-    if (present(periods)) selected = selected + 1
-    if (present(station)) selected = selected + 1
-    if (selected == 0) then
-      status = NML_ERR_INVALID_NAME
-      if (present(errmsg)) errmsg = "init_type requires at least one derived field argument"
-      return
-    end if
     if (present(period)) then
       period%start_year = -huge(period%start_year) ! sentinel for derived component start_year
       period%end_year = -huge(period%end_year) ! sentinel for derived component end_year

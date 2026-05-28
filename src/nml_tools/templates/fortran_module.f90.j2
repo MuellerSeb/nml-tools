@@ -160,27 +160,33 @@ contains
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
-
 {% if runtime_allocations %}
+
     ! allocate runtime-sized fields
 {% for stmt in runtime_allocations %}
 {{ stmt | indent(4, True) }}
 {% endfor %}
 {% endif %}
-
 {% if sentinel_assignments %}
+
     ! sentinel values for required/optional parameters
 {% for stmt in sentinel_assignments %}
 {{ stmt | indent(4, True) }}
 {% endfor %}
 {% endif %}
 {% if default_assignments %}
+{% if not sentinel_assignments %}
+
+{% endif %}
     ! default values
 {% for stmt in default_assignments %}
 {{ stmt | indent(4, True) }}
 {% endfor %}
 {% endif %}
 {% if derived_init_type_fields %}
+{% if not (runtime_allocations or sentinel_assignments or default_assignments) %}
+
+{% endif %}
     ! derived values
     status = this%init_type( &
 {% for field in derived_init_type_fields %}
@@ -201,19 +207,9 @@ contains
 {{ field.declaration | indent(4, True) }}
 {% endfor %}
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: selected
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    selected = 0
-{% for field in derived_init_type_fields %}
-    if (present({{ field.name }})) selected = selected + 1
-{% endfor %}
-    if (selected == 0) then
-      status = NML_ERR_INVALID_NAME
-      if (present(errmsg)) errmsg = "init_type requires at least one derived field argument"
-      return
-    end if
 {% for field in derived_init_type_fields %}
     if (present({{ field.name }})) then
 {% for stmt in field.allocation_lines %}

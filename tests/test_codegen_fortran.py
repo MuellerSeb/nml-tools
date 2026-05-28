@@ -1133,7 +1133,9 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
     assert "period=this%period" in generated
     assert "periods=this%periods" in generated
     assert "init_type requires exactly one" not in generated
-    assert "init_type requires at least one derived field argument" in generated
+    assert "init_type requires at least one" not in generated
+    assert "integer :: selected" not in generated
+    assert "selected = selected + 1" not in generated
     assert "this%period%start_year" in generated
     assert 'case ("period%start_year")' in generated
     assert 'case ("periods%start_year")' in generated
