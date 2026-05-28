@@ -649,6 +649,43 @@ def test_resolve_schema_rejects_user_authored_derived_origin_marker() -> None:
         )
 
 
+@pytest.mark.parametrize("container", ["$defs", "definitions"])
+def test_resolve_schema_validates_identifiers_in_definition_containers(container: str) -> None:
+    with pytest.raises(ValueError, match="'x-fortran-type'.*must not contain '__'"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                container: {
+                    "period": {
+                        "type": "object",
+                        "x-fortran-type": "period__t",
+                        "properties": {"year": {"type": "integer"}},
+                    }
+                },
+                "properties": {"year": {"type": "integer"}},
+            }
+        )
+
+
+@pytest.mark.parametrize("container", ["allOf", "anyOf", "oneOf"])
+def test_resolve_schema_validates_identifiers_in_combinator_containers(container: str) -> None:
+    with pytest.raises(ValueError, match="property 'start__year'.*must not contain '__'"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                container: [
+                    {
+                        "type": "object",
+                        "properties": {"start__year": {"type": "integer"}},
+                    }
+                ],
+                "properties": {"year": {"type": "integer"}},
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("property_schema", "match"),
     [

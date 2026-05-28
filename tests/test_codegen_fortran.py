@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import re
 import sys
 from pathlib import Path
 
@@ -45,6 +46,30 @@ def _import_codegen_module():
     finally:
         sys.path.pop(0)
     return module
+
+
+def _extract_use_only_symbols(source: str, module_name: str) -> list[str]:
+    pattern = re.compile(rf"^\s*use\s+{re.escape(module_name)}\s*,\s*only:\s*(.*)$", re.IGNORECASE)
+    lines = source.splitlines()
+    for index, line in enumerate(lines):
+        match = pattern.match(line)
+        if not match:
+            continue
+        chunks = [match.group(1)]
+        current = index
+        while lines[current].rstrip().endswith("&") and current + 1 < len(lines):
+            current += 1
+            chunks.append(lines[current])
+
+        symbols: list[str] = []
+        for chunk in chunks:
+            normalized = chunk.replace("&", "")
+            for part in normalized.split(","):
+                symbol = part.strip()
+                if symbol:
+                    symbols.append(symbol)
+        return symbols
+    return []
 
 
 def test_generate_fortran_matches_reference(tmp_path: Path) -> None:
@@ -304,7 +329,8 @@ def test_generate_fortran_accepts_runtime_dimensions(tmp_path: Path) -> None:
     assert "procedure :: set_dims => nml_test_nml_set_dims" in generated
     assert "allocate(this%values(this%max_layers))" in generated
     assert "use nml_helper, only:" in generated
-    assert "max_layers__default" in generated
+    helper_symbols = _extract_use_only_symbols(generated, "nml_helper")
+    assert "max_layers__default" in helper_symbols
     assert "max_layers__default=>" not in generated
     assert "integer(i4), parameter, public :: values__default = 1_i4" in generated
     assert "this%values = values__default" in generated
@@ -335,6 +361,8 @@ def test_generate_fortran_normalizes_runtime_dimension_names(tmp_path: Path) -> 
 
     generated = output.read_text()
     assert "integer :: max_layers = max_layers__default" in generated
+    helper_symbols = _extract_use_only_symbols(generated, "nml_helper")
+    assert "max_layers__default" in helper_symbols
     assert "max_layers__default=>" not in generated
 
 

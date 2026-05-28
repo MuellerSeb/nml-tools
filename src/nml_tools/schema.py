@@ -452,29 +452,30 @@ def _validate_user_identifiers(raw: Any, document: _Document, pointer: str) -> N
             except ValueError as exc:
                 raise ValueError(f"{_location(document, pointer)}: {exc}") from exc
 
-        properties = raw.get("properties")
-        if isinstance(properties, Mapping):
-            for name, prop in properties.items():
-                if not isinstance(name, str):
-                    raise ValueError(
-                        f"{_location(document, _child_pointer(pointer, 'properties'))}: "
-                        "property names must be strings"
+        for key, value in raw.items():
+            if not isinstance(key, str):
+                continue
+            child_pointer = _child_pointer(pointer, key)
+            if key == "properties" and isinstance(value, Mapping):
+                for name, prop in value.items():
+                    if not isinstance(name, str):
+                        raise ValueError(
+                            f"{_location(document, child_pointer)}: "
+                            "property names must be strings"
+                        )
+                    try:
+                        validate_user_fortran_identifier(name, label=f"property '{name}'")
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"{_location(document, child_pointer)}: {exc}"
+                        ) from exc
+                    _validate_user_identifiers(
+                        prop,
+                        document,
+                        _child_pointer(child_pointer, name),
                     )
-                try:
-                    validate_user_fortran_identifier(name, label=f"property '{name}'")
-                except ValueError as exc:
-                    raise ValueError(
-                        f"{_location(document, _child_pointer(pointer, 'properties'))}: {exc}"
-                    ) from exc
-                _validate_user_identifiers(
-                    prop,
-                    document,
-                    _child_pointer(_child_pointer(pointer, "properties"), name),
-                )
-
-        items = raw.get("items")
-        if isinstance(items, Mapping):
-            _validate_user_identifiers(items, document, _child_pointer(pointer, "items"))
+                continue
+            _validate_user_identifiers(value, document, child_pointer)
         return
     if isinstance(raw, list):
         for index, value in enumerate(raw):
