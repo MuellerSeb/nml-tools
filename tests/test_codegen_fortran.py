@@ -730,6 +730,53 @@ def test_generate_fortran_rejects_case_insensitive_duplicates(tmp_path: Path) ->
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
+@pytest.mark.parametrize("name", ["is_configured", "init", "set", "from_file", "is_valid"])
+def test_generate_fortran_rejects_property_names_conflicting_with_type_members(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    schema = {
+        "title": "Reserved property",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            name: {"type": "integer"},
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match="conflicts with generated namelist type member"):
+        generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+
+
+@pytest.mark.parametrize("name", ["is_configured", "init", "set_dims", "filled_shape"])
+def test_generate_fortran_rejects_runtime_dimensions_conflicting_with_type_members(
+    tmp_path: Path,
+    name: str,
+) -> None:
+    schema = {
+        "title": "Reserved runtime dimension",
+        "x-fortran-namelist": "test_nml",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": name,
+            },
+        },
+    }
+
+    generate_fortran = _import_generate_fortran()
+    with pytest.raises(ValueError, match="conflicts with generated namelist type member"):
+        generate_fortran(
+            schema,
+            tmp_path / "nml_test.f90",
+            kind_module="mo_kind",
+            dimensions={name: 2},
+        )
+
+
 def test_generate_fortran_accepts_required_case_insensitive(tmp_path: Path) -> None:
     schema = {
         "title": "Required case",

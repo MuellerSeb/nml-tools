@@ -28,6 +28,18 @@ _TEMPLATE_ENV = Environment(
     undefined=StrictUndefined,
 )
 
+_RESERVED_NAMELIST_TYPE_MEMBERS = {
+    "filled_shape",
+    "from_file",
+    "init",
+    "init_type",
+    "is_configured",
+    "is_set",
+    "is_valid",
+    "set",
+    "set_dims",
+}
+
 
 @dataclass
 class ScalarTypeInfo:
@@ -334,6 +346,10 @@ def _build_context(
             raise ValueError("property names must be non-empty strings")
         validate_user_fortran_identifier(prop_name, label=f"property '{prop_name}'")
         key = prop_name.lower()
+        if key in _RESERVED_NAMELIST_TYPE_MEMBERS:
+            raise ValueError(
+                f"property '{prop_name}' conflicts with generated namelist type member"
+            )
         if key in property_name_map:
             raise ValueError(
                 "property names must be unique (case-insensitive): "
@@ -443,6 +459,11 @@ def _build_context(
                 raise ValueError(
                     f"runtime dimension '{dim_name}' conflicts with property "
                     f"'{property_name_map[dim_name]}'"
+                )
+            if dim_name in _RESERVED_NAMELIST_TYPE_MEMBERS:
+                raise ValueError(
+                    f"runtime dimension '{dim_name}' conflicts with generated "
+                    "namelist type member"
                 )
             default_name = _generated_name(dim_name, "default")
             if default_name.lower() in static_constants:
