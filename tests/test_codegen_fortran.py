@@ -1129,6 +1129,11 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
     assert "type(period_t) :: period" in generated
     assert "type(period_t), allocatable, dimension(:) :: periods" in generated
     assert "procedure :: init_type => nml_run_init_type" in generated
+    assert "status = this%init_type( &" in generated
+    assert "period=this%period" in generated
+    assert "periods=this%periods" in generated
+    assert "init_type requires exactly one" not in generated
+    assert "init_type requires at least one derived field argument" in generated
     assert "this%period%start_year" in generated
     assert 'case ("period%start_year")' in generated
     assert 'case ("periods%start_year")' in generated
@@ -1145,6 +1150,42 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
     assert "period_label_in_enum(this%period%label)" in generated
     assert "periods_start_year_in_bounds(this%periods%start_year" in generated
     assert "if (allocated(this%periods)) then" in generated
+
+
+def test_generate_fortran_init_type_accepts_fixed_derived_arrays() -> None:
+    from nml_tools.schema import resolve_schema
+
+    codegen = _import_codegen_module()
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "year": {"type": "integer", "default": 2001},
+                    },
+                }
+            },
+            "properties": {
+                "periods": {
+                    "type": "array",
+                    "x-fortran-shape": 2,
+                    "items": {"$ref": "#/$defs/period"},
+                },
+            },
+        }
+    )
+
+    generated = codegen.render_fortran(schema, file_name="nml_run.f90")
+
+    assert "type(period_t), dimension(2) :: periods" in generated
+    assert "type(period_t), dimension(:), intent(inout), optional :: periods" in generated
+    assert "allocatable, intent(inout), optional :: periods" not in generated
+    assert "periods=this%periods" in generated
+    assert "periods%year = 2001" in generated
 
 
 def test_generate_fortran_imports_application_owned_derived_type() -> None:

@@ -144,12 +144,21 @@ $defs:
 properties:
   period:
     $ref: "#/$defs/period"
+    properties:
+      label:
+        default: main
   periods:
     type: array
     x-fortran-shape: n_periods
     items:
       $ref: "#/$defs/period"
 ```
+
+The `properties` block on a derived-type `$ref` use site may refine existing
+scalar members, including `default`, `title`, `description`, bounds, and enums.
+It may not add new members, because the referenced type definition owns the
+Fortran layout. In the example above, `period%label` defaults to `main`, while
+`periods%label` keeps the reusable definition default `default`.
 
 Only intrinsic scalar members are supported in the first implementation.
 Object defaults, derived array defaults, derived flexible-tail arrays, nested
@@ -163,7 +172,8 @@ Generated native APIs accept typed values and add `init_type`, for example:
 
 ```fortran
 type(period_t) :: period
-status = config%init_type(period=period)
+type(period_t), allocatable :: periods(:)
+status = config%init_type(period=period, periods=periods)
 period%start_year = 2001
 status = config%set(period=period)
 ```

@@ -149,22 +149,17 @@ contains
     if (present(errmsg)) errmsg = ""
     this%is_configured = .false.
 
-    ! allocate runtime-sized fields
-    if (allocated(this%periods)) deallocate(this%periods)
-    allocate(this%periods(this%dim_n_periods))
 
-    ! sentinel values for required/optional parameters
-    this%period%start_year = -huge(this%period%start_year) ! sentinel for derived component start_year
-    this%period%end_year = -huge(this%period%end_year) ! sentinel for derived component end_year
-    this%period%label = "period"
-    this%periods%start_year = -huge(this%periods%start_year) ! sentinel for derived component start_year
-    this%periods%end_year = -huge(this%periods%end_year) ! sentinel for derived component end_year
-    this%periods%label = "period"
-    this%station%code = -huge(this%station%code) ! sentinel for derived component code
-    this%station%label = "unknown"
+    ! derived values
+    status = this%init_type( &
+      period=this%period, &
+      periods=this%periods, &
+      station=this%station, &
+      errmsg=errmsg)
+    if (status /= NML_OK) return
   end function nml_run_init
 
-  !> \brief Initialize one concrete derived value with its field-specific defaults
+  !> \brief Initialize derived values with their field-specific defaults
   integer function nml_run_init_type(this, &
     period, &
     periods, &
@@ -183,15 +178,15 @@ contains
     if (present(period)) selected = selected + 1
     if (present(periods)) selected = selected + 1
     if (present(station)) selected = selected + 1
-    if (selected /= 1) then
+    if (selected == 0) then
       status = NML_ERR_INVALID_NAME
-      if (present(errmsg)) errmsg = "init_type requires exactly one derived field argument"
+      if (present(errmsg)) errmsg = "init_type requires at least one derived field argument"
       return
     end if
     if (present(period)) then
       period%start_year = -huge(period%start_year) ! sentinel for derived component start_year
       period%end_year = -huge(period%end_year) ! sentinel for derived component end_year
-      period%label = "period"
+      period%label = "main"
     end if
     if (present(periods)) then
       if (allocated(periods)) deallocate(periods)

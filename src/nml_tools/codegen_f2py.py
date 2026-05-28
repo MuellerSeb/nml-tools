@@ -509,6 +509,7 @@ def build_f2py_namelist_spec(
                     field.required,
                     outer_has_flag,
                     dim_names,
+                    init_allocates_array=field.runtime_sized_array,
                 )
             )
             set_call_arguments.append(f"{field.name}={maybe_name}")
@@ -879,6 +880,8 @@ def _derived_bridge_assignments(
     required: bool,
     outer_has_flag: str | None,
     dim_names: list[str],
+    *,
+    init_allocates_array: bool,
 ) -> list[str]:
     lines: list[str] = []
     gated = not required
@@ -891,6 +894,9 @@ def _derived_bridge_assignments(
             lines.append(f"  allocate({maybe_name})")
     else:
         indent = ""
+    if rank and not init_allocates_array:
+        dims = ", ".join(dim_names)
+        lines.append(f"{indent}allocate({maybe_name}({dims}))")
     lines.append(f"{indent}status = this%init_type({name}={maybe_name}, errmsg=errmsg)")
     lines.append(f"{indent}if (status /= NML_OK) return")
     if rank:

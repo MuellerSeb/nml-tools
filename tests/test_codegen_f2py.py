@@ -292,6 +292,7 @@ def test_generate_f2py_wrappers_supports_multirank_derived_arrays() -> None:
         "periods__start_year"
     ) in generated
     assert "type(period_t), dimension(:, :), allocatable :: maybe_periods" in generated
+    assert "allocate(maybe_periods(periods_n1, periods_n2))" in generated
     assert "maybe_periods(1:periods_n1, 1:periods_n2)%start_year" in generated
 
 

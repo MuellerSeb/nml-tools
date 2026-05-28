@@ -7,7 +7,9 @@ importing the type from the application-owned `fortran/application_types.f90`
 module.
 
 The generated namelist has a required scalar period, a runtime-sized period array,
-and a required imported station. The imported `station_t%label` storage is longer
+and a required imported station. The scalar `period` refines the referenced
+`period_t%label` default to `main`, while the `periods` array keeps the reusable
+definition default `period`. The imported `station_t%label` storage is longer
 than its schema contract; generated code checks that storage and blanks content
 beyond the mapped eight-character value after assignments.
 
@@ -27,15 +29,16 @@ python -m pytest -q tests
 
 ## Native Fortran
 
-A caller can initialize an individual typed value with the concrete field's
-defaults and sentinels before applying changes:
+A caller can initialize any non-empty subset of typed values with the concrete
+field defaults and sentinels before applying changes:
 
 ```fortran
 type(period_t) :: period
+type(period_t), allocatable :: periods(:)
 integer :: status
 character(len=512) :: errmsg
 
-status = config%init_type(period=period, errmsg=errmsg)
+status = config%init_type(period=period, periods=periods, errmsg=errmsg)
 period%start_year = 2001
 period%end_year = 2010
 status = config%set(period=period, errmsg=errmsg)

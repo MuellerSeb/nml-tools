@@ -180,10 +180,19 @@ contains
 {{ stmt | indent(4, True) }}
 {% endfor %}
 {% endif %}
+{% if derived_init_type_fields %}
+    ! derived values
+    status = this%init_type( &
+{% for field in derived_init_type_fields %}
+      {{ field.name }}=this%{{ field.name }}, &
+{% endfor %}
+      errmsg=errmsg)
+    if (status /= NML_OK) return
+{% endif %}
   end function {{ type_prefix }}_init
 
 {% if derived_init_type_fields %}
-  !> \brief Initialize one concrete derived value with its field-specific defaults
+  !> \brief Initialize derived values with their field-specific defaults
   integer function {{ type_prefix }}_init_type(this, &
     {{ derived_init_type_fields | map(attribute='name') | join(', &\n    ') }}, &
     errmsg) result(status)
@@ -200,9 +209,9 @@ contains
 {% for field in derived_init_type_fields %}
     if (present({{ field.name }})) selected = selected + 1
 {% endfor %}
-    if (selected /= 1) then
+    if (selected == 0) then
       status = NML_ERR_INVALID_NAME
-      if (present(errmsg)) errmsg = "init_type requires exactly one derived field argument"
+      if (present(errmsg)) errmsg = "init_type requires at least one derived field argument"
       return
     end if
 {% for field in derived_init_type_fields %}

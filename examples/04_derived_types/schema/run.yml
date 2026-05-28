@@ -8,6 +8,10 @@ properties:
   period:
     $ref: "definitions.yml#/$defs/period"
     title: Main simulation period
+    properties:
+      label:
+        description: Use-site default overriding the reusable period definition.
+        default: main
   periods:
     title: Comparison periods
     type: array

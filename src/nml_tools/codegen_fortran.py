@@ -540,9 +540,8 @@ def _build_context(
                 ):
                     raise ValueError("flex arrays cannot define defaults")
 
-            is_runtime_sized = (
-                type_info.category == "array" and dynamic_shape
-            )
+            is_runtime_sized = type_info.category == "array" and dynamic_shape
+            derived = _derived_schema(prop)
 
             if is_runtime_sized:
                 declaration = _render_runtime_declaration(
@@ -554,15 +553,16 @@ def _build_context(
                     name,
                     runtime_dimensions=runtime_shape,
                 )
-                runtime_allocations.extend(
-                    _render_runtime_allocations(
-                        type_info,
-                        name,
-                        runtime_dimensions=runtime_shape,
-                        runtime_length_expr=runtime_length_expr,
-                        target_prefix="this%",
+                if derived is None:
+                    runtime_allocations.extend(
+                        _render_runtime_allocations(
+                            type_info,
+                            name,
+                            runtime_dimensions=runtime_shape,
+                            runtime_length_expr=runtime_length_expr,
+                            target_prefix="this%",
+                        )
                     )
-                )
                 runtime_deallocations.extend(
                     _render_runtime_deallocations(name, target_prefix="this%")
                 )
@@ -591,7 +591,6 @@ def _build_context(
             dynamic_array = type_info.category == "array" and is_runtime_sized
 
             is_required = name in required_set
-            derived = _derived_schema(prop)
             if derived is not None:
                 derived_type_name = _derived_type_name(derived)
                 module = derived.get("x-fortran-module")
@@ -655,7 +654,6 @@ def _build_context(
                     has_default = "default" in child
                     if has_default:
                         literal = _format_default(child["default"], child_info, child, constants)
-                        sentinel_assignments.append(f"{child_target} = {literal}")
                         init_lines.append(f"{arg_target} = {literal}")
                         missing_condition = None
                     else:
@@ -664,17 +662,9 @@ def _build_context(
                                 f"derived boolean component '{child_display_name}' "
                                 "must define a default"
                             )
-                        value_expr, missing_condition, child_uses_ieee = _sentinel_expressions(
+                        _, missing_condition, child_uses_ieee = _sentinel_expressions(
                             child_info,
                             var_ref=child_target,
-                        )
-                        sentinel_assignments.append(
-                            _render_sentinel_assignment(
-                                child_info,
-                                target_ref=child_target,
-                                value_expr=value_expr,
-                                comment=f" ! sentinel for derived component {child_name}",
-                            )
                         )
                         arg_value_expr, _, _ = _sentinel_expressions(
                             child_info,
@@ -868,12 +858,18 @@ def _build_context(
                 )
                 allocation_lines: list[str] = []
                 if type_info.category == "array":
-                    init_argument_declaration = init_argument_declaration.replace(
-                        ", intent(in), optional", ", allocatable, intent(inout), optional"
-                    )
-                    allocation_lines.append(f"if (allocated({name})) deallocate({name})")
-                    dims = ", ".join(runtime_shape)
-                    allocation_lines.append(f"allocate({name}({dims}))")
+                    if dynamic_array:
+                        init_argument_declaration = init_argument_declaration.replace(
+                            ", intent(in), optional",
+                            ", allocatable, intent(inout), optional",
+                        )
+                        allocation_lines.append(f"if (allocated({name})) deallocate({name})")
+                        dims = ", ".join(runtime_shape)
+                        allocation_lines.append(f"allocate({name}({dims}))")
+                    else:
+                        init_argument_declaration = init_argument_declaration.replace(
+                            "intent(in)", "intent(inout)"
+                        )
                 else:
                     init_argument_declaration = init_argument_declaration.replace(
                         "intent(in)", "intent(inout)"
