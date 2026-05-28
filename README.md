@@ -297,8 +297,8 @@ Enums are supported for strings and integers only.
 For arrays, enums are defined on `items` (not on the array itself).
 
 - Keywords: `enum`
-- The generated Fortran module exposes public `*_enum_values` arrays and
-  elemental `*_in_enum` helpers.
+- The generated Fortran module exposes public `*__enum_values` arrays and
+  elemental `*__in_enum` helpers.
 - String enums compare against `trim(value)`; enum literals are stored with the
   field length.
 
@@ -473,12 +473,15 @@ cfg.set(periods=[{"start_year": 1980}, {"start_year": 2001}])
 ```
 
 Only the internal f2py ABI is flattened: `%` paths are encoded with `__`, for
-example `period__start_year` and `has__period__start_year`. Python
-`is_set("period.start_year")` is translated to the native
-`is_set("period%start_year")` lookup. Nested sequences of mappings are accepted
-for multi-rank derived arrays. Flattened generated names are made unique
-case-insensitively and deterministically shortened when needed to remain valid
-Fortran identifiers.
+example `period__start_year` and `has__period__start_year`. Generated Fortran
+support identifiers also use `__` as an internal separator, for example
+`seed__default`, `method__enum_values`, and `dim__n_periods`. Avoid `__` in
+schema property, component, and runtime dimension names to keep generated names
+readable and minimize collision fallback. Python `is_set("period.start_year")`
+is translated to the native `is_set("period%start_year")` lookup. Nested
+sequences of mappings are accepted for multi-rank derived arrays. Flattened
+generated f2py names are made unique case-insensitively and deterministically
+shortened when needed to remain valid Fortran identifiers.
 
 The f2py wrappers use opaque integer handles for Fortran-owned namelist
 instances. nml-tools assumes that the owning Fortran library creates those

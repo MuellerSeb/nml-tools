@@ -117,9 +117,9 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
         "integer(c_intptr_t), intent(in) :: handle "
         "!< opaque handle to a nml_optimization_t instance"
     ) in generated
-    assert "integer, intent(in) :: values_n1 !< extent for values" in generated
+    assert "integer, intent(in) :: values__n1 !< extent for values" in generated
     assert (
-        "real(dp), dimension(values_n1, values_n2), intent(in) :: values "
+        "real(dp), dimension(values__n1, values__n2), intent(in) :: values "
         "!< values (required)"
     ) in generated
     assert (
@@ -129,21 +129,21 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     assert "use iso_fortran_env, only:" in generated
     assert "dp=>real64" in generated
     assert "i4=>int32" in generated
-    assert "integer, intent(in) :: values_n1 !< extent for values" in generated
-    assert "integer, intent(in) :: values_n2 !< extent for values" in generated
-    assert "real(dp), dimension(values_n1, values_n2), intent(in) :: values" in generated
+    assert "integer, intent(in) :: values__n1 !< extent for values" in generated
+    assert "integer, intent(in) :: values__n2 !< extent for values" in generated
+    assert "real(dp), dimension(values__n1, values__n2), intent(in) :: values" in generated
     assert "integer(i4), intent(in) :: seed !< seed (optional)" in generated
     assert "logical, intent(in) :: has__seed !< whether seed was provided" in generated
-    assert "integer, intent(in) :: weights_n1 !< extent for weights" in generated
-    assert "integer(i4), dimension(weights_n1), intent(in) :: weights" in generated
+    assert "integer, intent(in) :: weights__n1 !< extent for weights" in generated
+    assert "integer(i4), dimension(weights__n1), intent(in) :: weights" in generated
     assert "logical, intent(in) :: has__weights !< whether weights was provided" in generated
-    assert "integer(i4), allocatable :: maybe_seed" in generated
-    assert "integer(i4), dimension(:), allocatable :: maybe_weights" in generated
+    assert "integer(i4), allocatable :: maybe__seed" in generated
+    assert "integer(i4), dimension(:), allocatable :: maybe__weights" in generated
     assert "if (has__seed) then" in generated
     assert "if (has__weights) then" in generated
     assert "status = this%set(" in generated
-    assert "seed=maybe_seed" in generated
-    assert "weights=maybe_weights" in generated
+    assert "seed=maybe__seed" in generated
+    assert "weights=maybe__weights" in generated
     assert "optional ::" not in generated
     assert "dimension(:), intent(in)" not in generated
     assert "function optimization_handle" not in generated
@@ -182,18 +182,18 @@ def test_generate_f2py_wrappers_uses_deferred_length_for_string_array_bridges(
 
     generated = output.read_text()
     assert (
-        "character(len=*), dimension(names_n1, names_n2), intent(in) :: names"
+        "character(len=*), dimension(names__n1, names__n2), intent(in) :: names"
         in generated
     )
     assert (
-        "character(len=:), dimension(:, :), allocatable :: maybe_names"
+        "character(len=:), dimension(:, :), allocatable :: maybe__names"
         in generated
     )
     assert (
-        "allocate(character(len=len(names)) :: maybe_names(names_n1, names_n2))"
+        "allocate(character(len=len(names)) :: maybe__names(names__n1, names__n2))"
         in generated
     )
-    assert "character(len=*), dimension(:, :), allocatable :: maybe_names" not in generated
+    assert "character(len=*), dimension(:, :), allocatable :: maybe__names" not in generated
 
 
 def test_generate_f2py_wrappers_exposes_set_dims_wrapper(tmp_path: Path) -> None:
@@ -220,10 +220,10 @@ def test_generate_f2py_wrappers_exposes_set_dims_wrapper(tmp_path: Path) -> None
         "!< whether n_weights was provided"
         in generated
     )
-    assert "integer, allocatable :: maybe_n_weights" in generated
+    assert "integer, allocatable :: maybe__n_weights" in generated
     assert "if (has__n_weights) then" in generated
     assert "status = this%set_dims(" in generated
-    assert "n_weights=maybe_n_weights" in generated
+    assert "n_weights=maybe__n_weights" in generated
 
 
 def test_generate_f2py_wrappers_flattens_derived_values_to_intrinsic_arguments() -> None:
@@ -240,15 +240,15 @@ def test_generate_f2py_wrappers_flattens_derived_values_to_intrinsic_arguments()
 
     assert "integer(i4), intent(in) :: period__start_year" in generated
     assert "logical, intent(in) :: has__period__start_year" in generated
-    assert "integer(i4), dimension(periods_n1), intent(in) :: periods__start_year" in generated
-    assert "logical, dimension(periods_n1), intent(in) :: has__periods__start_year" in generated
-    assert "type(period_t) :: maybe_period" in generated
-    assert "type(period_t), dimension(:), allocatable :: maybe_periods" in generated
-    assert "status = this%init_type(period=maybe_period, errmsg=errmsg)" in generated
+    assert "integer(i4), dimension(periods__n1), intent(in) :: periods__start_year" in generated
+    assert "logical, dimension(periods__n1), intent(in) :: has__periods__start_year" in generated
+    assert "type(period_t) :: maybe__period" in generated
+    assert "type(period_t), dimension(:), allocatable :: maybe__periods" in generated
+    assert "status = this%init_type(period=maybe__period, errmsg=errmsg)" in generated
     assert "where (has__periods__start_year)" in generated
     assert "status = this%set(" in generated
-    assert "period=maybe_period" in generated
-    assert "periods=maybe_periods" in generated
+    assert "period=maybe__period" in generated
+    assert "periods=maybe__periods" in generated
 
     usage = codegen.collect_f2py_kind_usage([_derived_schema()])
     assert usage.integer == {"i4"}
@@ -288,12 +288,12 @@ def test_generate_f2py_wrappers_supports_multirank_derived_arrays() -> None:
     )
 
     assert (
-        "integer(i4), dimension(periods_n1, periods_n2), intent(in) :: "
+        "integer(i4), dimension(periods__n1, periods__n2), intent(in) :: "
         "periods__start_year"
     ) in generated
-    assert "type(period_t), dimension(:, :), allocatable :: maybe_periods" in generated
-    assert "allocate(maybe_periods(periods_n1, periods_n2))" in generated
-    assert "maybe_periods(1:periods_n1, 1:periods_n2)%start_year" in generated
+    assert "type(period_t), dimension(:, :), allocatable :: maybe__periods" in generated
+    assert "allocate(maybe__periods(periods__n1, periods__n2))" in generated
+    assert "maybe__periods(1:periods__n1, 1:periods__n2)%start_year" in generated
 
 
 def test_derived_abi_names_avoid_intrinsic_collisions_and_identifier_overflow() -> None:
@@ -435,7 +435,7 @@ def test_generate_python_wrapper_normalizes_arrays_and_handles_status(
     assert kwargs["has__weights"] is False
     assert cfg.is_set("seed") is False
     assert calls[-1][1]["idx"].shape == (1,)
-    assert calls[-1][1]["has_idx"] is False
+    assert calls[-1][1]["has__idx"] is False
     cfg.from_file("optimization.nml")
     cfg.invalidate()
     assert cfg.handle == 0

@@ -295,6 +295,10 @@ def collect_local_derived_types(
     return list(collected.values())
 
 
+def _generated_name(*parts: str) -> str:
+    return "__".join(parts)
+
+
 def _build_context(
     schema: dict[str, Any],
     *,
@@ -357,7 +361,7 @@ def _build_context(
         else:
             has_default_parameter = "default" in prop
         if has_default_parameter:
-            reserved_property_default_names.add(f"{attr_name}_default".lower())
+            reserved_property_default_names.add(_generated_name(attr_name, "default").lower())
 
     module_name = f"nml_{namelist_name}"
     type_name = f"{module_name}_t"
@@ -457,13 +461,13 @@ def _build_context(
     def _register_runtime_dimension(dim_name: str) -> str:
         local_name = runtime_dimension_locals.get(dim_name)
         if local_name is None:
-            local_base = f"dim_{dim_name}"
+            local_base = _generated_name("dim", dim_name)
             local_taken = set(property_name_map) | {
                 existing.lower() for existing in runtime_dimension_locals.values()
             }
             local_name = _unique_generated_name(local_base, local_taken)
             runtime_dimension_locals[dim_name] = local_name
-            default_name = _unique_helper_import_alias(f"{dim_name}_default")
+            default_name = _unique_helper_import_alias(_generated_name(dim_name, "default"))
             _add_helper_import(f"{default_name}=>{dim_name}")
             runtime_dimensions.append(
                 {
@@ -680,12 +684,12 @@ def _build_context(
                             "has_default": has_default,
                         }
                     )
-                    constraint_name = f"{name}_{child_name}"
+                    constraint_name = _generated_name(name, child_name)
                     component_ref = f"this%{name}%{child_name}"
                     enum_values = _enum_values(child, child_info, constants)
                     if enum_values is not None:
                         enum_category = _enum_category(child_info)
-                        enum_const_name = f"{constraint_name}_enum_values"
+                        enum_const_name = _generated_name(constraint_name, "enum_values")
                         enum_literals = [
                             _format_scalar_default(value, child_info.kind, enum_category)
                             for value in enum_values
@@ -713,7 +717,7 @@ def _build_context(
                         enum_functions.append(
                             {
                                 "name": constraint_name,
-                                "func_name": f"{constraint_name}_in_enum",
+                                "func_name": _generated_name(constraint_name, "in_enum"),
                                 "arg_type_spec": _enum_arg_type_spec(child_info),
                                 "enum_values_name": enum_const_name,
                                 "use_trim": enum_category == "string",
@@ -724,7 +728,7 @@ def _build_context(
                             {
                                 "name": constraint_name,
                                 "display_name": f"{display_name}%{child_name}",
-                                "func_name": f"{constraint_name}_in_enum",
+                                "func_name": _generated_name(constraint_name, "in_enum"),
                                 "is_array": type_info.category == "array",
                                 "runtime_array": dynamic_array,
                                 "array_ref": component_ref,
@@ -743,9 +747,9 @@ def _build_context(
                         max_name = None
                         if min_value is not None:
                             min_name = (
-                                f"{constraint_name}_min_excl"
+                                _generated_name(constraint_name, "min_excl")
                                 if min_exclusive
-                                else f"{constraint_name}_min"
+                                else _generated_name(constraint_name, "min")
                             )
                             min_literal = _format_scalar_default(
                                 min_value, child_info.kind, bounds_category
@@ -756,9 +760,9 @@ def _build_context(
                             )
                         if max_value is not None:
                             max_name = (
-                                f"{constraint_name}_max_excl"
+                                _generated_name(constraint_name, "max_excl")
                                 if max_exclusive
-                                else f"{constraint_name}_max"
+                                else _generated_name(constraint_name, "max")
                             )
                             max_literal = _format_scalar_default(
                                 max_value, child_info.kind, bounds_category
@@ -777,7 +781,7 @@ def _build_context(
                         bounds_functions.append(
                             {
                                 "name": constraint_name,
-                                "func_name": f"{constraint_name}_in_bounds",
+                                "func_name": _generated_name(constraint_name, "in_bounds"),
                                 "arg_type_spec": child_info.arg_type_spec,
                                 "has_min": min_value is not None,
                                 "has_max": max_value is not None,
@@ -792,7 +796,7 @@ def _build_context(
                             {
                                 "name": constraint_name,
                                 "display_name": f"{display_name}%{child_name}",
-                                "func_name": f"{constraint_name}_in_bounds",
+                                "func_name": _generated_name(constraint_name, "in_bounds"),
                                 "is_array": type_info.category == "array",
                                 "runtime_array": dynamic_array,
                                 "array_ref": component_ref,
@@ -1092,7 +1096,7 @@ def _build_context(
             if has_default and is_required:
                 raise ValueError(f"required property '{display_name}' cannot define a default")
             if has_default:
-                default_const_name = f"{name}_default"
+                default_const_name = _generated_name(name, "default")
                 if type_info.category == "array":
                     if default_values is None:
                         raise ValueError(f"missing array default for '{display_name}'")
@@ -1110,7 +1114,7 @@ def _build_context(
                         repeat = bool(repeat_raw)
                         pad_raw = prop.get("x-fortran-default-pad")
                         if pad_raw is not None:
-                            pad_const_name = f"{name}_pad"
+                            pad_const_name = _generated_name(name, "pad")
                             pad_is_scalar = not isinstance(pad_raw, list)
                             pad_values = pad_raw if isinstance(pad_raw, list) else [pad_raw]
                             pad_values = _ensure_flat_scalar_list(pad_values, "array default pad")
@@ -1247,7 +1251,7 @@ def _build_context(
             enum_values = _enum_values(prop, type_info, constants)
             if enum_values is not None:
                 enum_category = _enum_category(type_info)
-                enum_const_name = f"{name}_enum_values"
+                enum_const_name = _generated_name(name, "enum_values")
                 enum_literals = [
                     _format_scalar_default(value, type_info.kind, enum_category)
                     for value in enum_values
@@ -1279,7 +1283,7 @@ def _build_context(
                 enum_functions.append(
                     {
                         "name": name,
-                        "func_name": f"{name}_in_enum",
+                        "func_name": _generated_name(name, "in_enum"),
                         "arg_type_spec": _enum_arg_type_spec(type_info),
                         "enum_values_name": enum_const_name,
                         "use_trim": enum_category == "string",
@@ -1291,7 +1295,7 @@ def _build_context(
                         {
                             "name": name,
                             "display_name": display_name,
-                            "func_name": f"{name}_in_enum",
+                            "func_name": _generated_name(name, "in_enum"),
                             "is_array": True,
                             "runtime_array": dynamic_array,
                             "array_ref": f"this%{name}",
@@ -1303,7 +1307,7 @@ def _build_context(
                         {
                             "name": name,
                             "display_name": display_name,
-                            "func_name": f"{name}_in_enum",
+                            "func_name": _generated_name(name, "in_enum"),
                             "is_array": False,
                             "element_ref": f"this%{name}",
                         }
@@ -1322,7 +1326,11 @@ def _build_context(
                 min_name = None
                 max_name = None
                 if min_value is not None:
-                    min_name = f"{name}_min_excl" if min_exclusive else f"{name}_min"
+                    min_name = (
+                        _generated_name(name, "min_excl")
+                        if min_exclusive
+                        else _generated_name(name, "min")
+                    )
                     min_literal = _format_scalar_default(
                         min_value, bounds_type_info.kind, bounds_category
                     )
@@ -1331,7 +1339,11 @@ def _build_context(
                         f"{min_name} = {min_literal}"
                     )
                 if max_value is not None:
-                    max_name = f"{name}_max_excl" if max_exclusive else f"{name}_max"
+                    max_name = (
+                        _generated_name(name, "max_excl")
+                        if max_exclusive
+                        else _generated_name(name, "max")
+                    )
                     max_literal = _format_scalar_default(
                         max_value, bounds_type_info.kind, bounds_category
                     )
@@ -1349,7 +1361,7 @@ def _build_context(
                 bounds_functions.append(
                     {
                         "name": name,
-                        "func_name": f"{name}_in_bounds",
+                        "func_name": _generated_name(name, "in_bounds"),
                         "arg_type_spec": bounds_type_info.arg_type_spec,
                         "has_min": min_value is not None,
                         "has_max": max_value is not None,
@@ -1365,7 +1377,7 @@ def _build_context(
                         {
                             "name": name,
                             "display_name": display_name,
-                            "func_name": f"{name}_in_bounds",
+                            "func_name": _generated_name(name, "in_bounds"),
                             "is_array": True,
                             "runtime_array": dynamic_array,
                             "array_ref": f"this%{name}",
@@ -1377,7 +1389,7 @@ def _build_context(
                         {
                             "name": name,
                             "display_name": display_name,
-                            "func_name": f"{name}_in_bounds",
+                            "func_name": _generated_name(name, "in_bounds"),
                             "is_array": False,
                             "element_ref": f"this%{name}",
                         }
@@ -1518,7 +1530,7 @@ def _build_context(
     set_dims_arguments: list[dict[str, Any]] = []
     candidate_names_in_use: set[str] = set()
     for entry in runtime_dimensions:
-        candidate_base = f"candidate_{entry['name']}"
+        candidate_base = _generated_name("candidate", str(entry["name"]))
         candidate_name = _unique_generated_name(candidate_base, candidate_names_in_use)
         candidate_names_in_use.add(candidate_name.lower())
         set_dims_arguments.append(
@@ -2429,7 +2441,7 @@ def _slice_ref(name: str, rank: int, dim: int, index_var: str) -> str:
 
 
 def _flex_bound_vars(dim: int) -> tuple[str, str]:
-    return f"lb_{dim}", f"ub_{dim}"
+    return _generated_name("lb", str(dim)), _generated_name("ub", str(dim))
 
 
 def _slice_ref_bounds(
@@ -2477,7 +2489,7 @@ def _render_partial_set_block(
 
 def _sort_bound_vars(values: set[str]) -> list[str]:
     def sort_key(name: str) -> tuple[str, int]:
-        prefix, _, suffix = name.partition("_")
+        prefix, _, suffix = name.partition("__")
         try:
             return prefix, int(suffix)
         except ValueError:

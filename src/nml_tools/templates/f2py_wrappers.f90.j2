@@ -108,26 +108,26 @@ contains
 {% endif %}
 
   !> \brief Check whether a {{ spec.namelist_name }} field is set
-  subroutine {{ spec.namelist_name }}_is_set_wrapper(handle, name, idx_n1, idx, has_idx, status, errmsg)
+  subroutine {{ spec.namelist_name }}_is_set_wrapper(handle, name, idx__n1, idx, has__idx, status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a {{ spec.type_name }} instance
     character(len=*), intent(in) :: name !< field name
-    integer, intent(in) :: idx_n1 !< extent for idx
-    integer, dimension(idx_n1), intent(in) :: idx !< optional field index values
-    logical, intent(in) :: has_idx !< whether idx was provided
+    integer, intent(in) :: idx__n1 !< extent for idx
+    integer, dimension(idx__n1), intent(in) :: idx !< optional field index values
+    logical, intent(in) :: has__idx !< whether idx was provided
     integer, intent(out) :: status !< nml-tools status code
     character(len={{ spec.errmsg_len }}), intent(out) :: errmsg !< error message for non-OK status values
     type({{ spec.type_name }}), pointer :: this
-    integer, dimension(:), allocatable :: maybe_idx
+    integer, dimension(:), allocatable :: maybe__idx
 
     call {{ spec.resolve_handle_name }}(handle, this, status, errmsg)
     if (.not. associated(this)) then
       return
     end if
-    if (has_idx) then
-      allocate(maybe_idx(idx_n1))
-      maybe_idx = idx
+    if (has__idx) then
+      allocate(maybe__idx(idx__n1))
+      maybe__idx = idx
     end if
-    status = this%is_set(name, idx=maybe_idx, errmsg=errmsg)
+    status = this%is_set(name, idx=maybe__idx, errmsg=errmsg)
   end subroutine {{ spec.namelist_name }}_is_set_wrapper
 
   !> \brief Validate the handled {{ spec.namelist_name }} instance

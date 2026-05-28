@@ -40,7 +40,7 @@ contains
     tolerance, &
     enabled, &
     has__enabled, &
-    weights_n1, &
+    weights__n1, &
     weights, &
     has__weights, &
     status, errmsg)
@@ -51,37 +51,37 @@ contains
     real(dp), intent(in) :: tolerance !< Tolerance (required)
     logical, intent(in) :: enabled !< Enabled (optional)
     logical, intent(in) :: has__enabled !< whether enabled was provided
-    integer, intent(in) :: weights_n1 !< extent for weights
-    real(dp), dimension(weights_n1), intent(in) :: weights !< Weights (optional)
+    integer, intent(in) :: weights__n1 !< extent for weights
+    real(dp), dimension(weights__n1), intent(in) :: weights !< Weights (optional)
     logical, intent(in) :: has__weights !< whether weights was provided
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_config_t), pointer :: this
-    character(len=:), allocatable :: maybe_name
-    logical, allocatable :: maybe_enabled
-    real(dp), dimension(:), allocatable :: maybe_weights
+    character(len=:), allocatable :: maybe__name
+    logical, allocatable :: maybe__enabled
+    real(dp), dimension(:), allocatable :: maybe__weights
 
     call nml_config_resolve_handle(handle, this, status, errmsg)
     if (.not. associated(this)) then
       return
     end if
     if (has__name) then
-      maybe_name = name
+      maybe__name = name
     end if
     if (has__enabled) then
-      allocate(maybe_enabled)
-      maybe_enabled = enabled
+      allocate(maybe__enabled)
+      maybe__enabled = enabled
     end if
     if (has__weights) then
-      allocate(maybe_weights(weights_n1))
-      maybe_weights = weights
+      allocate(maybe__weights(weights__n1))
+      maybe__weights = weights
     end if
     status = this%set( &
-      name=maybe_name, &
+      name=maybe__name, &
       iterations=iterations, &
       tolerance=tolerance, &
-      enabled=maybe_enabled, &
-      weights=maybe_weights, &
+      enabled=maybe__enabled, &
+      weights=maybe__weights, &
       errmsg=errmsg)
   end subroutine config_set_wrapper
 
@@ -96,43 +96,43 @@ contains
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_config_t), pointer :: this
-    integer, allocatable :: maybe_n_weights
+    integer, allocatable :: maybe__n_weights
 
     call nml_config_resolve_handle(handle, this, status, errmsg)
     if (.not. associated(this)) then
       return
     end if
     if (has__n_weights) then
-      allocate(maybe_n_weights)
-      maybe_n_weights = n_weights
+      allocate(maybe__n_weights)
+      maybe__n_weights = n_weights
     end if
     status = this%set_dims( &
-      n_weights=maybe_n_weights, &
+      n_weights=maybe__n_weights, &
       errmsg=errmsg)
   end subroutine config_set_dims_wrapper
 
 
   !> \brief Check whether a config field is set
-  subroutine config_is_set_wrapper(handle, name, idx_n1, idx, has_idx, status, errmsg)
+  subroutine config_is_set_wrapper(handle, name, idx__n1, idx, has__idx, status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
     character(len=*), intent(in) :: name !< field name
-    integer, intent(in) :: idx_n1 !< extent for idx
-    integer, dimension(idx_n1), intent(in) :: idx !< optional field index values
-    logical, intent(in) :: has_idx !< whether idx was provided
+    integer, intent(in) :: idx__n1 !< extent for idx
+    integer, dimension(idx__n1), intent(in) :: idx !< optional field index values
+    logical, intent(in) :: has__idx !< whether idx was provided
     integer, intent(out) :: status !< nml-tools status code
     character(len=512), intent(out) :: errmsg !< error message for non-OK status values
     type(nml_config_t), pointer :: this
-    integer, dimension(:), allocatable :: maybe_idx
+    integer, dimension(:), allocatable :: maybe__idx
 
     call nml_config_resolve_handle(handle, this, status, errmsg)
     if (.not. associated(this)) then
       return
     end if
-    if (has_idx) then
-      allocate(maybe_idx(idx_n1))
-      maybe_idx = idx
+    if (has__idx) then
+      allocate(maybe__idx(idx__n1))
+      maybe__idx = idx
     end if
-    status = this%is_set(name, idx=maybe_idx, errmsg=errmsg)
+    status = this%is_set(name, idx=maybe__idx, errmsg=errmsg)
   end subroutine config_is_set_wrapper
 
   !> \brief Validate the handled config instance

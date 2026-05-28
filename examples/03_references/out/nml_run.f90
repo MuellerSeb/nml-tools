@@ -23,7 +23,7 @@ module nml_run
     idx_check, &
     to_lower, &
     label_len, &
-    n_stations_default=>n_stations
+    n_stations__default=>n_stations
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -33,28 +33,28 @@ module nml_run
   implicit none
 
   ! default values
-  character(len=label_len), parameter, public :: label_default = "reference-example"
-  real(dp), parameter, public :: station_weights_default(2) = [0.5_dp, 1.0_dp]
-  character(len=label_len), parameter, public :: method_default = "RK2"
-  real(dp), parameter, public :: relaxation_default = 0.25_dp
+  character(len=label_len), parameter, public :: label__default = "reference-example"
+  real(dp), parameter, public :: station_weights__default(2) = [0.5_dp, 1.0_dp]
+  character(len=label_len), parameter, public :: method__default = "RK2"
+  real(dp), parameter, public :: relaxation__default = 0.25_dp
 
   ! enum values
   character(len=label_len), parameter, public :: &
-    method_enum_values(3) = [character(len=label_len) :: "Euler", "RK2", "RK4"]
+    method__enum_values(3) = [character(len=label_len) :: "Euler", "RK2", "RK4"]
 
   ! bounds values
-  integer(i4), parameter, public :: steps_min = 1_i4
-  integer(i4), parameter, public :: steps_max = 10000_i4
-  real(dp), parameter, public :: station_weights_min = 0.0_dp
-  real(dp), parameter, public :: relaxation_min_excl = 0.0_dp
-  real(dp), parameter, public :: relaxation_max = 0.5_dp
+  integer(i4), parameter, public :: steps__min = 1_i4
+  integer(i4), parameter, public :: steps__max = 10000_i4
+  real(dp), parameter, public :: station_weights__min = 0.0_dp
+  real(dp), parameter, public :: relaxation__min_excl = 0.0_dp
+  real(dp), parameter, public :: relaxation__max = 0.5_dp
 
   !> \class nml_run_t
   !> \brief Reference-driven run configuration
   !> \details Configuration composed from a reusable root schema and local fields.
   type, public :: nml_run_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: dim_n_stations = n_stations_default !< runtime dimension for n_stations
+    integer :: dim__n_stations = n_stations__default !< runtime dimension for n_stations
     character(len=label_len) :: label !< Run label
     integer(i4) :: steps !< Simulation steps
     real(dp), allocatable, dimension(:) :: station_weights !< Station weights
@@ -72,7 +72,7 @@ module nml_run
 contains
 
   !> \brief Check whether a value is part of an enum
-  elemental logical function method_in_enum(val, allow_missing) result(in_enum)
+  elemental logical function method__in_enum(val, allow_missing) result(in_enum)
     character(len=*), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -84,11 +84,11 @@ contains
         end if
       end if
     end if
-    in_enum = any(trim(val) == method_enum_values)
-  end function method_in_enum
+    in_enum = any(trim(val) == method__enum_values)
+  end function method__in_enum
 
   !> \brief Check whether a value is within bounds
-  elemental logical function steps_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function steps__in_bounds(val, allow_missing) result(in_bounds)
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -102,12 +102,12 @@ contains
     end if
 
     in_bounds = .true.
-    if (val < steps_min) in_bounds = .false.
-    if (val > steps_max) in_bounds = .false.
-  end function steps_in_bounds
+    if (val < steps__min) in_bounds = .false.
+    if (val > steps__max) in_bounds = .false.
+  end function steps__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function station_weights_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function station_weights__in_bounds(val, allow_missing) result(in_bounds)
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -121,11 +121,11 @@ contains
     end if
 
     in_bounds = .true.
-    if (val < station_weights_min) in_bounds = .false.
-  end function station_weights_in_bounds
+    if (val < station_weights__min) in_bounds = .false.
+  end function station_weights__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function relaxation_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function relaxation__in_bounds(val, allow_missing) result(in_bounds)
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -139,9 +139,9 @@ contains
     end if
 
     in_bounds = .true.
-    if (val <= relaxation_min_excl) in_bounds = .false.
-    if (val > relaxation_max) in_bounds = .false.
-  end function relaxation_in_bounds
+    if (val <= relaxation__min_excl) in_bounds = .false.
+    if (val > relaxation__max) in_bounds = .false.
+  end function relaxation__in_bounds
 
   !> \brief Initialize defaults and sentinels for run
   integer function nml_run_init(this, errmsg) result(status)
@@ -154,18 +154,18 @@ contains
 
     ! allocate runtime-sized fields
     if (allocated(this%station_weights)) deallocate(this%station_weights)
-    allocate(this%station_weights(this%dim_n_stations))
+    allocate(this%station_weights(this%dim__n_stations))
 
     ! sentinel values for required/optional parameters
     this%steps = -huge(this%steps) ! sentinel for required integer
     ! default values
-    this%label = label_default
+    this%label = label__default
     this%station_weights = reshape( &
-      station_weights_default, &
-      shape=[this%dim_n_stations], &
-      pad=station_weights_default)
-    this%method = method_default
-    this%relaxation = relaxation_default
+      station_weights__default, &
+      shape=[this%dim__n_stations], &
+      pad=station_weights__default)
+    this%method = method__default
+    this%relaxation = relaxation__default
   end function nml_run_init
 
   !> \brief Reset runtime dimensions for run
@@ -174,27 +174,27 @@ contains
     errmsg) result(status)
     class(nml_run_t), intent(inout) :: this !< namelist instance
     integer, intent(in), optional :: n_stations !< runtime dimension override for n_stations
-    integer :: candidate_n_stations
+    integer :: candidate__n_stations
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(n_stations)) then
-      candidate_n_stations = n_stations
+      candidate__n_stations = n_stations
     else
-      candidate_n_stations = n_stations_default
+      candidate__n_stations = n_stations__default
     end if
-    if (candidate_n_stations <= 0) then
+    if (candidate__n_stations <= 0) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'n_stations' must be positive"
       return
     end if
-    if (candidate_n_stations < 2) then
+    if (candidate__n_stations < 2) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "shape constants for 'station_weights' must allow at least 2 default values"
       return
     end if
-    this%dim_n_stations = candidate_n_stations
+    this%dim__n_stations = candidate__n_stations
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%station_weights)) deallocate(this%station_weights)
@@ -230,7 +230,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(station_weights)) deallocate(station_weights)
-    allocate(station_weights(this%dim_n_stations))
+    allocate(station_weights(this%dim__n_stations))
     label = this%label
     steps = this%steps
     station_weights = this%station_weights
@@ -289,8 +289,8 @@ contains
     character(len=*), intent(in), optional :: method !< Time integration method
     real(dp), intent(in), optional :: relaxation !< Relaxation factor
     integer :: &
-      lb_1, &
-      ub_1
+      lb__1, &
+      ub__1
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -305,9 +305,9 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'station_weights'"
         return
       end if
-      lb_1 = lbound(this%station_weights, 1)
-      ub_1 = lb_1 + size(station_weights, 1) - 1
-      this%station_weights(lb_1:ub_1) = station_weights
+      lb__1 = lbound(this%station_weights, 1)
+      ub__1 = lb__1 + size(station_weights, 1) - 1
+      this%station_weights(lb__1:ub__1) = station_weights
     end if
     if (present(method)) this%method = method
     if (present(relaxation)) this%relaxation = relaxation
@@ -410,7 +410,7 @@ contains
     ! enum constraints
     istat = this%is_set("method", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. method_in_enum(this%method)) then
+      if (.not. method__in_enum(this%method)) then
         status = NML_ERR_ENUM
         if (present(errmsg)) errmsg = "enum constraint failed: method"
         return
@@ -422,7 +422,7 @@ contains
     ! bounds constraints
     istat = this%is_set("steps", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. steps_in_bounds(this%steps)) then
+      if (.not. steps__in_bounds(this%steps)) then
         status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: steps"
         return
@@ -432,7 +432,7 @@ contains
       return
     end if
     if (allocated(this%station_weights)) then
-    if (.not. all(station_weights_in_bounds(this%station_weights, allow_missing=.true.))) then
+    if (.not. all(station_weights__in_bounds(this%station_weights, allow_missing=.true.))) then
       status = NML_ERR_BOUNDS
       if (present(errmsg)) errmsg = "bounds constraint failed: station_weights"
       return
@@ -440,7 +440,7 @@ contains
     end if
     istat = this%is_set("relaxation", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. relaxation_in_bounds(this%relaxation)) then
+      if (.not. relaxation__in_bounds(this%relaxation)) then
         status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: relaxation"
         return

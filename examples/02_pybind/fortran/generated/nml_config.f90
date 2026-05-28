@@ -28,7 +28,7 @@ module nml_config
     to_lower, &
     NML_ERR_INVALID_HANDLE, &
     str_len, &
-    n_weights_default=>n_weights
+    n_weights__default=>n_weights
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -39,13 +39,13 @@ module nml_config
   implicit none
 
   ! default values
-  character(len=str_len), parameter, public :: name_default = "pybind-example"
-  logical, parameter, public :: enabled_default = .false.
-  real(dp), parameter, public :: weights_default = 1.0_dp
+  character(len=str_len), parameter, public :: name__default = "pybind-example"
+  logical, parameter, public :: enabled__default = .false.
+  real(dp), parameter, public :: weights__default = 1.0_dp
 
   ! bounds values
-  integer(i4), parameter, public :: iterations_min = 1_i4
-  real(dp), parameter, public :: tolerance_min_excl = 0.0_dp
+  integer(i4), parameter, public :: iterations__min = 1_i4
+  real(dp), parameter, public :: tolerance__min_excl = 0.0_dp
 
   !> \class nml_config_t
   !> \brief Python binding config
@@ -56,7 +56,7 @@ module nml_config
   !!
   type, public :: nml_config_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: dim_n_weights = n_weights_default !< runtime dimension for n_weights
+    integer :: dim__n_weights = n_weights__default !< runtime dimension for n_weights
     character(len=str_len) :: name !< Config name
     integer(i4) :: iterations !< Iterations
     real(dp) :: tolerance !< Tolerance
@@ -74,7 +74,7 @@ module nml_config
 contains
 
   !> \brief Check whether a value is within bounds
-  elemental logical function iterations_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function iterations__in_bounds(val, allow_missing) result(in_bounds)
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -88,11 +88,11 @@ contains
     end if
 
     in_bounds = .true.
-    if (val < iterations_min) in_bounds = .false.
-  end function iterations_in_bounds
+    if (val < iterations__min) in_bounds = .false.
+  end function iterations__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function tolerance_in_bounds(val, allow_missing) result(in_bounds)
+  elemental logical function tolerance__in_bounds(val, allow_missing) result(in_bounds)
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
@@ -106,8 +106,8 @@ contains
     end if
 
     in_bounds = .true.
-    if (val <= tolerance_min_excl) in_bounds = .false.
-  end function tolerance_in_bounds
+    if (val <= tolerance__min_excl) in_bounds = .false.
+  end function tolerance__in_bounds
 
   !> \brief Resolve an opaque C pointer handle to a nml_config_t pointer
   subroutine nml_config_resolve_handle(handle, this, status, errmsg)
@@ -140,15 +140,15 @@ contains
 
     ! allocate runtime-sized fields
     if (allocated(this%weights)) deallocate(this%weights)
-    allocate(this%weights(this%dim_n_weights))
+    allocate(this%weights(this%dim__n_weights))
 
     ! sentinel values for required/optional parameters
     this%iterations = -huge(this%iterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
     ! default values
-    this%name = name_default
-    this%enabled = enabled_default ! bool values always need a default
-    this%weights = weights_default
+    this%name = name__default
+    this%enabled = enabled__default ! bool values always need a default
+    this%weights = weights__default
   end function nml_config_init
 
   !> \brief Reset runtime dimensions for config
@@ -157,22 +157,22 @@ contains
     errmsg) result(status)
     class(nml_config_t), intent(inout) :: this !< namelist instance
     integer, intent(in), optional :: n_weights !< runtime dimension override for n_weights
-    integer :: candidate_n_weights
+    integer :: candidate__n_weights
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(n_weights)) then
-      candidate_n_weights = n_weights
+      candidate__n_weights = n_weights
     else
-      candidate_n_weights = n_weights_default
+      candidate__n_weights = n_weights__default
     end if
-    if (candidate_n_weights <= 0) then
+    if (candidate__n_weights <= 0) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'n_weights' must be positive"
       return
     end if
-    this%dim_n_weights = candidate_n_weights
+    this%dim__n_weights = candidate__n_weights
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%weights)) deallocate(this%weights)
@@ -208,7 +208,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(weights)) deallocate(weights)
-    allocate(weights(this%dim_n_weights))
+    allocate(weights(this%dim__n_weights))
     name = this%name
     iterations = this%iterations
     tolerance = this%tolerance
@@ -267,8 +267,8 @@ contains
     logical, intent(in), optional :: enabled !< Enabled
     real(dp), dimension(:), intent(in), optional :: weights !< Weights
     integer :: &
-      lb_1, &
-      ub_1
+      lb__1, &
+      ub__1
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -285,9 +285,9 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'weights'"
         return
       end if
-      lb_1 = lbound(this%weights, 1)
-      ub_1 = lb_1 + size(weights, 1) - 1
-      this%weights(lb_1:ub_1) = weights
+      lb__1 = lbound(this%weights, 1)
+      ub__1 = lb__1 + size(weights, 1) - 1
+      this%weights(lb__1:ub__1) = weights
     end if
 
     ! mark as configured
@@ -404,7 +404,7 @@ contains
     ! bounds constraints
     istat = this%is_set("iterations", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. iterations_in_bounds(this%iterations)) then
+      if (.not. iterations__in_bounds(this%iterations)) then
         status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: iterations"
         return
@@ -415,7 +415,7 @@ contains
     end if
     istat = this%is_set("tolerance", errmsg=errmsg)
     if (istat == NML_OK) then
-      if (.not. tolerance_in_bounds(this%tolerance)) then
+      if (.not. tolerance__in_bounds(this%tolerance)) then
         status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: tolerance"
         return

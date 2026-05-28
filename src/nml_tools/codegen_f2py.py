@@ -771,7 +771,7 @@ def _one_line(value: str) -> str:
 
 
 def _array_dimension_argument_names(name: str, rank: int) -> list[str]:
-    return [f"{name}_n{idx}" for idx in range(1, rank + 1)]
+    return [f"{name}__n{idx}" for idx in range(1, rank + 1)]
 
 
 def _unique_generated_name(base_name: str, taken_names: set[str]) -> str:
@@ -794,7 +794,7 @@ def _bounded_generated_name(base_name: str) -> str:
 
 
 def _maybe_bridge_name(name: str) -> str:
-    return f"maybe_{name}"
+    return f"maybe__{name}"
 
 
 def _f2py_field_arguments(
