@@ -649,6 +649,43 @@ def test_resolve_schema_rejects_user_authored_derived_origin_marker() -> None:
         )
 
 
+@pytest.mark.parametrize("container", ["$defs", "definitions"])
+def test_resolve_schema_validates_identifiers_in_definition_containers(container: str) -> None:
+    with pytest.raises(ValueError, match="'x-fortran-type'.*must not contain '__'"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                container: {
+                    "period": {
+                        "type": "object",
+                        "x-fortran-type": "period__t",
+                        "properties": {"year": {"type": "integer"}},
+                    }
+                },
+                "properties": {"year": {"type": "integer"}},
+            }
+        )
+
+
+@pytest.mark.parametrize("container", ["allOf", "anyOf", "oneOf"])
+def test_resolve_schema_validates_identifiers_in_combinator_containers(container: str) -> None:
+    with pytest.raises(ValueError, match="property 'start__year'.*must not contain '__'"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                container: [
+                    {
+                        "type": "object",
+                        "properties": {"start__year": {"type": "integer"}},
+                    }
+                ],
+                "properties": {"year": {"type": "integer"}},
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("property_schema", "match"),
     [
@@ -674,34 +711,37 @@ def test_resolve_schema_rejects_user_authored_derived_origin_marker() -> None:
         ),
         (
             {"$ref": "#/$defs/invalid_component"},
-            "component 'start-year' must be a valid Fortran identifier",
+            "property 'start-year' must be a valid Fortran identifier",
         ),
     ],
 )
 def test_referenced_derived_type_rejects_invalid_property_forms(
     property_schema: dict[str, object], match: str
 ) -> None:
+    definitions: dict[str, dict[str, object]] = {
+        "missing_type": {
+            "type": "object",
+            "properties": {"year": {"type": "integer"}},
+        },
+        "period": {
+            "type": "object",
+            "x-fortran-type": "period_t",
+            "properties": {"year": {"type": "integer"}},
+        },
+    }
+    if property_schema.get("$ref") == "#/$defs/invalid_component":
+        definitions["invalid_component"] = {
+            "type": "object",
+            "x-fortran-type": "invalid_t",
+            "properties": {"start-year": {"type": "integer"}},
+        }
+
     with pytest.raises(ValueError, match=match):
         resolve_schema(
             {
                 "x-fortran-namelist": "run",
                 "type": "object",
-                "$defs": {
-                    "missing_type": {
-                        "type": "object",
-                        "properties": {"year": {"type": "integer"}},
-                    },
-                    "period": {
-                        "type": "object",
-                        "x-fortran-type": "period_t",
-                        "properties": {"year": {"type": "integer"}},
-                    },
-                    "invalid_component": {
-                        "type": "object",
-                        "x-fortran-type": "invalid_t",
-                        "properties": {"start-year": {"type": "integer"}},
-                    },
-                },
+                "$defs": definitions,
                 "properties": {"period": property_schema},
             }
         )
@@ -815,5 +855,107 @@ def test_inline_derived_types_reject_unsupported_v1_layouts(
                 "x-fortran-namelist": "run",
                 "type": "object",
                 "properties": {"value": property_schema},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("property_schema", "match"),
+    [
+        (
+            {"value__generated": {"type": "integer"}},
+            "property 'value__generated' must not contain",
+        ),
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period__t",
+                    "properties": {"year": {"type": "integer"}},
+                }
+            },
+            "'x-fortran-type' must not contain",
+        ),
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "x-fortran-module": "app__types",
+                    "properties": {"year": {"type": "integer"}},
+                }
+            },
+            "'x-fortran-module' must not contain",
+        ),
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {"start__year": {"type": "integer"}},
+                }
+            },
+            "property 'start__year' must not contain",
+        ),
+    ],
+)
+def test_schema_rejects_reserved_double_underscore_identifiers(
+    property_schema: dict[str, object], match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": property_schema,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("property_schema", "match"),
+    [
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": 1,
+                    "properties": {"year": {"type": "integer"}},
+                }
+            },
+            "'x-fortran-type' must be a valid Fortran identifier",
+        ),
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "x-fortran-module": 1,
+                    "properties": {"year": {"type": "integer"}},
+                }
+            },
+            "'x-fortran-module' must be a valid Fortran identifier",
+        ),
+        (
+            {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {1: {"type": "integer"}},
+                }
+            },
+            "property names must be strings",
+        ),
+    ],
+)
+def test_schema_rejects_invalid_identifier_container_values(
+    property_schema: dict[str, object], match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": property_schema,
             }
         )

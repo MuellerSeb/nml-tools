@@ -16,6 +16,7 @@ from ._utils import (
     normalize_runtime_dimensions,
     reject_constant_dimension_overlap,
     strip_trailing_whitespace,
+    validate_user_fortran_identifier,
 )
 from .codegen_fortran import (
     FieldSpec,
@@ -681,6 +682,7 @@ def _normalized_properties(schema: dict[str, Any]) -> dict[str, dict[str, Any]]:
     for raw_name, prop in properties.items():
         if not isinstance(raw_name, str):
             raise ValueError("property names must be strings")
+        validate_user_fortran_identifier(raw_name, label=f"property '{raw_name}'")
         if not isinstance(prop, dict):
             raise ValueError(f"property '{raw_name}' must be an object")
         name = raw_name.lower()

@@ -41,7 +41,7 @@ module nml_helper
 
   !> \brief Shared constants for generated namelist modules
   integer, parameter, public :: label_len = 32 !< Length of labels referenced from shared definitions.
-  integer, parameter, public :: n_stations = 4 !< Number of station weights in the run configuration.
+  integer, parameter, public :: n_stations__default = 4 !< Number of station weights in the run configuration.
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations

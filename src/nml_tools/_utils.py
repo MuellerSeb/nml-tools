@@ -6,11 +6,23 @@ import re
 from collections.abc import Mapping
 
 FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+RESERVED_IDENTIFIER_SEPARATOR = "__"
 
 
 def is_fortran_identifier(name: str) -> bool:
     """Return whether *name* is a valid Fortran identifier."""
     return FORTRAN_IDENTIFIER.match(name) is not None
+
+
+def validate_user_fortran_identifier(name: str, *, label: str) -> None:
+    """Validate a user-controlled Fortran identifier.
+
+    nml-tools reserves double underscores for generated support identifiers.
+    """
+    if not is_fortran_identifier(name):
+        raise ValueError(f"{label} must be a valid Fortran identifier")
+    if RESERVED_IDENTIFIER_SEPARATOR in name:
+        raise ValueError(f"{label} must not contain '{RESERVED_IDENTIFIER_SEPARATOR}'")
 
 
 def strip_trailing_whitespace(text: str) -> str:
@@ -31,8 +43,7 @@ def normalize_constant_values(
     for name, value in constants.items():
         if not isinstance(name, str) or not name.strip():
             raise ValueError("constant names must be non-empty strings")
-        if not is_fortran_identifier(name):
-            raise ValueError(f"constant '{name}' must be a valid Fortran identifier")
+        validate_user_fortran_identifier(name, label=f"constant '{name}'")
         canonical_name = name.lower()
         if canonical_name in normalized:
             raise ValueError(f"constant '{name}' duplicates another constant name")
@@ -52,8 +63,7 @@ def normalize_runtime_dimensions(
     for name, value in dimensions.items():
         if not isinstance(name, str) or not name.strip():
             raise ValueError("runtime dimension names must be non-empty strings")
-        if not is_fortran_identifier(name):
-            raise ValueError(f"runtime dimension '{name}' must be a valid Fortran identifier")
+        validate_user_fortran_identifier(name, label=f"runtime dimension '{name}'")
         canonical_name = name.lower()
         if canonical_name in normalized:
             raise ValueError(f"runtime dimension '{name}' duplicates another dimension name")

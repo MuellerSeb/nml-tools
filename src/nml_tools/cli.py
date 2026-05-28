@@ -15,7 +15,7 @@ import f90nml  # type: ignore
 from click.exceptions import Exit
 from packaging.version import InvalidVersion, Version
 
-from ._utils import constant_dimension_overlap, is_fortran_identifier
+from ._utils import constant_dimension_overlap, validate_user_fortran_identifier
 from ._version import __version__
 from .codegen_f2py import (
     F2pyCTypeMap,
@@ -87,8 +87,10 @@ class NamedIntegerType(_NamedIntegerTypeBase):  # type: ignore[valid-type, misc]
         name = raw_name.strip()
         if not name:
             self.fail("must use non-empty names", param, ctx)
-        if not is_fortran_identifier(name):
-            self.fail(f"{self._label} '{name}' must be a valid identifier", param, ctx)
+        try:
+            validate_user_fortran_identifier(name, label=f"{self._label} '{name}'")
+        except ValueError as exc:
+            self.fail(str(exc), param, ctx)
 
         value_text = raw_value.strip()
         if not value_text:
@@ -372,10 +374,10 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int], list[Consta
         name = name_raw.strip()
         if not name:
             raise click.ClickException("config constants must have non-empty names")
-        if not is_fortran_identifier(name):
-            raise click.ClickException(
-                f"config constant '{name}' must be a valid Fortran identifier"
-            )
+        try:
+            validate_user_fortran_identifier(name, label=f"config constant '{name}'")
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
         canonical_name = name.lower()
         if canonical_name in constants:
             raise click.ClickException(
@@ -425,10 +427,10 @@ def _load_dimensions(
         name = name_raw.strip()
         if not name:
             raise click.ClickException("config dimensions must have non-empty names")
-        if not is_fortran_identifier(name):
-            raise click.ClickException(
-                f"config dimension '{name}' must be a valid Fortran identifier"
-            )
+        try:
+            validate_user_fortran_identifier(name, label=f"config dimension '{name}'")
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
         canonical_name = name.lower()
         if canonical_name in constant_names:
             raise click.ClickException(
@@ -438,15 +440,24 @@ def _load_dimensions(
             raise click.ClickException(
                 f"config dimension '{name}' duplicates another dimension name"
             )
+        default_name = f"{canonical_name}__default"
+        if default_name in constant_names:
+            raise click.ClickException(
+                f"config dimension '{name}' default name duplicates a constant name"
+            )
         if not isinstance(entry, dict):
-            raise click.ClickException(f"config dimension '{name}' must be a table with 'value'")
-        if "value" not in entry:
-            raise click.ClickException(f"config dimension '{name}' must define 'value'")
-        value = entry.get("value")
+            raise click.ClickException(f"config dimension '{name}' must be a table with 'default'")
+        if "value" in entry:
+            raise click.ClickException(
+                f"config dimension '{name}' must use 'default', not 'value'"
+            )
+        if "default" not in entry:
+            raise click.ClickException(f"config dimension '{name}' must define 'default'")
+        value = entry.get("default")
         if isinstance(value, bool) or not isinstance(value, int):
-            raise click.ClickException(f"config dimension '{name}' value must be an integer")
+            raise click.ClickException(f"config dimension '{name}' default must be an integer")
         if value <= 0:
-            raise click.ClickException(f"config dimension '{name}' value must be positive")
+            raise click.ClickException(f"config dimension '{name}' default must be positive")
         doc = entry.get("doc")
         if doc is not None:
             if not isinstance(doc, str):
@@ -454,7 +465,7 @@ def _load_dimensions(
             doc = " ".join(doc.splitlines()).strip() or None
         specs.append(
             ConstantSpec(
-                name=canonical_name,
+                name=default_name,
                 type_spec="integer",
                 value=str(value),
                 doc=doc,

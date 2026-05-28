@@ -23,7 +23,7 @@ module nml_run
     idx_check, &
     to_lower, &
     label_len, &
-    n_stations__default=>n_stations
+    n_stations__default
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -54,7 +54,7 @@ module nml_run
   !> \details Configuration composed from a reusable root schema and local fields.
   type, public :: nml_run_t
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: dim__n_stations = n_stations__default !< runtime dimension for n_stations
+    integer :: n_stations = n_stations__default !< runtime dimension for n_stations
     character(len=label_len) :: label !< Run label
     integer(i4) :: steps !< Simulation steps
     real(dp), allocatable, dimension(:) :: station_weights !< Station weights
@@ -154,7 +154,7 @@ contains
 
     ! allocate runtime-sized fields
     if (allocated(this%station_weights)) deallocate(this%station_weights)
-    allocate(this%station_weights(this%dim__n_stations))
+    allocate(this%station_weights(this%n_stations))
 
     ! sentinel values for required/optional parameters
     this%steps = -huge(this%steps) ! sentinel for required integer
@@ -162,7 +162,7 @@ contains
     this%label = label__default
     this%station_weights = reshape( &
       station_weights__default, &
-      shape=[this%dim__n_stations], &
+      shape=[this%n_stations], &
       pad=station_weights__default)
     this%method = method__default
     this%relaxation = relaxation__default
@@ -194,7 +194,7 @@ contains
       if (present(errmsg)) errmsg = "shape constants for 'station_weights' must allow at least 2 default values"
       return
     end if
-    this%dim__n_stations = candidate__n_stations
+    this%n_stations = candidate__n_stations
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
     if (allocated(this%station_weights)) deallocate(this%station_weights)
@@ -230,7 +230,7 @@ contains
     if (status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(station_weights)) deallocate(station_weights)
-    allocate(station_weights(this%dim__n_stations))
+    allocate(station_weights(this%n_stations))
     label = this%label
     steps = this%steps
     station_weights = this%station_weights

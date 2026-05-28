@@ -31,6 +31,17 @@ Generate Fortran namelist modules, Markdown docs, and template namelists from a 
 
 These keywords extend JSON Schema with Fortran-specific requirements.
 
+### Identifier Names
+
+Names that nml-tools turns into Fortran identifiers must be valid Fortran
+identifiers and must not contain `__`. Double underscores are reserved for
+generated support names such as `seed__default`, `method__enum_values`, and
+`period__start_year__min`.
+
+Schema property names and runtime dimension names must also avoid generated
+namelist type member names: `is_configured`, `init`, `init_type`, `set_dims`,
+`from_file`, `set`, `is_set`, `is_valid`, and `filled_shape`.
+
 ### x-fortran-namelist
 
 - Location: schema root.
@@ -380,6 +391,8 @@ Named static constants used for fixed dimensions, string lengths, and generated
 helper parameters.
 
 - Each entry is a table with integer `value` and optional `doc`.
+- Names must not contain `__`; nml-tools reserves double underscores for
+  generated helper identifiers.
 - Values must be plain integers (no kind suffixes).
 - String lengths from `x-fortran-len` may use constants. Runtime dimensions are
   intentionally not supported for string lengths.
@@ -396,8 +409,14 @@ doc = "String buffer length."
 
 Named runtime array dimension defaults.
 
-- Each entry is a table with positive integer `value` and optional `doc`.
+- Each entry is a table with positive integer `default` and optional `doc`.
 - Names must be unique across `[constants]` and `[dimensions]`.
+- Names must not contain `__`; nml-tools reserves double underscores for
+  generated helper identifiers.
+- Names must not collide with namelist property names, because generated
+  Fortran stores the current runtime extent as a field with the dimension name.
+- Names must not collide with generated namelist type members such as `init`,
+  `set_dims`, or `is_valid`.
 - Entries may be used in `x-fortran-shape`, but not in `x-fortran-len`.
 - Arrays whose shape contains a `[dimensions]` name are generated as
   allocatable runtime-sized arrays.
@@ -410,7 +429,7 @@ Example:
 
 ```toml
 [dimensions.max_iter]
-value = 4
+default = 4
 doc = "Maximum number of iterations."
 ```
 
@@ -481,9 +500,10 @@ cfg.set(periods=[{"start_year": 1980}, {"start_year": 2001}])
 Only the internal f2py ABI is flattened: `%` paths are encoded with `__`, for
 example `period__start_year` and `has__period__start_year`. Generated Fortran
 support identifiers also use `__` as an internal separator, for example
-`seed__default`, `method__enum_values`, and `dim__n_periods`. Avoid `__` in
-schema property, component, and runtime dimension names to keep generated names
-readable and minimize collision fallback. Python `is_set("period.start_year")`
+`seed__default`, `method__enum_values`, and `n_periods__default`. Do not use
+`__` in schema property, component, derived type/module, constant, or runtime
+dimension names; it is reserved for generated identifiers. Python
+`is_set("period.start_year")`
 is translated to the native `is_set("period%start_year")` lookup. Nested
 sequences of mappings are accepted for multi-rank derived arrays. Flattened
 generated f2py names are made unique case-insensitively and deterministically

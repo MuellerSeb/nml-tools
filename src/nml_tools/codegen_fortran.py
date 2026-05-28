@@ -15,6 +15,7 @@ from ._utils import (
     normalize_runtime_dimensions,
     reject_constant_dimension_overlap,
     strip_trailing_whitespace,
+    validate_user_fortran_identifier,
 )
 from .schema import DERIVED_REF_ORIGIN_KEY
 from .validate import validate_schema_defaults
@@ -26,6 +27,18 @@ _TEMPLATE_ENV = Environment(
     keep_trailing_newline=True,
     undefined=StrictUndefined,
 )
+
+_RESERVED_NAMELIST_TYPE_MEMBERS = {
+    "filled_shape",
+    "from_file",
+    "init",
+    "init_type",
+    "is_configured",
+    "is_set",
+    "is_valid",
+    "set",
+    "set_dims",
+}
 
 
 @dataclass
@@ -331,7 +344,12 @@ def _build_context(
     for prop_name, prop in properties.items():
         if not isinstance(prop_name, str) or not prop_name.strip():
             raise ValueError("property names must be non-empty strings")
+        validate_user_fortran_identifier(prop_name, label=f"property '{prop_name}'")
         key = prop_name.lower()
+        if key in _RESERVED_NAMELIST_TYPE_MEMBERS:
+            raise ValueError(
+                f"property '{prop_name}' conflicts with generated namelist type member"
+            )
         if key in property_name_map:
             raise ValueError(
                 "property names must be unique (case-insensitive): "
@@ -353,16 +371,6 @@ def _build_context(
         if req_key not in required_fields:
             required_fields.append(req_key)
     required_set = set(required_fields)
-    reserved_property_default_names: set[str] = set()
-    for _, attr_name, prop in property_items:
-        has_default_parameter = False
-        if prop.get("type") == "array":
-            has_default_parameter = _array_default_value(prop) is not None
-        else:
-            has_default_parameter = "default" in prop
-        if has_default_parameter:
-            reserved_property_default_names.add(_generated_name(attr_name, "default").lower())
-
     module_name = f"nml_{namelist_name}"
     type_name = f"{module_name}_t"
     doc_class = f"{module_name}_t"
@@ -430,14 +438,6 @@ def _build_context(
     if f2py_handle_helpers:
         helper_imports.append("NML_ERR_INVALID_HANDLE")
 
-    def _helper_import_local_name(import_spec: str) -> str:
-        if "=>" in import_spec:
-            return import_spec.split("=>", 1)[0].strip()
-        return import_spec.strip()
-
-    def _helper_import_local_names() -> set[str]:
-        return {_helper_import_local_name(existing).lower() for existing in helper_imports}
-
     def _add_helper_import(name: str) -> None:
         if not any(existing.lower() == name.lower() for existing in helper_imports):
             helper_imports.append(name)
@@ -452,23 +452,27 @@ def _build_context(
                 return candidate
             index += 1
 
-    def _unique_helper_import_alias(base_name: str) -> str:
-        local_names = (
-            _helper_import_local_names() | set(static_constants) | reserved_property_default_names
-        )
-        return _unique_generated_name(base_name, local_names)
-
     def _register_runtime_dimension(dim_name: str) -> str:
         local_name = runtime_dimension_locals.get(dim_name)
         if local_name is None:
-            local_base = _generated_name("dim", dim_name)
-            local_taken = set(property_name_map) | {
-                existing.lower() for existing in runtime_dimension_locals.values()
-            }
-            local_name = _unique_generated_name(local_base, local_taken)
+            if dim_name in property_name_map:
+                raise ValueError(
+                    f"runtime dimension '{dim_name}' conflicts with property "
+                    f"'{property_name_map[dim_name]}'"
+                )
+            if dim_name in _RESERVED_NAMELIST_TYPE_MEMBERS:
+                raise ValueError(
+                    f"runtime dimension '{dim_name}' conflicts with generated "
+                    "namelist type member"
+                )
+            default_name = _generated_name(dim_name, "default")
+            if default_name.lower() in static_constants:
+                raise ValueError(
+                    f"runtime dimension default name '{default_name}' conflicts with a constant"
+                )
+            local_name = dim_name
             runtime_dimension_locals[dim_name] = local_name
-            default_name = _unique_helper_import_alias(_generated_name(dim_name, "default"))
-            _add_helper_import(f"{default_name}=>{dim_name}")
+            _add_helper_import(default_name)
             runtime_dimensions.append(
                 {
                     "name": dim_name,
@@ -1956,7 +1960,9 @@ def _derived_type_name(schema: dict[str, Any]) -> str:
     type_name = schema.get("x-fortran-type")
     if not isinstance(type_name, str) or not type_name.strip():
         raise ValueError("derived object must define non-empty 'x-fortran-type'")
-    return type_name.strip()
+    stripped = type_name.strip()
+    validate_user_fortran_identifier(stripped, label="'x-fortran-type'")
+    return stripped
 
 
 def _derived_origin(schema: dict[str, Any]) -> dict[str, Any]:

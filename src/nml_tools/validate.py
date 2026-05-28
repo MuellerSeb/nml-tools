@@ -11,6 +11,7 @@ from ._utils import (
     normalize_constant_values,
     normalize_runtime_dimensions,
     reject_constant_dimension_overlap,
+    validate_user_fortran_identifier,
 )
 
 
@@ -136,6 +137,10 @@ def _validate_property_defaults(
         if not isinstance(properties, Mapping):
             raise ValueError(f"derived property '{name}' must define object 'properties'")
         for child_name, child in properties.items():
+            if isinstance(child_name, str):
+                validate_user_fortran_identifier(
+                    child_name, label=f"derived property '{name}' component '{child_name}'"
+                )
             if not isinstance(child_name, str) or not isinstance(child, Mapping) or child.get(
                 "type"
             ) not in {"integer", "number", "boolean", "string"}:
@@ -238,16 +243,26 @@ def _validate_derived_declaration(name: str, prop: Mapping[str, Any]) -> None:
     type_name = prop.get("x-fortran-type")
     if not isinstance(type_name, str) or not type_name.strip():
         raise ValueError(f"derived property '{name}' must define non-empty 'x-fortran-type'")
-    if FORTRAN_IDENTIFIER.match(type_name.strip()) is None:
-        raise ValueError(f"derived property '{name}' x-fortran-type must be a valid identifier")
+    try:
+        validate_user_fortran_identifier(
+            type_name.strip(), label=f"derived property '{name}' x-fortran-type"
+        )
+    except ValueError as exc:
+        raise ValueError(str(exc).replace("Fortran identifier", "identifier")) from exc
     module_name = prop.get("x-fortran-module")
     if module_name is not None and (
-        not isinstance(module_name, str)
-        or FORTRAN_IDENTIFIER.match(module_name.strip()) is None
+        not isinstance(module_name, str) or not module_name.strip()
     ):
         raise ValueError(
             f"derived property '{name}' x-fortran-module must be a valid identifier"
         )
+    if isinstance(module_name, str):
+        try:
+            validate_user_fortran_identifier(
+                module_name.strip(), label=f"derived property '{name}' x-fortran-module"
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc).replace("Fortran identifier", "identifier")) from exc
 
 
 def _validate_array_default_layout(
@@ -295,6 +310,9 @@ def _normalize_properties(
     for name, prop in properties.items():
         if not isinstance(name, str):
             raise ValueError(f"schema '{namelist_name}' property names must be strings")
+        validate_user_fortran_identifier(
+            name, label=f"schema '{namelist_name}' property '{name}'"
+        )
         if not isinstance(prop, dict):
             raise ValueError(f"schema '{namelist_name}' property '{name}' must be an object")
         key = name.lower()

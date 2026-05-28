@@ -159,6 +159,34 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     assert "subroutine optimization_is_valid_wrapper" in generated
 
 
+def test_collect_f2py_kind_usage_rejects_reserved_property_separator() -> None:
+    codegen = _import_codegen_f2py()
+    schema = _schema()
+    schema["properties"]["seed__value"] = {"type": "integer"}
+
+    with pytest.raises(ValueError, match="property 'seed__value' must not contain"):
+        codegen.collect_f2py_kind_usage([schema])
+
+
+@pytest.mark.parametrize(
+    ("properties", "match"),
+    [
+        ({1: {"type": "integer"}}, "property names must be strings"),
+        ({"seed": 1}, "property 'seed' must be an object"),
+        ({"seed": {"type": "integer"}, "Seed": {"type": "integer"}}, "duplicate property"),
+    ],
+)
+def test_collect_f2py_kind_usage_rejects_invalid_property_tables(
+    properties: dict[Any, Any], match: str
+) -> None:
+    codegen = _import_codegen_f2py()
+    schema = _schema()
+    schema["properties"] = properties
+
+    with pytest.raises(ValueError, match=match):
+        codegen.collect_f2py_kind_usage([schema])
+
+
 def test_generate_f2py_wrappers_uses_deferred_length_for_string_array_bridges(
     tmp_path: Path,
 ) -> None:
@@ -302,22 +330,8 @@ def test_generate_f2py_wrappers_supports_multirank_derived_arrays() -> None:
     assert "maybe__periods(1:periods__n1, 1:periods__n2)%start_year" in generated
 
 
-def test_derived_abi_names_avoid_intrinsic_collisions_and_identifier_overflow() -> None:
+def test_derived_abi_names_avoid_identifier_overflow() -> None:
     codegen = _import_codegen_f2py()
-    collision_schema = _derived_schema()
-    collision_schema["required"].append("period__start_year")
-    collision_schema["properties"]["period__start_year"] = {"type": "integer"}
-
-    collision_spec = codegen.build_f2py_namelist_spec(
-        collision_schema,
-        dimensions={"n_periods": 2},
-    )
-    period = next(arg for arg in collision_spec.required_args if arg.name == "period")
-    assert period.derived_leaves is not None
-    start_year = next(leaf for leaf in period.derived_leaves if leaf.name == "start_year")
-    assert start_year.encoded_name == "period__start_year_1"
-    assert start_year.has_name == "has__period__start_year_1"
-
     long_field = "configured_period_field_with_a_long_descriptive_name"
     long_member = "start_year_attribute_with_a_long_descriptive_name"
     long_schema = resolve_schema(
