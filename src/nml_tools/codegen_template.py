@@ -32,6 +32,8 @@ def generate_template(
     *,
     doc_mode: str = "plain",
     value_mode: str = "empty",
+    title: str | None = None,
+    description: str | None = None,
     constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     kind_map: dict[str, str] | None = None,
@@ -43,6 +45,8 @@ def generate_template(
         schemas,
         doc_mode=doc_mode,
         value_mode=value_mode,
+        title=title,
+        description=description,
         constants=constants,
         dimensions=dimensions,
         kind_map=kind_map,
@@ -59,6 +63,8 @@ def render_template(
     *,
     doc_mode: str = "plain",
     value_mode: str = "empty",
+    title: str | None = None,
+    description: str | None = None,
     constants: dict[str, int] | None = None,
     dimensions: dict[str, int] | None = None,
     kind_map: dict[str, str] | None = None,
@@ -79,6 +85,8 @@ def render_template(
         schemas,
         doc_mode=doc_mode,
         value_mode=value_mode,
+        title=title,
+        description=description,
         constants=constants,
         dimensions=dimensions,
         kind_map=kind_map,
@@ -92,6 +100,8 @@ def _render_template(
     *,
     doc_mode: str,
     value_mode: str,
+    title: str | None,
+    description: str | None,
     constants: dict[str, int] | None,
     dimensions: dict[str, int] | None,
     kind_map: dict[str, str] | None,
@@ -138,6 +148,16 @@ def _render_template(
                 raise ValueError(
                     f"template values for namelist '{namelist_name}' include unknown field '{key}'"
                 )
+
+    if doc_mode == "documented":
+        _append_template_comment(lines, title)
+        has_title = isinstance(title, str) and bool(title.strip())
+        has_description = isinstance(description, str) and bool(description.strip())
+        if has_title and has_description:
+            lines.append("!")
+        _append_template_comment(lines, description)
+        if lines:
+            lines.append("")
 
     for schema in schemas_list:
         namelist_name = schema.get("x-fortran-namelist")
@@ -213,6 +233,13 @@ def _render_template(
     if lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines) + "\n"
+
+
+def _append_template_comment(lines: list[str], value: str | None) -> None:
+    if not isinstance(value, str) or not value.strip():
+        return
+    for line in value.strip().splitlines():
+        lines.append(f"! {line.strip()}" if line.strip() else "!")
 
 
 def _array_slice(rank: int) -> str:

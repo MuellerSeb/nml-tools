@@ -31,8 +31,8 @@ mod_path = "out/nml_report.f90"
 doc_path = "out/nml_report.md"
 
 [[templates]]
-output = "out/reference-demo.nml"
-schemas = ["schema/run.yml", "schema/report.yml"]
+path = "out/reference-demo.nml"
+namelists = ["run", "report"]
 doc_mode = "documented"
 value_mode = "filled"
 

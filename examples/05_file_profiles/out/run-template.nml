@@ -1,0 +1,21 @@
+! Main configuration
+!
+! Runtime and physics settings for the example project.
+
+! Run settings
+&run
+  ! Start year
+  start_year = 2001
+  ! End year
+  end_year = 2005
+  ! Run label
+  label = "baseline"
+/
+
+! Physics settings
+&physics
+  ! Time step
+  timestep_seconds = 3600
+  ! Use radiation
+  use_radiation = .true.
+/

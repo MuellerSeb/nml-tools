@@ -552,14 +552,44 @@ If a path is omitted, that output is not generated.
 Multiple namelists may use the same `f2py_path` or `py_path`; nml-tools
 collects the wrappers/classes into the shared file.
 
+### file_profiles (array)
+
+Named project-specific namelist file layouts.
+
+- `name` (string): unique profile name.
+- `default_file` (string): project file-name hint for tools that open/save real
+  namelist files.
+- `namelists` (list of strings): configured namelist names in file order.
+- `title` / `description` (string, optional): display and documentation metadata.
+
+`default_file` is not used for template output paths. Profiles do not define
+values or defaults; use schema defaults/examples and `[templates.values]` for
+template values.
+
+```toml
+[[file_profiles]]
+name = "main"
+title = "Main configuration"
+description = "Runtime settings for the model."
+default_file = "run.nml"
+namelists = ["run", "physics"]
+```
+
 ### templates (array)
 
 Template namelist output configuration.
 
-- `output` (string): template namelist output path.
-- `schemas` (list of strings): schemas included in the template file.
+- `path` (string): template namelist output path.
+- `profile` (string, optional): file profile whose namelists are included in the template.
+- `namelists` (list of strings, optional): namelist names included in the template.
+- `title` / `description` (string, optional): documented-template header metadata.
 - `doc_mode`: `plain` or `documented`.
 - `value_mode`: `empty`, `filled`, `minimal-empty`, or `minimal-filled`.
+
+Each template must define exactly one of `profile` or `namelists`. Template
+entries using `profile` inherit the profile `title` and `description` unless
+they override them. In documented mode, title and description are emitted as
+leading comments before the first namelist block; plain templates omit them.
 
 Optional values can override per-namelist fields for filled modes:
 
@@ -639,6 +669,7 @@ Config-driven:
 
 ```bash
 nml-tools validate --config nml-config.toml input.nml
+nml-tools validate --config nml-config.toml --profile main run.nml
 ```
 
 Schema-only:
@@ -770,9 +801,14 @@ schema = "demo.yml"
 mod_path = "out/nml_demo.f90"
 doc_path = "out/nml_demo.md"
 
+[[file_profiles]]
+name = "main"
+default_file = "demo.nml"
+namelists = ["demo"]
+
 [[templates]]
-output = "out/demo.nml"
-schemas = ["demo.yml"]
+path = "out/demo.nml"
+profile = "main"
 doc_mode = "documented"
 value_mode = "filled"
 ```

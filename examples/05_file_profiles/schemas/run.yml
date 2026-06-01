@@ -1,0 +1,26 @@
+title: Run settings
+description: Runtime controls for the example project.
+x-fortran-namelist: run
+type: object
+properties:
+  start_year:
+    title: Start year
+    description: First year of the run.
+    type: integer
+    x-fortran-kind: i4
+    default: 2001
+  end_year:
+    title: End year
+    description: Last year of the run.
+    type: integer
+    x-fortran-kind: i4
+    default: 2005
+  label:
+    title: Run label
+    description: Short label written to output metadata.
+    type: string
+    x-fortran-len: 32
+    default: baseline
+required:
+  - start_year
+  - end_year

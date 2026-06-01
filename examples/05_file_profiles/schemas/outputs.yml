@@ -1,0 +1,26 @@
+title: Output settings
+description: Output controls for the example project.
+x-fortran-namelist: outputs
+type: object
+properties:
+  write_restart:
+    title: Write restart
+    description: Whether restart files are written.
+    type: boolean
+    default: true
+  format:
+    title: Output format
+    description: File format for generated output.
+    type: string
+    x-fortran-len: 16
+    enum: [netcdf, csv]
+    default: netcdf
+  interval_hours:
+    title: Output interval
+    description: Time between output writes in hours.
+    type: integer
+    x-fortran-kind: i4
+    default: 24
+    minimum: 1
+required:
+  - format

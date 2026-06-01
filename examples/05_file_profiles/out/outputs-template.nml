@@ -1,0 +1,13 @@
+! Output configuration
+!
+! Output switches and formatting settings.
+
+! Output settings
+&outputs
+  ! Write restart
+  write_restart = .true.
+  ! Output format
+  format = "netcdf"
+  ! Output interval
+  interval_hours = 24
+/

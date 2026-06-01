@@ -117,6 +117,28 @@ class GeneratedOutput:
     content: str
 
 
+@dataclass(frozen=True)
+class LoadedNamelist:
+    """Configured namelist entry with its resolved schema."""
+
+    entry: dict[str, Any]
+    schema: dict[str, Any]
+    name: str
+    key: str
+
+
+@dataclass(frozen=True)
+class FileProfile:
+    """Project-specific logical namelist file profile."""
+
+    name: str
+    key: str
+    default_file: str
+    namelists: list[str]
+    title: str | None = None
+    description: str | None = None
+
+
 def _configure_logging(verbose: int, quiet: int) -> None:
     base_level = logging.INFO
     level = base_level - (10 * verbose) + (10 * quiet)
@@ -605,7 +627,134 @@ def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
     return entries
 
 
-def _iter_templates(config: dict[str, Any], base_dir: Path) -> list[dict[str, Any]]:
+def _load_namelist_registry(
+    config: dict[str, Any],
+    base_dir: Path,
+    resolver: SchemaResolver,
+) -> list[LoadedNamelist]:
+    entries = _iter_namelists(config, base_dir)
+    loaded: list[LoadedNamelist] = []
+    seen: dict[str, str] = {}
+    for entry in entries:
+        schema_path = entry["schema"]
+        if schema_path is None:
+            raise click.ClickException("namelists entry missing schema path")
+        try:
+            logger.debug("Loading schema %s", schema_path)
+            schema = load_schema(schema_path, resolver=resolver)
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        namelist_name = schema.get("x-fortran-namelist")
+        if not isinstance(namelist_name, str) or not namelist_name.strip():
+            raise click.ClickException("schema must define non-empty 'x-fortran-namelist'")
+        key = namelist_name.lower()
+        if key in seen:
+            raise click.ClickException(f"duplicate schema for namelist '{namelist_name}'")
+        seen[key] = namelist_name
+        loaded.append(
+            LoadedNamelist(
+                entry=entry,
+                schema=schema,
+                name=namelist_name,
+                key=key,
+            )
+        )
+    return loaded
+
+
+def _namelist_registry_by_key(
+    registry: list[LoadedNamelist],
+) -> dict[str, LoadedNamelist]:
+    return {loaded.key: loaded for loaded in registry}
+
+
+def _resolve_namelist_members(
+    raw_names: Any,
+    *,
+    registry: dict[str, LoadedNamelist],
+    label: str,
+) -> list[LoadedNamelist]:
+    if not isinstance(raw_names, list) or not raw_names:
+        raise click.ClickException(f"{label} must define non-empty 'namelists'")
+    resolved: list[LoadedNamelist] = []
+    seen: set[str] = set()
+    for raw_name in raw_names:
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise click.ClickException(f"{label} 'namelists' entries must be strings")
+        key = raw_name.lower()
+        if key in seen:
+            raise click.ClickException(f"{label} namelist '{raw_name}' duplicates another name")
+        seen.add(key)
+        loaded = registry.get(key)
+        if loaded is None:
+            raise click.ClickException(f"{label} references unknown namelist '{raw_name}'")
+        resolved.append(loaded)
+    return resolved
+
+
+def _optional_string(
+    entry: dict[str, Any],
+    key: str,
+    *,
+    label: str,
+) -> str | None:
+    value = entry.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise click.ClickException(f"{label} '{key}' must be a string")
+    return value
+
+
+def _iter_file_profiles(
+    config: dict[str, Any],
+    registry: dict[str, LoadedNamelist],
+) -> dict[str, FileProfile]:
+    raw_entries = config.get("file_profiles")
+    if raw_entries is None:
+        return {}
+    if not isinstance(raw_entries, list) or not raw_entries:
+        raise click.ClickException("config 'file_profiles' must be a non-empty list")
+
+    profiles: dict[str, FileProfile] = {}
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            raise click.ClickException("each file_profiles entry must be a table")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise click.ClickException("file_profiles entry must define string 'name'")
+        key = name.lower()
+        if key in profiles:
+            raise click.ClickException(f"file profile '{name}' duplicates another profile")
+        default_file = entry.get("default_file")
+        if not isinstance(default_file, str) or not default_file.strip():
+            raise click.ClickException("file_profiles entry must define string 'default_file'")
+        members = _resolve_namelist_members(
+            entry.get("namelists"),
+            registry=registry,
+            label=f"file profile '{name}'",
+        )
+        profiles[key] = FileProfile(
+            name=name,
+            key=key,
+            default_file=default_file,
+            namelists=[member.key for member in members],
+            title=_optional_string(entry, "title", label=f"file profile '{name}'"),
+            description=_optional_string(
+                entry,
+                "description",
+                label=f"file profile '{name}'",
+            ),
+        )
+    return profiles
+
+
+def _iter_templates(
+    config: dict[str, Any],
+    base_dir: Path,
+    registry: dict[str, LoadedNamelist],
+    profiles: dict[str, FileProfile],
+) -> list[dict[str, Any]]:
     raw_entries = config.get("templates")
     if raw_entries is None:
         return []
@@ -616,17 +765,43 @@ def _iter_templates(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
     for entry in raw_entries:
         if not isinstance(entry, dict):
             raise click.ClickException("each templates entry must be a table")
-        output_raw = entry.get("output")
-        if not isinstance(output_raw, str):
-            raise click.ClickException("templates entry must define string 'output'")
-        output_path = base_dir / output_raw
+        if "output" in entry:
+            raise click.ClickException("templates use 'path', not deprecated 'output'")
+        if "schemas" in entry:
+            raise click.ClickException("templates use 'namelists', not deprecated 'schemas'")
+        path_raw = entry.get("path")
+        if not isinstance(path_raw, str):
+            raise click.ClickException("templates entry must define string 'path'")
+        output_path = base_dir / path_raw
 
-        schemas_raw = entry.get("schemas")
-        if not isinstance(schemas_raw, list) or not schemas_raw:
-            raise click.ClickException("templates entry must define non-empty 'schemas'")
-        if not all(isinstance(item, str) for item in schemas_raw):
-            raise click.ClickException("templates 'schemas' entries must be strings")
-        schema_paths = [base_dir / item for item in schemas_raw]
+        profile_raw = entry.get("profile")
+        has_profile = profile_raw is not None
+        has_namelists = "namelists" in entry
+        if has_profile == has_namelists:
+            raise click.ClickException(
+                "templates entry must define exactly one of 'profile' or 'namelists'"
+            )
+        title = _optional_string(entry, "title", label="templates entry")
+        description = _optional_string(entry, "description", label="templates entry")
+        if has_profile:
+            if not isinstance(profile_raw, str) or not profile_raw.strip():
+                raise click.ClickException("templates 'profile' must be a string")
+            profile = profiles.get(profile_raw.lower())
+            if profile is None:
+                raise click.ClickException(
+                    f"templates entry references unknown profile '{profile_raw}'"
+                )
+            loaded_namelists = [registry[key] for key in profile.namelists]
+            if title is None:
+                title = profile.title
+            if description is None:
+                description = profile.description
+        else:
+            loaded_namelists = _resolve_namelist_members(
+                entry.get("namelists"),
+                registry=registry,
+                label="templates entry",
+            )
 
         doc_mode = entry.get("doc_mode", "plain")
         if not isinstance(doc_mode, str):
@@ -642,10 +817,12 @@ def _iter_templates(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
 
         entries.append(
             {
-                "output": output_path,
-                "schemas": schema_paths,
+                "path": output_path,
+                "schemas": [loaded.schema for loaded in loaded_namelists],
                 "doc_mode": doc_mode,
                 "value_mode": value_mode,
+                "title": title,
+                "description": description,
                 "values": values_raw,
             }
         )
@@ -675,19 +852,16 @@ def _collect_generated_outputs(
     resolver = SchemaResolver()
     outputs: list[GeneratedOutput] = []
 
-    entries = _iter_namelists(config, base_dir)
-    logger.debug("Found %d schema entries", len(entries))
-    loaded_entries: list[dict[str, Any]] = []
-    for namelist_entry in entries:
-        schema_path = namelist_entry["schema"]
-        if schema_path is None:
-            raise click.ClickException("namelists entry missing schema path")
-        try:
-            logger.debug("Loading schema %s", schema_path)
-            schema = load_schema(schema_path, resolver=resolver)
-        except (FileNotFoundError, ValueError) as exc:
-            raise click.ClickException(str(exc)) from exc
-        loaded_entries.append({"entry": namelist_entry, "schema": schema})
+    loaded_namelists = _load_namelist_registry(config, base_dir, resolver)
+    loaded_by_key = _namelist_registry_by_key(loaded_namelists)
+    profiles = _iter_file_profiles(config, loaded_by_key)
+    logger.debug("Found %d schema entries", len(loaded_namelists))
+    loaded_entries: list[dict[str, Any]] = [
+        {"entry": loaded.entry, "schema": loaded.schema} for loaded in loaded_namelists
+    ]
+    for loaded in loaded_namelists:
+        namelist_entry = loaded.entry
+        schema = loaded.schema
 
         mod_path = namelist_entry["mod_path"]
         if mod_path is not None:
@@ -734,7 +908,7 @@ def _collect_generated_outputs(
 
     try:
         local_derived_types = collect_local_derived_types(
-            [loaded["schema"] for loaded in loaded_entries],
+            [loaded.schema for loaded in loaded_namelists],
             constants=constants,
         )
         if local_derived_types and helper_path is None:
@@ -778,23 +952,21 @@ def _collect_generated_outputs(
         )
     )
 
-    template_entries = _iter_templates(config, base_dir)
+    template_entries = _iter_templates(config, base_dir, loaded_by_key, profiles)
     if template_entries:
         logger.debug("Found %d template entries", len(template_entries))
     for template_entry in template_entries:
         try:
-            schemas = []
-            for schema_path in template_entry["schemas"]:
-                logger.debug("Loading schema %s", schema_path)
-                schemas.append(load_schema(schema_path, resolver=resolver))
-            logger.debug("Rendering template at %s", template_entry["output"])
+            logger.debug("Rendering template at %s", template_entry["path"])
             outputs.append(
                 GeneratedOutput(
-                    template_entry["output"],
+                    template_entry["path"],
                     render_template(
-                        schemas,
+                        template_entry["schemas"],
                         doc_mode=template_entry["doc_mode"],
                         value_mode=template_entry["value_mode"],
+                        title=template_entry["title"],
+                        description=template_entry["description"],
                         constants=constants,
                         dimensions=dimensions,
                         kind_map=kind_map,
@@ -803,7 +975,7 @@ def _collect_generated_outputs(
                     ),
                 )
             )
-        except (FileNotFoundError, ValueError) as exc:
+        except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 
     return outputs
@@ -1144,6 +1316,11 @@ def gen_fortran(config_path: Path | None) -> None:
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option(
+    "--profile",
+    "profile_name",
+    help="Validate against one configured file profile.",
+)
+@click.option(
     "--constants",
     "constant_args",
     metavar="NAME=INT",
@@ -1168,6 +1345,7 @@ def validate(
     config_path: Path | None,
     schema_paths: tuple[Path, ...],
     input_option: Path | None,
+    profile_name: str | None,
     constant_args: tuple[tuple[str, int], ...],
     dimension_args: tuple[tuple[str, int], ...],
     input_path: Path | None,
@@ -1185,6 +1363,8 @@ def validate(
     resolver = SchemaResolver()
 
     if schema_paths:
+        if profile_name is not None:
+            raise click.ClickException("--profile can only be used with config-based validation")
         if config_path is not None:
             config, config_path = _load_config_checked(config_path)
             logger.info("Loading config from %s", config_path)
@@ -1209,17 +1389,16 @@ def validate(
         dimensions, _ = _load_dimensions(config, cfg_constants)
         constants = {**cfg_constants, **constants}
         dimensions = {**dimensions, **dimension_overrides}
-        entries = _iter_namelists(config, base_dir)
-        logger.info("Found %d schema entries", len(entries))
-        for entry in entries:
-            schema_path = entry["schema"]
-            if schema_path is None:
-                raise click.ClickException("namelists entry missing schema path")
-            try:
-                logger.info("Loading schema %s", schema_path)
-                schemas.append(load_schema(schema_path, resolver=resolver))
-            except (FileNotFoundError, ValueError) as exc:
-                raise click.ClickException(str(exc)) from exc
+        loaded_namelists = _load_namelist_registry(config, base_dir, resolver)
+        loaded_by_key = _namelist_registry_by_key(loaded_namelists)
+        if profile_name is not None:
+            profiles = _iter_file_profiles(config, loaded_by_key)
+            profile = profiles.get(profile_name.lower())
+            if profile is None:
+                raise click.ClickException(f"unknown file profile '{profile_name}'")
+            loaded_namelists = [loaded_by_key[key] for key in profile.namelists]
+        logger.info("Found %d schema entries", len(loaded_namelists))
+        schemas = [loaded.schema for loaded in loaded_namelists]
         require_all = False
 
     if not schemas:
@@ -1339,30 +1518,31 @@ def gen_template(config_path: Path | None) -> None:
     constants, _ = _load_constants(config)
     dimensions, _ = _load_dimensions(config, constants)
     _, kind_map, kind_allowlist = _load_kind_settings(config)
-    templates = _iter_templates(config, base_dir)
     resolver = SchemaResolver()
+    loaded_namelists = _load_namelist_registry(config, base_dir, resolver)
+    loaded_by_key = _namelist_registry_by_key(loaded_namelists)
+    profiles = _iter_file_profiles(config, loaded_by_key)
+    templates = _iter_templates(config, base_dir, loaded_by_key, profiles)
     if not templates:
         raise click.ClickException("config must define non-empty 'templates'")
     logger.info("Found %d template entries", len(templates))
     for entry in templates:
         try:
-            schemas = []
-            for schema_path in entry["schemas"]:
-                logger.info("Loading schema %s", schema_path)
-                schemas.append(load_schema(schema_path, resolver=resolver))
-            logger.info("Generating template at %s", entry["output"])
+            logger.info("Generating template at %s", entry["path"])
             generate_template(
-                schemas,
-                entry["output"],
+                entry["schemas"],
+                entry["path"],
                 doc_mode=entry["doc_mode"],
                 value_mode=entry["value_mode"],
+                title=entry["title"],
+                description=entry["description"],
                 constants=constants,
                 dimensions=dimensions,
                 kind_map=kind_map,
                 kind_allowlist=kind_allowlist,
                 values=entry["values"],
             )
-        except (FileNotFoundError, ValueError) as exc:
+        except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
 
 

@@ -1,0 +1,19 @@
+title: Physics settings
+description: Minimal physics switches for the example project.
+x-fortran-namelist: physics
+type: object
+properties:
+  timestep_seconds:
+    title: Time step
+    description: Model time step in seconds.
+    type: integer
+    x-fortran-kind: i4
+    default: 3600
+    minimum: 1
+  use_radiation:
+    title: Use radiation
+    description: Whether the radiation calculation is enabled.
+    type: boolean
+    default: true
+required:
+  - timestep_seconds

@@ -1,0 +1,5 @@
+&outputs
+  write_restart = .true.
+  format = "netcdf"
+  interval_hours = 24
+/
