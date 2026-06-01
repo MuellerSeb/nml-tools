@@ -62,8 +62,8 @@ f2py_path = "f2py/generated/f2py_config.f90"
 py_path = "src/nml_derived_types_example/config_wrappers.py"
 
 [[tool.nml-tools.templates]]
-output = "templates/run.nml"
-schemas = ["schema/run.yml"]
+path = "templates/run.nml"
+namelists = ["run"]
 doc_mode = "documented"
 value_mode = "filled"
 
