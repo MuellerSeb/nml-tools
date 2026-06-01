@@ -210,6 +210,116 @@ def test_parse_cli_dimensions_rejects_duplicates() -> None:
         cli_module._parse_cli_dimensions((("n_cells", 3), ("n_cells", 4)))
 
 
+def test_file_profiles_resolve_namelist_names(tmp_path: Path) -> None:
+    for name in ["run", "outputs"]:
+        (tmp_path / f"{name}.yml").write_text(
+            dedent(
+                f"""
+                title: {name}
+                x-fortran-namelist: {name}
+                type: object
+                properties:
+                  value:
+                    type: integer
+                """
+            ),
+            encoding="utf-8",
+        )
+    config = {
+        "namelists": [
+            {"schema": "run.yml"},
+            {"schema": "outputs.yml"},
+        ],
+        "file_profiles": [
+            {
+                "name": "main",
+                "title": "Main configuration",
+                "description": "Runtime settings.",
+                "default_file": "run.nml",
+                "namelists": ["run"],
+            }
+        ],
+    }
+    resolver = cli_module.SchemaResolver()
+    registry = cli_module._namelist_registry_by_key(
+        cli_module._load_namelist_registry(config, tmp_path, resolver)
+    )
+
+    profiles = cli_module._iter_file_profiles(config, registry)
+
+    assert profiles["main"].default_file == "run.nml"
+    assert profiles["main"].namelists == ["run"]
+    assert profiles["main"].title == "Main configuration"
+
+
+def test_file_profiles_reject_invalid_entries(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            title: Run
+            x-fortran-namelist: run
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    base_config = {"namelists": [{"schema": "run.yml"}]}
+    resolver = cli_module.SchemaResolver()
+    registry = cli_module._namelist_registry_by_key(
+        cli_module._load_namelist_registry(base_config, tmp_path, resolver)
+    )
+
+    invalid_configs = [
+        (
+            {
+                "file_profiles": [
+                    {"name": "main", "default_file": "run.nml", "namelists": ["run"]},
+                    {"name": "MAIN", "default_file": "other.nml", "namelists": ["run"]},
+                ]
+            },
+            "duplicates another profile",
+        ),
+        (
+            {
+                "file_profiles": [
+                    {"name": "main", "default_file": "run.nml", "namelists": ["missing"]}
+                ]
+            },
+            "unknown namelist",
+        ),
+        (
+            {
+                "file_profiles": [
+                    {"name": "main", "default_file": "run.nml", "namelists": ["run", "RUN"]}
+                ]
+            },
+            "duplicates another name",
+        ),
+        (
+            {
+                "file_profiles": [
+                    {"name": "main", "default_file": "run.nml", "namelists": ["run"], "title": 1}
+                ]
+            },
+            "'title' must be a string",
+        ),
+        (
+            {"file_profiles": [{"name": "main", "namelists": ["run"]}]},
+            "must define string 'default_file'",
+        ),
+        (
+            {"file_profiles": [{"default_file": "run.nml", "namelists": ["run"]}]},
+            "must define string 'name'",
+        ),
+    ]
+    for config, message in invalid_configs:
+        with pytest.raises(click.ClickException, match=message):
+            cli_module._iter_file_profiles(config, registry)
+
+
 def test_parse_cli_constants_rejects_duplicates() -> None:
     constant_type = cli_module.NamedIntegerType(label="constant")
     assert constant_type.convert("BUF=128", None, None) == ("buf", 128)
@@ -498,8 +608,8 @@ def test_generate_command_resolves_definitions_for_all_outputs(tmp_path: Path) -
                 doc_path = "out/nml_demo.md"
 
                 [[templates]]
-                schemas = ["schema.yml"]
-                output = "out/demo.nml"
+                path = "out/demo.nml"
+                namelists = ["demo"]
                 value_mode = "filled"
                 doc_mode = "documented"
                 """
@@ -513,6 +623,102 @@ def test_generate_command_resolves_definitions_for_all_outputs(tmp_path: Path) -
         assert "integer(i4)" in Path("out/nml_demo.f90").read_text(encoding="ascii")
         assert "Default: `2`" in Path("out/nml_demo.md").read_text(encoding="ascii")
         assert "value = 2" in Path("out/demo.nml").read_text(encoding="ascii")
+
+
+def test_template_profile_metadata_and_order(tmp_path: Path) -> None:
+    for name in ["run", "outputs"]:
+        (tmp_path / f"{name}.yml").write_text(
+            dedent(
+                f"""
+                title: {name.title()}
+                x-fortran-namelist: {name}
+                type: object
+                properties:
+                  value:
+                    type: integer
+                    default: 1
+                """
+            ),
+            encoding="utf-8",
+        )
+    config = {
+        "namelists": [
+            {"schema": "run.yml"},
+            {"schema": "outputs.yml"},
+        ],
+        "file_profiles": [
+            {
+                "name": "main",
+                "title": "Main profile",
+                "description": "Profile description.",
+                "default_file": "run.nml",
+                "namelists": ["outputs", "run"],
+            }
+        ],
+        "templates": [
+            {
+                "profile": "main",
+                "path": "out/main.nml",
+                "description": "Template description.",
+                "doc_mode": "documented",
+                "value_mode": "filled",
+            }
+        ],
+    }
+    resolver = cli_module.SchemaResolver()
+    registry = cli_module._namelist_registry_by_key(
+        cli_module._load_namelist_registry(config, tmp_path, resolver)
+    )
+    profiles = cli_module._iter_file_profiles(config, registry)
+
+    template = cli_module._iter_templates(config, tmp_path, registry, profiles)[0]
+    rendered = cli_module.render_template(
+        template["schemas"],
+        doc_mode=template["doc_mode"],
+        value_mode=template["value_mode"],
+        title=template["title"],
+        description=template["description"],
+    )
+
+    assert template["path"] == tmp_path / "out/main.nml"
+    assert rendered.startswith("! Main profile\n! Template description.")
+    assert rendered.index("&outputs") < rendered.index("&run")
+
+
+def test_templates_reject_deprecated_keys(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            title: Run
+            x-fortran-namelist: run
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    config = {"namelists": [{"schema": "run.yml"}]}
+    resolver = cli_module.SchemaResolver()
+    registry = cli_module._namelist_registry_by_key(
+        cli_module._load_namelist_registry(config, tmp_path, resolver)
+    )
+
+    with pytest.raises(click.ClickException, match="not deprecated 'output'"):
+        cli_module._iter_templates(
+            {"templates": [{"output": "out/run.nml", "namelists": ["run"]}]},
+            tmp_path,
+            registry,
+            {},
+        )
+    with pytest.raises(click.ClickException, match="not deprecated 'schemas'"):
+        cli_module._iter_templates(
+            {"templates": [{"path": "out/run.nml", "schemas": ["run.yml"]}]},
+            tmp_path,
+            registry,
+            {},
+        )
 
 
 def test_generation_subcommands_use_discovered_pyproject_config(
@@ -551,8 +757,8 @@ def test_generation_subcommands_use_discovered_pyproject_config(
             doc_path = "out/nml_demo.md"
 
             [[tool.nml-tools.templates]]
-            schemas = ["schema.yml"]
-            output = "out/demo.nml"
+            path = "out/demo.nml"
+            namelists = ["demo"]
             value_mode = "filled"
             doc_mode = "plain"
             """
@@ -607,7 +813,62 @@ def test_validate_uses_discovered_pyproject_config(
     )
     monkeypatch.chdir(tmp_path)
 
-    cli_module.validate.callback(None, (), None, (), (), Path("input.nml"))
+    cli_module.validate.callback(None, (), None, None, (), (), Path("input.nml"))
+
+
+def test_validate_profile_filters_config_schemas(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        for name in ["run", "outputs"]:
+            Path(f"{name}.yml").write_text(
+                dedent(
+                    f"""
+                    title: {name}
+                    x-fortran-namelist: {name}
+                    type: object
+                    required: [value]
+                    properties:
+                      value:
+                        type: integer
+                    """
+                ),
+                encoding="utf-8",
+            )
+        Path("nml-config.toml").write_text(
+            dedent(
+                """
+                [[namelists]]
+                schema = "run.yml"
+
+                [[namelists]]
+                schema = "outputs.yml"
+
+                [[file_profiles]]
+                name = "main"
+                default_file = "run.nml"
+                namelists = ["run"]
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("run.nml").write_text("&run\nvalue = 1\n/\n", encoding="utf-8")
+        Path("mixed.nml").write_text(
+            "&run\nvalue = 1\n/\n&outputs\nvalue = 2\n/\n",
+            encoding="utf-8",
+        )
+
+        ok = runner.invoke(cli_module.cli, ["validate", "--profile", "main", "run.nml"])
+        unknown = runner.invoke(cli_module.cli, ["validate", "--profile", "main", "mixed.nml"])
+        explicit_schema = runner.invoke(
+            cli_module.cli,
+            ["validate", "--schema", "run.yml", "--profile", "main", "run.nml"],
+        )
+
+        assert ok.exit_code == 0, ok.output
+        assert unknown.exit_code != 0
+        assert "unknown namelist 'outputs'" in unknown.output
+        assert explicit_schema.exit_code != 0
+        assert "--profile can only be used with config-based validation" in explicit_schema.output
 
 
 def test_check_command_passes_and_reports_differences(tmp_path: Path) -> None:
@@ -645,8 +906,8 @@ def test_check_command_passes_and_reports_differences(tmp_path: Path) -> None:
                 doc_path = "out/nml_demo.md"
 
                 [[tool.nml-tools.templates]]
-                schemas = ["schema.yml"]
-                output = "out/demo.nml"
+                path = "out/demo.nml"
+                namelists = ["demo"]
                 value_mode = "filled"
                 doc_mode = "plain"
                 """

@@ -145,6 +145,46 @@ def test_render_template_items_default() -> None:
     assert "grid(:) = 7" in rendered
 
 
+def test_render_template_documented_metadata_header() -> None:
+    schema = {
+        "title": "Run",
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {"steps": {"type": "integer", "default": 1}},
+    }
+
+    rendered = _import_render_template()(
+        [schema],
+        doc_mode="documented",
+        value_mode="filled",
+        title="Main template",
+        description="Line one\nLine two",
+    )
+
+    assert rendered.startswith("! Main template\n! Line one\n! Line two\n\n! Run\n&run")
+
+
+def test_render_template_plain_omits_metadata_header() -> None:
+    schema = {
+        "title": "Run",
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {"steps": {"type": "integer", "default": 1}},
+    }
+
+    rendered = _import_render_template()(
+        [schema],
+        doc_mode="plain",
+        value_mode="filled",
+        title="Main template",
+        description="Line one",
+    )
+
+    assert rendered.startswith("&run")
+    assert "Main template" not in rendered
+    assert "Line one" not in rendered
+
+
 def test_render_template_derived_values_use_component_syntax_and_nested_overrides() -> None:
     schema = resolve_schema(
         {
