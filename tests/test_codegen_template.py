@@ -161,7 +161,7 @@ def test_render_template_documented_metadata_header() -> None:
         description="Line one\nLine two",
     )
 
-    assert rendered.startswith("! Main template\n! Line one\n! Line two\n\n! Run\n&run")
+    assert rendered.startswith("! Main template\n!\n! Line one\n! Line two\n\n! Run\n&run")
 
 
 def test_render_template_plain_omits_metadata_header() -> None:

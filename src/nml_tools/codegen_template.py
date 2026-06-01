@@ -151,6 +151,10 @@ def _render_template(
 
     if doc_mode == "documented":
         _append_template_comment(lines, title)
+        has_title = isinstance(title, str) and bool(title.strip())
+        has_description = isinstance(description, str) and bool(description.strip())
+        if has_title and has_description:
+            lines.append("!")
         _append_template_comment(lines, description)
         if lines:
             lines.append("")
