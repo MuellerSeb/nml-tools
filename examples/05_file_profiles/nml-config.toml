@@ -1,0 +1,48 @@
+[kinds]
+module = "iso_fortran_env"
+integer = ["int32"]
+map = { i4 = "int32" }
+
+[[namelists]]
+schema = "schemas/run.yml"
+
+[[namelists]]
+schema = "schemas/physics.yml"
+
+[[namelists]]
+schema = "schemas/outputs.yml"
+
+[[file_profiles]]
+name = "main"
+title = "Main configuration"
+description = "Runtime and physics settings for the example project."
+default_file = "run.nml"
+namelists = ["run", "physics"]
+
+[[file_profiles]]
+name = "outputs"
+title = "Output configuration"
+description = "Output switches and formatting settings."
+default_file = "outputs.nml"
+namelists = ["outputs"]
+
+[[templates]]
+profile = "main"
+path = "out/run-template.nml"
+doc_mode = "documented"
+value_mode = "filled"
+
+[[templates]]
+profile = "outputs"
+path = "out/outputs-template.nml"
+doc_mode = "documented"
+value_mode = "filled"
+
+[[templates]]
+path = "out/run-only-template.nml"
+namelists = ["run"]
+doc_mode = "plain"
+value_mode = "minimal-filled"
+
+[templates.values.run]
+start_year = 2001
