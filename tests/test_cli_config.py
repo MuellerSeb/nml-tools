@@ -681,7 +681,7 @@ def test_template_profile_metadata_and_order(tmp_path: Path) -> None:
     )
 
     assert template["path"] == tmp_path / "out/main.nml"
-    assert rendered.startswith("! Main profile\n! Template description.")
+    assert rendered.startswith("! Main profile\n!\n! Template description.")
     assert rendered.index("&outputs") < rendered.index("&run")
 
 
