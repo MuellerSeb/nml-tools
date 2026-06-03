@@ -85,8 +85,18 @@ jobs:
         run: >
           nml-tools validate --config examples/05_file_profiles/nml-config.toml
           --profile main
-          examples/05_file_profiles/run.nml
+          examples/05_file_profiles/out/run-template.nml
       - name: Validate 05_file_profiles outputs profile
+        run: >
+          nml-tools validate --config examples/05_file_profiles/nml-config.toml
+          --profile outputs
+          examples/05_file_profiles/out/outputs-template.nml
+      - name: Validate 05_file_profiles handwritten main file
+        run: >
+          nml-tools validate --config examples/05_file_profiles/nml-config.toml
+          --profile main
+          examples/05_file_profiles/run.nml
+      - name: Validate 05_file_profiles handwritten outputs file
         run: >
           nml-tools validate --config examples/05_file_profiles/nml-config.toml
           --profile outputs
