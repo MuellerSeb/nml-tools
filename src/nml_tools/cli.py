@@ -589,13 +589,6 @@ def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
         if name_raw is not None:
             if not isinstance(name_raw, str) or not name_raw.strip():
                 raise click.ClickException("namelists entry 'name' must be a non-empty string")
-            try:
-                validate_user_fortran_identifier(
-                    name_raw.strip(),
-                    label=f"namelists entry name '{name_raw.strip()}'",
-                )
-            except ValueError as exc:
-                raise click.ClickException(str(exc)) from exc
         f2py_path = _resolve_optional_path(
             entry.get("f2py_path"),
             base_dir=base_dir,

@@ -93,6 +93,12 @@ def validate_namelist(
     namelist_name = schema.get("x-fortran-namelist")
     if not isinstance(namelist_name, str) or not namelist_name.strip():
         raise ValueError("schema must define non-empty 'x-fortran-namelist'")
+    try:
+        validate_user_fortran_identifier(
+            namelist_name.strip(), label="'x-fortran-namelist'"
+        )
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
     if schema.get("type") != "object":
         raise ValueError(f"schema '{namelist_name}' must be of type 'object'")
     properties_raw = schema.get("properties")

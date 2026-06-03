@@ -427,6 +427,19 @@ def _reject_reserved_marker(raw: Any, document: _Document, pointer: str) -> None
 
 def _validate_user_identifiers(raw: Any, document: _Document, pointer: str) -> None:
     if isinstance(raw, Mapping):
+        namelist_name = raw.get("x-fortran-namelist")
+        if namelist_name is not None:
+            if not isinstance(namelist_name, str):
+                raise ValueError(
+                    f"{_location(document, pointer)}: 'x-fortran-namelist' must be a valid "
+                    "Fortran identifier"
+                )
+            try:
+                validate_user_fortran_identifier(
+                    namelist_name.strip(), label="'x-fortran-namelist'"
+                )
+            except ValueError as exc:
+                raise ValueError(f"{_location(document, pointer)}: {exc}") from exc
         type_name = raw.get("x-fortran-type")
         if type_name is not None:
             if not isinstance(type_name, str):

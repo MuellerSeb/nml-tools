@@ -265,7 +265,7 @@ def test_namelist_config_name_can_be_omitted(tmp_path: Path) -> None:
     assert loaded.name == "run"
 
 
-def test_namelist_config_name_rejects_mismatch_and_invalid_values(tmp_path: Path) -> None:
+def test_namelist_config_name_rejects_empty_and_non_string_values(tmp_path: Path) -> None:
     (tmp_path / "run.yml").write_text(
         dedent(
             """
@@ -282,16 +282,62 @@ def test_namelist_config_name_rejects_mismatch_and_invalid_values(tmp_path: Path
     invalid_entries = [
         ({"name": 1, "schema": "run.yml"}, "must be a non-empty string"),
         ({"name": "", "schema": "run.yml"}, "must be a non-empty string"),
-        ({"name": "1bad", "schema": "run.yml"}, "valid Fortran identifier"),
-        ({"name": "run__alias", "schema": "run.yml"}, "must not contain '__'"),
     ]
     for entry, message in invalid_entries:
         with pytest.raises(click.ClickException, match=message):
             cli_module._iter_namelists({"namelists": [entry]}, tmp_path)
 
+
+def test_namelist_config_name_rejects_mismatch(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            title: Run
+            x-fortran-namelist: run
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+
     with pytest.raises(click.ClickException, match="does not match schema"):
         cli_module._load_namelist_registry(
             {"namelists": [{"name": "other", "schema": "run.yml"}]},
+            tmp_path,
+            cli_module.SchemaResolver(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "match"),
+    [
+        ("1run", "valid Fortran identifier"),
+        ("run__config", "must not contain '__'"),
+    ],
+)
+def test_namelist_config_rejects_invalid_schema_namelist_names_when_name_is_omitted(
+    tmp_path: Path, schema_name: str, match: str
+) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            f"""
+            title: Run
+            x-fortran-namelist: {schema_name}
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(click.ClickException, match=match):
+        cli_module._load_namelist_registry(
+            {"namelists": [{"schema": "run.yml"}]},
             tmp_path,
             cli_module.SchemaResolver(),
         )

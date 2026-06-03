@@ -544,6 +544,8 @@ Schema entries to generate per-namelist outputs.
 - `name` (string, optional): expected namelist name defined by the schema.
   When present, it must match the schema's `x-fortran-namelist`
   case-insensitively; the schema remains canonical for generated namelist names.
+  The schema's `x-fortran-namelist` must be a valid user Fortran identifier, and
+  `__` is reserved for generated internal names.
 - `schema` (string): schema file path.
 - `mod_path` (string, optional): Fortran module output path.
 - `doc_path` (string, optional): Markdown output path.

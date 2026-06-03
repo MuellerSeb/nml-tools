@@ -806,6 +806,26 @@ def test_referenced_derived_types_reject_unsupported_v1_layouts(
 
 
 @pytest.mark.parametrize(
+    ("namelist_name", "match"),
+    [
+        ("1run", "valid Fortran identifier"),
+        ("run__config", "must not contain '__'"),
+    ],
+)
+def test_schema_rejects_invalid_fortran_namelist_names(
+    namelist_name: str, match: str
+) -> None:
+    with pytest.raises(ValueError, match=match):
+        resolve_schema(
+            {
+                "x-fortran-namelist": namelist_name,
+                "type": "object",
+                "properties": {"value": {"type": "integer"}},
+            }
+        )
+
+
+@pytest.mark.parametrize(
     ("property_schema", "match"),
     [
         (

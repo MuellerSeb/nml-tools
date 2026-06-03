@@ -9,6 +9,7 @@ from ._utils import (
     normalize_constant_values,
     normalize_runtime_dimensions,
     reject_constant_dimension_overlap,
+    validate_user_fortran_identifier,
 )
 from .codegen_fortran import (
     FieldTypeInfo,
@@ -125,8 +126,11 @@ def _render_template(
     for schema in schemas_list:
         validate_schema_defaults(schema, constants=constants, dimensions=dimensions)
         namelist_name = schema.get("x-fortran-namelist")
-        if not isinstance(namelist_name, str):
+        if not isinstance(namelist_name, str) or not namelist_name.strip():
             raise ValueError("schema must define 'x-fortran-namelist'")
+        validate_user_fortran_identifier(
+            namelist_name.strip(), label="'x-fortran-namelist'"
+        )
         schema_by_name[namelist_name] = schema
 
     for namelist_name, namelist_values in values_map.items():
@@ -161,8 +165,11 @@ def _render_template(
 
     for schema in schemas_list:
         namelist_name = schema.get("x-fortran-namelist")
-        if not isinstance(namelist_name, str):
+        if not isinstance(namelist_name, str) or not namelist_name.strip():
             raise ValueError("schema must define 'x-fortran-namelist'")
+        validate_user_fortran_identifier(
+            namelist_name.strip(), label="'x-fortran-namelist'"
+        )
         if schema.get("type") != "object":
             raise ValueError("schema root must be of type 'object'")
         properties = schema.get("properties")
