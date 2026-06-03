@@ -582,14 +582,19 @@ Template namelist output configuration.
 - `path` (string): template namelist output path.
 - `profile` (string, optional): file profile whose namelists are included in the template.
 - `namelists` (list of strings, optional): namelist names included in the template.
+- `schemas` (list of strings, optional): backward-compatible schema paths for
+  namelist inclusion. These paths must match configured `[[namelists]].schema`
+  entries and are converted internally to `namelists`.
 - `title` / `description` (string, optional): documented-template header metadata.
 - `doc_mode`: `plain` or `documented`.
 - `value_mode`: `empty`, `filled`, `minimal-empty`, or `minimal-filled`.
 
-Each template must define exactly one of `profile` or `namelists`. Template
-entries using `profile` inherit the profile `title` and `description` unless
-they override them. In documented mode, title and description are emitted as
-leading comments before the first namelist block; plain templates omit them.
+Each template must define exactly one of `profile`, `namelists`, or legacy
+`schemas`. If `schemas` is used, neither `profile` nor `namelists` may be
+present. Template entries using `profile` inherit the profile `title` and
+`description` unless they override them. In documented mode, title and
+description are emitted as leading comments before the first namelist block;
+plain templates omit them.
 
 Optional values can override per-namelist fields for filled modes:
 

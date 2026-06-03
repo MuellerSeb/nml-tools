@@ -692,6 +692,44 @@ def _resolve_namelist_members(
     return resolved
 
 
+def _resolve_template_schema_members(
+    raw_paths: Any,
+    *,
+    base_dir: Path,
+    registry: dict[str, LoadedNamelist],
+) -> list[LoadedNamelist]:
+    """Resolve legacy template schema paths to configured namelist entries."""
+    if not isinstance(raw_paths, list) or not raw_paths:
+        raise click.ClickException("templates 'schemas' must be a non-empty list")
+    by_schema_path: dict[Path, LoadedNamelist] = {}
+    for loaded in registry.values():
+        schema_path = loaded.entry["schema"]
+        if isinstance(schema_path, Path):
+            by_schema_path[schema_path.resolve()] = loaded
+
+    resolved: list[LoadedNamelist] = []
+    seen: set[Path] = set()
+    for raw_path in raw_paths:
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            raise click.ClickException("templates 'schemas' entries must be strings")
+        schema_path = Path(raw_path)
+        if not schema_path.is_absolute():
+            schema_path = base_dir / schema_path
+        canonical_path = schema_path.resolve()
+        if canonical_path in seen:
+            raise click.ClickException(
+                f"templates schema '{raw_path}' duplicates another schema"
+            )
+        seen.add(canonical_path)
+        matched = by_schema_path.get(canonical_path)
+        if matched is None:
+            raise click.ClickException(
+                f"templates schema '{raw_path}' does not match a configured namelist schema"
+            )
+        resolved.append(matched)
+    return resolved
+
+
 def _optional_string(
     entry: dict[str, Any],
     key: str,
@@ -767,8 +805,6 @@ def _iter_templates(
             raise click.ClickException("each templates entry must be a table")
         if "output" in entry:
             raise click.ClickException("templates use 'path', not deprecated 'output'")
-        if "schemas" in entry:
-            raise click.ClickException("templates use 'namelists', not deprecated 'schemas'")
         path_raw = entry.get("path")
         if not isinstance(path_raw, str):
             raise click.ClickException("templates entry must define string 'path'")
@@ -777,7 +813,12 @@ def _iter_templates(
         profile_raw = entry.get("profile")
         has_profile = profile_raw is not None
         has_namelists = "namelists" in entry
-        if has_profile == has_namelists:
+        has_schemas = "schemas" in entry
+        if has_schemas and (has_profile or has_namelists):
+            raise click.ClickException(
+                "templates entry with 'schemas' must not define 'profile' or 'namelists'"
+            )
+        if not has_schemas and has_profile == has_namelists:
             raise click.ClickException(
                 "templates entry must define exactly one of 'profile' or 'namelists'"
             )
@@ -796,6 +837,12 @@ def _iter_templates(
                 title = profile.title
             if description is None:
                 description = profile.description
+        elif has_schemas:
+            loaded_namelists = _resolve_template_schema_members(
+                entry.get("schemas"),
+                base_dir=base_dir,
+                registry=registry,
+            )
         else:
             loaded_namelists = _resolve_namelist_members(
                 entry.get("namelists"),
