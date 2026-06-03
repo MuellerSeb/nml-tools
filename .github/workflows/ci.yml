@@ -71,6 +71,8 @@ jobs:
         run: nml-tools check --config examples/03_references/nml-config.toml --diff
       - name: Check generated 04_derived_types files
         run: nml-tools check --config examples/04_derived_types/pyproject.toml --diff
+      - name: Check generated 05_file_profiles files
+        run: nml-tools check --config examples/05_file_profiles/nml-config.toml --diff
       - name: Validate 03_references template
         run: >
           nml-tools validate --config examples/03_references/nml-config.toml
@@ -79,6 +81,26 @@ jobs:
         run: >
           nml-tools validate --config examples/04_derived_types/pyproject.toml
           examples/04_derived_types/templates/run.nml
+      - name: Validate 05_file_profiles main profile
+        run: >
+          nml-tools validate --config examples/05_file_profiles/nml-config.toml
+          --profile main
+          examples/05_file_profiles/out/run-template.nml
+      - name: Validate 05_file_profiles outputs profile
+        run: >
+          nml-tools validate --config examples/05_file_profiles/nml-config.toml
+          --profile outputs
+          examples/05_file_profiles/out/outputs-template.nml
+      - name: Validate 05_file_profiles handwritten main file
+        run: >
+          nml-tools validate --config examples/05_file_profiles/nml-config.toml
+          --profile main
+          examples/05_file_profiles/run.nml
+      - name: Validate 05_file_profiles handwritten outputs file
+        run: >
+          nml-tools validate --config examples/05_file_profiles/nml-config.toml
+          --profile outputs
+          examples/05_file_profiles/outputs.nml
       - name: Build 01_simple
         run: >
           cmake -S examples/01_simple -B build/01_simple -G Ninja
