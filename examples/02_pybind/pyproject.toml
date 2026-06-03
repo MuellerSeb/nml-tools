@@ -54,6 +54,7 @@ dp = "double"
 i4 = "int"
 
 [[tool.nml-tools.namelists]]
+name = "config"
 schema = "schema/config.yml"
 mod_path = "fortran/generated/nml_config.f90"
 f2py_path = "f2py/generated/f2py_config.f90"

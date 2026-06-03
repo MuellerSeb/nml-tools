@@ -30,6 +30,7 @@ md_doxygen_id_from_name = false  # add {#<namelist>} to Markdown header
 md_add_toc_statement = false     # insert [TOC] after the header
 
 [[namelists]]
+name = "optimization"
 schema = "optimization.yml"           # schema defining the namelist file
 mod_path = "out/nml_optimization.f90" # target path to create Fortran module
 doc_path = "out/nml_optimization.md"  # target path to create documentation file

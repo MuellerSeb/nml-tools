@@ -55,6 +55,7 @@ f2cmap_path = "f2py/generated/.f2py_f2cmap"
 i4 = "int"
 
 [[tool.nml-tools.namelists]]
+name = "run"
 schema = "schema/run.yml"
 mod_path = "fortran/generated/nml_run.f90"
 doc_path = "docs/run.md"

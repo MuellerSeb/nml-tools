@@ -21,11 +21,13 @@ integer = ["int32"]
 map = { dp = "real64", i4 = "int32" }
 
 [[namelists]]
+name = "run"
 schema = "schema/run.yml"
 mod_path = "out/nml_run.f90"
 doc_path = "out/nml_run.md"
 
 [[namelists]]
+name = "report"
 schema = "schema/report.yml"
 mod_path = "out/nml_report.f90"
 doc_path = "out/nml_report.md"

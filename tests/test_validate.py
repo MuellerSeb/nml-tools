@@ -21,6 +21,26 @@ def test_validate_namelist_rejects_unknown_property() -> None:
         validate_namelist(schema, namelist)
 
 
+@pytest.mark.parametrize(
+    ("namelist_name", "match"),
+    [
+        ("1config", "valid Fortran identifier"),
+        ("config__run", "must not contain '__'"),
+        ("config ", "valid Fortran identifier"),
+    ],
+)
+def test_validate_namelist_rejects_invalid_schema_namelist_names(
+    namelist_name: str, match: str
+) -> None:
+    schema = {
+        "x-fortran-namelist": namelist_name,
+        "type": "object",
+        "properties": {"foo": {"type": "integer"}},
+    }
+    with pytest.raises(ValueError, match=match):
+        validate_namelist(schema, {"foo": 1})
+
+
 def test_normalize_config_values_accept_none_and_reject_empty_names() -> None:
     assert normalize_constant_values(None) == {}
     assert normalize_runtime_dimensions(None) == {}

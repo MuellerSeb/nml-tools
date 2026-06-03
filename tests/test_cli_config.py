@@ -210,6 +210,140 @@ def test_parse_cli_dimensions_rejects_duplicates() -> None:
         cli_module._parse_cli_dimensions((("n_cells", 3), ("n_cells", 4)))
 
 
+def test_namelist_config_name_matches_schema_name_case_insensitively(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            title: Run
+            x-fortran-namelist: Run
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    config = {"namelists": [{"name": "run", "schema": "run.yml"}]}
+
+    entry = cli_module._iter_namelists(config, tmp_path)[0]
+    loaded = cli_module._load_namelist_registry(
+        config,
+        tmp_path,
+        cli_module.SchemaResolver(),
+    )[0]
+
+    assert entry["name"] == "run"
+    assert loaded.name == "Run"
+    assert loaded.key == "run"
+
+
+def test_namelist_config_name_can_be_omitted(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            title: Run
+            x-fortran-namelist: run
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    config = {"namelists": [{"schema": "run.yml"}]}
+
+    entry = cli_module._iter_namelists(config, tmp_path)[0]
+    loaded = cli_module._load_namelist_registry(
+        config,
+        tmp_path,
+        cli_module.SchemaResolver(),
+    )[0]
+
+    assert entry["name"] is None
+    assert loaded.name == "run"
+
+
+def test_namelist_config_name_rejects_empty_and_non_string_values(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            title: Run
+            x-fortran-namelist: run
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    invalid_entries = [
+        ({"name": 1, "schema": "run.yml"}, "must be a non-empty string"),
+        ({"name": "", "schema": "run.yml"}, "must be a non-empty string"),
+    ]
+    for entry, message in invalid_entries:
+        with pytest.raises(click.ClickException, match=message):
+            cli_module._iter_namelists({"namelists": [entry]}, tmp_path)
+
+
+def test_namelist_config_name_rejects_mismatch(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            title: Run
+            x-fortran-namelist: run
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(click.ClickException, match="does not match schema"):
+        cli_module._load_namelist_registry(
+            {"namelists": [{"name": "other", "schema": "run.yml"}]},
+            tmp_path,
+            cli_module.SchemaResolver(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("schema_name", "match"),
+    [
+        ("1run", "valid Fortran identifier"),
+        ("run__config", "must not contain '__'"),
+        (" run", "valid Fortran identifier"),
+    ],
+)
+def test_namelist_config_rejects_invalid_schema_namelist_names_when_name_is_omitted(
+    tmp_path: Path, schema_name: str, match: str
+) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            f"""
+            title: Run
+            x-fortran-namelist: {schema_name!r}
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(click.ClickException, match=match):
+        cli_module._load_namelist_registry(
+            {"namelists": [{"schema": "run.yml"}]},
+            tmp_path,
+            cli_module.SchemaResolver(),
+        )
+
+
 def test_file_profiles_resolve_namelist_names(tmp_path: Path) -> None:
     for name in ["run", "outputs"]:
         (tmp_path / f"{name}.yml").write_text(
@@ -250,6 +384,49 @@ def test_file_profiles_resolve_namelist_names(tmp_path: Path) -> None:
     assert profiles["main"].default_file == "run.nml"
     assert profiles["main"].namelists == ["run"]
     assert profiles["main"].title == "Main configuration"
+
+
+def test_named_namelists_work_for_profiles_and_templates(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            title: Run
+            x-fortran-namelist: run
+            type: object
+            properties:
+              value:
+                type: integer
+                default: 3
+            """
+        ),
+        encoding="utf-8",
+    )
+    config = {
+        "namelists": [{"name": "run", "schema": "run.yml"}],
+        "file_profiles": [
+            {
+                "name": "main",
+                "default_file": "run.nml",
+                "namelists": ["run"],
+            }
+        ],
+        "templates": [{"path": "out/run.nml", "namelists": ["run"], "value_mode": "filled"}],
+    }
+    resolver = cli_module.SchemaResolver()
+    registry = cli_module._namelist_registry_by_key(
+        cli_module._load_namelist_registry(config, tmp_path, resolver)
+    )
+    profiles = cli_module._iter_file_profiles(config, registry)
+
+    template = cli_module._iter_templates(config, tmp_path, registry, profiles)[0]
+    rendered = cli_module.render_template(
+        template["schemas"],
+        value_mode=template["value_mode"],
+    )
+
+    assert profiles["main"].namelists == ["run"]
+    assert "&run" in rendered
+    assert "value = 3" in rendered
 
 
 def test_file_profiles_reject_invalid_entries(tmp_path: Path) -> None:
@@ -685,6 +862,45 @@ def test_template_profile_metadata_and_order(tmp_path: Path) -> None:
     assert rendered.index("&outputs") < rendered.index("&run")
 
 
+def test_templates_accept_legacy_schemas_for_namelist_inclusion(tmp_path: Path) -> None:
+    for name in ["run", "outputs"]:
+        (tmp_path / f"{name}.yml").write_text(
+            dedent(
+                f"""
+                title: {name.title()}
+                x-fortran-namelist: {name}
+                type: object
+                properties:
+                  value:
+                    type: integer
+                """
+            ),
+            encoding="utf-8",
+        )
+    config = {
+        "namelists": [
+            {"schema": "run.yml"},
+            {"schema": "outputs.yml"},
+        ],
+        "templates": [
+            {
+                "path": "out/legacy.nml",
+                "schemas": ["outputs.yml", "run.yml"],
+            }
+        ],
+    }
+    resolver = cli_module.SchemaResolver()
+    registry = cli_module._namelist_registry_by_key(
+        cli_module._load_namelist_registry(config, tmp_path, resolver)
+    )
+
+    template = cli_module._iter_templates(config, tmp_path, registry, {})[0]
+    rendered = cli_module.render_template(template["schemas"])
+
+    assert template["path"] == tmp_path / "out/legacy.nml"
+    assert rendered.index("&outputs") < rendered.index("&run")
+
+
 def test_templates_reject_deprecated_keys(tmp_path: Path) -> None:
     (tmp_path / "run.yml").write_text(
         dedent(
@@ -712,9 +928,45 @@ def test_templates_reject_deprecated_keys(tmp_path: Path) -> None:
             registry,
             {},
         )
-    with pytest.raises(click.ClickException, match="not deprecated 'schemas'"):
+
+
+def test_templates_reject_invalid_legacy_schemas(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            title: Run
+            x-fortran-namelist: run
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    config = {"namelists": [{"schema": "run.yml"}]}
+    resolver = cli_module.SchemaResolver()
+    registry = cli_module._namelist_registry_by_key(
+        cli_module._load_namelist_registry(config, tmp_path, resolver)
+    )
+
+    with pytest.raises(click.ClickException, match="must not define 'profile' or 'namelists'"):
         cli_module._iter_templates(
-            {"templates": [{"path": "out/run.nml", "schemas": ["run.yml"]}]},
+            {"templates": [{"path": "out/run.nml", "schemas": ["run.yml"], "namelists": ["run"]}]},
+            tmp_path,
+            registry,
+            {},
+        )
+    with pytest.raises(click.ClickException, match="does not match a configured namelist schema"):
+        cli_module._iter_templates(
+            {"templates": [{"path": "out/run.nml", "schemas": ["missing.yml"]}]},
+            tmp_path,
+            registry,
+            {},
+        )
+    with pytest.raises(click.ClickException, match="duplicates another schema"):
+        cli_module._iter_templates(
+            {"templates": [{"path": "out/run.nml", "schemas": ["run.yml", "run.yml"]}]},
             tmp_path,
             registry,
             {},

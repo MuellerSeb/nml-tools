@@ -372,6 +372,7 @@ minimum-version = "0.2.2"
 path = "out/nml_helper.f90"
 
 [[tool.nml-tools.namelists]]
+name = "optimization"
 schema = "optimization.yml"
 mod_path = "out/nml_optimization.f90"
 ```
@@ -540,6 +541,11 @@ Optional extra module documentation appended after the generated `\brief` and
 
 Schema entries to generate per-namelist outputs.
 
+- `name` (string, optional): expected namelist name defined by the schema.
+  When present, it must match the schema's `x-fortran-namelist`
+  case-insensitively; the schema remains canonical for generated namelist names.
+  The schema's `x-fortran-namelist` must be a valid user Fortran identifier, and
+  `__` is reserved for generated internal names.
 - `schema` (string): schema file path.
 - `mod_path` (string, optional): Fortran module output path.
 - `doc_path` (string, optional): Markdown output path.
@@ -551,6 +557,8 @@ If a path is omitted, that output is not generated.
 
 Multiple namelists may use the same `f2py_path` or `py_path`; nml-tools
 collects the wrappers/classes into the shared file.
+`file_profiles[].namelists` and `templates[].namelists` refer to these
+expected namelist names.
 
 ### file_profiles (array)
 
@@ -582,14 +590,19 @@ Template namelist output configuration.
 - `path` (string): template namelist output path.
 - `profile` (string, optional): file profile whose namelists are included in the template.
 - `namelists` (list of strings, optional): namelist names included in the template.
+- `schemas` (list of strings, optional): backward-compatible schema paths for
+  namelist inclusion. These paths must match configured `[[namelists]].schema`
+  entries and are loaded through the same internal template schema list.
 - `title` / `description` (string, optional): documented-template header metadata.
 - `doc_mode`: `plain` or `documented`.
 - `value_mode`: `empty`, `filled`, `minimal-empty`, or `minimal-filled`.
 
-Each template must define exactly one of `profile` or `namelists`. Template
-entries using `profile` inherit the profile `title` and `description` unless
-they override them. In documented mode, title and description are emitted as
-leading comments before the first namelist block; plain templates omit them.
+Each template must define exactly one of `profile`, `namelists`, or legacy
+`schemas`. If `schemas` is used, neither `profile` nor `namelists` may be
+present. Template entries using `profile` inherit the profile `title` and
+`description` unless they override them. In documented mode, title and
+description are emitted as leading comments before the first namelist block;
+plain templates omit them.
 
 Optional values can override per-namelist fields for filled modes:
 
@@ -797,6 +810,7 @@ integer = ["int32"]
 map = { dp = "real64", i4 = "int32" }
 
 [[namelists]]
+name = "demo"
 schema = "demo.yml"
 mod_path = "out/nml_demo.f90"
 doc_path = "out/nml_demo.md"

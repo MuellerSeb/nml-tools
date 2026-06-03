@@ -329,8 +329,9 @@ def _build_context(
     if "x-fortran-kind-module" in schema:
         raise ValueError("schema must not define 'x-fortran-kind-module'")
     namelist_name = schema.get("x-fortran-namelist")
-    if not isinstance(namelist_name, str):
+    if not isinstance(namelist_name, str) or not namelist_name.strip():
         raise ValueError("schema must define 'x-fortran-namelist'")
+    validate_user_fortran_identifier(namelist_name, label="'x-fortran-namelist'")
 
     if schema.get("type") != "object":
         raise ValueError("schema root must be of type 'object'")
