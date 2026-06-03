@@ -4,12 +4,15 @@ integer = ["int32"]
 map = { i4 = "int32" }
 
 [[namelists]]
+name = "run"
 schema = "schemas/run.yml"
 
 [[namelists]]
+name = "physics"
 schema = "schemas/physics.yml"
 
 [[namelists]]
+name = "outputs"
 schema = "schemas/outputs.yml"
 
 [[file_profiles]]
