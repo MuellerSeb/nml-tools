@@ -577,7 +577,7 @@ def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
     if not isinstance(raw_entries, list) or not raw_entries:
         raise click.ClickException("config must define non-empty 'namelists'")
 
-    entries: list[dict[str, Path | None]] = []
+    entries: list[dict[str, Any]] = []
     for entry in raw_entries:
         if not isinstance(entry, dict):
             raise click.ClickException("each namelists entry must be a table")
@@ -585,6 +585,17 @@ def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
         if not isinstance(schema_raw, str):
             raise click.ClickException("namelists entry must define string 'schema'")
         schema_path = base_dir / schema_raw
+        name_raw = entry.get("name")
+        if name_raw is not None:
+            if not isinstance(name_raw, str) or not name_raw.strip():
+                raise click.ClickException("namelists entry 'name' must be a non-empty string")
+            try:
+                validate_user_fortran_identifier(
+                    name_raw.strip(),
+                    label=f"namelists entry name '{name_raw.strip()}'",
+                )
+            except ValueError as exc:
+                raise click.ClickException(str(exc)) from exc
         f2py_path = _resolve_optional_path(
             entry.get("f2py_path"),
             base_dir=base_dir,
@@ -608,6 +619,7 @@ def _iter_namelists(config: dict[str, Any], base_dir: Path) -> list[dict[str, An
             raise click.ClickException("namelists entry with 'py_path' must define 'f2py_path'")
         entries.append(
             {
+                "name": name_raw.strip() if isinstance(name_raw, str) else None,
                 "schema": schema_path,
                 "mod_path": mod_path,
                 "doc_path": _resolve_optional_path(
@@ -647,6 +659,12 @@ def _load_namelist_registry(
         namelist_name = schema.get("x-fortran-namelist")
         if not isinstance(namelist_name, str) or not namelist_name.strip():
             raise click.ClickException("schema must define non-empty 'x-fortran-namelist'")
+        configured_name = entry.get("name")
+        if isinstance(configured_name, str) and configured_name.lower() != namelist_name.lower():
+            raise click.ClickException(
+                f"namelists entry name '{configured_name}' does not match "
+                f"schema x-fortran-namelist '{namelist_name}'"
+            )
         key = namelist_name.lower()
         if key in seen:
             raise click.ClickException(f"duplicate schema for namelist '{namelist_name}'")
