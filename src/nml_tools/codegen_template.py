@@ -128,9 +128,7 @@ def _render_template(
         namelist_name = schema.get("x-fortran-namelist")
         if not isinstance(namelist_name, str) or not namelist_name.strip():
             raise ValueError("schema must define 'x-fortran-namelist'")
-        validate_user_fortran_identifier(
-            namelist_name.strip(), label="'x-fortran-namelist'"
-        )
+        validate_user_fortran_identifier(namelist_name, label="'x-fortran-namelist'")
         schema_by_name[namelist_name] = schema
 
     for namelist_name, namelist_values in values_map.items():
@@ -167,9 +165,7 @@ def _render_template(
         namelist_name = schema.get("x-fortran-namelist")
         if not isinstance(namelist_name, str) or not namelist_name.strip():
             raise ValueError("schema must define 'x-fortran-namelist'")
-        validate_user_fortran_identifier(
-            namelist_name.strip(), label="'x-fortran-namelist'"
-        )
+        validate_user_fortran_identifier(namelist_name, label="'x-fortran-namelist'")
         if schema.get("type") != "object":
             raise ValueError("schema root must be of type 'object'")
         properties = schema.get("properties")

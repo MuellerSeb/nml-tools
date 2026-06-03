@@ -435,9 +435,7 @@ def _validate_user_identifiers(raw: Any, document: _Document, pointer: str) -> N
                     "Fortran identifier"
                 )
             try:
-                validate_user_fortran_identifier(
-                    namelist_name.strip(), label="'x-fortran-namelist'"
-                )
+                validate_user_fortran_identifier(namelist_name, label="'x-fortran-namelist'")
             except ValueError as exc:
                 raise ValueError(f"{_location(document, pointer)}: {exc}") from exc
         type_name = raw.get("x-fortran-type")

@@ -26,6 +26,7 @@ def test_validate_namelist_rejects_unknown_property() -> None:
     [
         ("1config", "valid Fortran identifier"),
         ("config__run", "must not contain '__'"),
+        ("config ", "valid Fortran identifier"),
     ],
 )
 def test_validate_namelist_rejects_invalid_schema_namelist_names(

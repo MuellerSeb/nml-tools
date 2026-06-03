@@ -316,6 +316,7 @@ def test_namelist_config_name_rejects_mismatch(tmp_path: Path) -> None:
     [
         ("1run", "valid Fortran identifier"),
         ("run__config", "must not contain '__'"),
+        (" run", "valid Fortran identifier"),
     ],
 )
 def test_namelist_config_rejects_invalid_schema_namelist_names_when_name_is_omitted(
@@ -325,7 +326,7 @@ def test_namelist_config_rejects_invalid_schema_namelist_names_when_name_is_omit
         dedent(
             f"""
             title: Run
-            x-fortran-namelist: {schema_name}
+            x-fortran-namelist: {schema_name!r}
             type: object
             properties:
               value:

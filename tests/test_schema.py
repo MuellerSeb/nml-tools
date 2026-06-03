@@ -810,6 +810,7 @@ def test_referenced_derived_types_reject_unsupported_v1_layouts(
     [
         ("1run", "valid Fortran identifier"),
         ("run__config", "must not contain '__'"),
+        (" run", "valid Fortran identifier"),
     ],
 )
 def test_schema_rejects_invalid_fortran_namelist_names(
