@@ -584,7 +584,7 @@ Template namelist output configuration.
 - `namelists` (list of strings, optional): namelist names included in the template.
 - `schemas` (list of strings, optional): backward-compatible schema paths for
   namelist inclusion. These paths must match configured `[[namelists]].schema`
-  entries and are converted internally to `namelists`.
+  entries and are loaded through the same internal template schema list.
 - `title` / `description` (string, optional): documented-template header metadata.
 - `doc_mode`: `plain` or `documented`.
 - `value_mode`: `empty`, `filled`, `minimal-empty`, or `minimal-filled`.
