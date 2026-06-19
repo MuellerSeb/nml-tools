@@ -359,14 +359,16 @@ Standalone config files use the tables shown below at the TOML root. In
 `pyproject.toml`, put the same content under `[tool.nml-tools]`, for example
 `[tool.nml-tools.helper]` and `[[tool.nml-tools.namelists]]`.
 
-- `minimum-version` (string, optional): lower bound for the nml-tools version
-  required by this config. This is not an exact version pin.
+- `required-version` (string, optional): PEP 440 version specifier set for the
+  nml-tools versions supported by this config, for example `>=0.2.2,<0.3`.
+- `minimum-version` (string, optional): legacy shorthand for
+  `required-version = ">=<minimum-version>"`. Do not set both keys.
 
 Example:
 
 ```toml
 [tool.nml-tools]
-minimum-version = "0.2.2"
+required-version = ">=0.2.2"
 
 [tool.nml-tools.helper]
 path = "out/nml_helper.f90"

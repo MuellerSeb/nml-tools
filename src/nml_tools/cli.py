@@ -13,6 +13,7 @@ from typing import Any, cast
 import click
 import f90nml  # type: ignore
 from click.exceptions import Exit
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from ._utils import constant_dimension_overlap, validate_user_fortran_identifier
@@ -170,7 +171,7 @@ def _load_config_checked(path: Path | None) -> tuple[dict[str, Any], Path]:
         config = _extract_pyproject_config(raw_config)
     else:
         config = raw_config
-    _check_minimum_version(config)
+    _check_required_version(config)
     return config, config_path
 
 
@@ -203,25 +204,47 @@ def _extract_pyproject_config(config: dict[str, Any]) -> dict[str, Any]:
     return nml_tools_raw
 
 
-def _check_minimum_version(config: dict[str, Any]) -> None:
+def _check_required_version(config: dict[str, Any]) -> None:
+    required_raw = config.get("required-version")
     minimum_raw = config.get("minimum-version")
-    if minimum_raw is None:
+    if required_raw is None and minimum_raw is None:
         return
-    if not isinstance(minimum_raw, str) or not minimum_raw.strip():
-        raise click.ClickException("config 'minimum-version' must be a non-empty string")
-    try:
-        minimum = Version(minimum_raw.strip())
-    except InvalidVersion as exc:
+
+    if required_raw is not None and minimum_raw is not None:
         raise click.ClickException(
-            f"config 'minimum-version' is not a valid version: {minimum_raw}"
-        ) from exc
+            "config must not set both 'required-version' and 'minimum-version'; "
+            "use 'required-version'"
+        )
+
+    if required_raw is not None:
+        if not isinstance(required_raw, str) or not required_raw.strip():
+            raise click.ClickException("config 'required-version' must be a non-empty string")
+        requirement = required_raw.strip()
+        try:
+            specifier = SpecifierSet(requirement)
+        except InvalidSpecifier as exc:
+            raise click.ClickException(
+                f"config 'required-version' is not a valid version specifier: {required_raw}"
+            ) from exc
+    else:
+        if not isinstance(minimum_raw, str) or not minimum_raw.strip():
+            raise click.ClickException("config 'minimum-version' must be a non-empty string")
+        try:
+            minimum = Version(minimum_raw.strip())
+        except InvalidVersion as exc:
+            raise click.ClickException(
+                f"config 'minimum-version' is not a valid version: {minimum_raw}"
+            ) from exc
+        requirement = f">={minimum}"
+        specifier = SpecifierSet(requirement)
+
     try:
         current = Version(__version__)
     except InvalidVersion as exc:  # pragma: no cover - package version should be valid
         raise click.ClickException(f"nml-tools version is not valid: {__version__}") from exc
-    if current < minimum:
+    if not specifier.contains(current, prereleases=True):
         raise click.ClickException(
-            f"config requires nml-tools >= {minimum}, current version is {current}"
+            f"config requires nml-tools {requirement}, current version is {current}"
         )
 
 

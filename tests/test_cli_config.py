@@ -48,7 +48,7 @@ def test_load_config_checked_reads_pyproject_tool_section(tmp_path: Path) -> Non
             version = "0.1.0"
 
             [tool.nml-tools]
-            minimum-version = "0"
+            required-version = ">=0"
 
             [tool.nml-tools.kinds]
             module = "iso_fortran_env"
@@ -61,7 +61,7 @@ def test_load_config_checked_reads_pyproject_tool_section(tmp_path: Path) -> Non
 
     assert path == pyproject
     assert config == {
-        "minimum-version": "0",
+        "required-version": ">=0",
         "kinds": {"module": "iso_fortran_env"},
     }
 
@@ -71,7 +71,7 @@ def test_load_config_checked_reads_standalone_root_table(tmp_path: Path) -> None
     config_path.write_text(
         dedent(
             """
-            minimum-version = "0"
+            required-version = ">=0"
 
             [kinds]
             module = "iso_fortran_env"
@@ -100,18 +100,63 @@ def test_has_pyproject_config_requires_tool_table() -> None:
     assert cli_module._has_pyproject_config({"project": {"name": "demo"}}) is False
 
 
-def test_check_minimum_version_rejects_invalid_values() -> None:
-    cli_module._check_minimum_version({})
-    cli_module._check_minimum_version({"minimum-version": "0"})
+def test_check_required_version_accepts_valid_specifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli_module, "__version__", "0.3.1")
+
+    cli_module._check_required_version({})
+    cli_module._check_required_version({"required-version": ">=0.3,<0.4"})
+
+
+def test_check_required_version_rejects_invalid_values() -> None:
+    with pytest.raises(click.ClickException, match="non-empty string"):
+        cli_module._check_required_version({"required-version": ""})
 
     with pytest.raises(click.ClickException, match="non-empty string"):
-        cli_module._check_minimum_version({"minimum-version": ""})
+        cli_module._check_required_version({"required-version": 1})
 
-    with pytest.raises(click.ClickException, match="valid version"):
-        cli_module._check_minimum_version({"minimum-version": "not a version"})
+    with pytest.raises(click.ClickException, match="required-version"):
+        cli_module._check_required_version({"required-version": "not a specifier"})
+
+
+def test_check_required_version_rejects_mismatched_versions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli_module, "__version__", "0.3.1")
 
     with pytest.raises(click.ClickException, match="requires nml-tools"):
-        cli_module._check_minimum_version({"minimum-version": "9999"})
+        cli_module._check_required_version({"required-version": ">=0.4"})
+
+    with pytest.raises(click.ClickException, match="requires nml-tools"):
+        cli_module._check_required_version({"required-version": ">=0.2,<0.3"})
+
+
+def test_check_required_version_supports_legacy_minimum_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cli_module, "__version__", "0.3.1")
+
+    cli_module._check_required_version({"minimum-version": "0.3"})
+
+    with pytest.raises(click.ClickException, match="non-empty string"):
+        cli_module._check_required_version({"minimum-version": ""})
+
+    with pytest.raises(click.ClickException, match="valid version"):
+        cli_module._check_required_version({"minimum-version": "not a version"})
+
+    with pytest.raises(click.ClickException, match="requires nml-tools"):
+        cli_module._check_required_version({"minimum-version": "9999"})
+
+
+def test_check_required_version_rejects_minimum_and_required_conflict() -> None:
+    with pytest.raises(click.ClickException, match="use 'required-version'"):
+        cli_module._check_required_version(
+            {
+                "minimum-version": "0.3",
+                "required-version": ">=0.3,<0.4",
+            }
+        )
 
 
 def test_load_constants_normalizes_names_case_insensitively() -> None:

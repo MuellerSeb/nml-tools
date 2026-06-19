@@ -337,7 +337,7 @@ def test_cli_rejects_pyproject_without_tool_section(tmp_path: Path) -> None:
     assert "tool.nml-tools" in result.stderr
 
 
-def test_cli_minimum_version_validation(tmp_path: Path) -> None:
+def test_cli_required_version_validation(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1] / "src"
     env = os.environ.copy()
     env["PYTHONPATH"] = f"{root}{os.pathsep}{env.get('PYTHONPATH', '')}"
@@ -355,13 +355,15 @@ def test_cli_minimum_version_validation(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (tmp_path / "input.nml").write_text("&demo\nvalue = 1\n/\n", encoding="utf-8")
-    (tmp_path / "ok.toml").write_text('minimum-version = "0"\n', encoding="utf-8")
+    (tmp_path / "ok.toml").write_text('required-version = ">=0"\n', encoding="utf-8")
+    (tmp_path / "legacy-ok.toml").write_text('minimum-version = "0"\n', encoding="utf-8")
     (tmp_path / "too-new.toml").write_text(
-        'minimum-version = "9999"\n',
+        'required-version = ">=9999"\n',
         encoding="utf-8",
     )
+    (tmp_path / "too-old.toml").write_text('required-version = "<0"\n', encoding="utf-8")
     (tmp_path / "bad.toml").write_text(
-        'minimum-version = "not a version"\n',
+        'required-version = "not a version"\n',
         encoding="utf-8",
     )
 
@@ -384,6 +386,25 @@ def test_cli_minimum_version_validation(tmp_path: Path) -> None:
     )
     assert ok.returncode == 0
 
+    legacy_ok = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nml_tools.cli",
+            "validate",
+            "--config",
+            str(tmp_path / "legacy-ok.toml"),
+            "--schema",
+            str(tmp_path / "schema.yml"),
+            str(tmp_path / "input.nml"),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert legacy_ok.returncode == 0
+
     too_new = subprocess.run(
         [
             sys.executable,
@@ -404,6 +425,26 @@ def test_cli_minimum_version_validation(tmp_path: Path) -> None:
     assert too_new.returncode != 0
     assert "requires nml-tools" in too_new.stderr
 
+    too_old = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "nml_tools.cli",
+            "validate",
+            "--config",
+            str(tmp_path / "too-old.toml"),
+            "--schema",
+            str(tmp_path / "schema.yml"),
+            str(tmp_path / "input.nml"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert too_old.returncode != 0
+    assert "requires nml-tools" in too_old.stderr
+
     bad = subprocess.run(
         [
             sys.executable,
@@ -422,5 +463,5 @@ def test_cli_minimum_version_validation(tmp_path: Path) -> None:
         env=env,
     )
     assert bad.returncode != 0
-    assert "minimum-version" in bad.stderr
-    assert "valid version" in bad.stderr
+    assert "required-version" in bad.stderr
+    assert "valid version specifier" in bad.stderr
