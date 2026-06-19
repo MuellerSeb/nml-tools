@@ -410,6 +410,11 @@ def _validate_array(
             f"derived array property '{name}' must not define x-fortran-flex-tail-dims"
         )
 
+    if items_type != "object" and _is_bare_array_buffer(value, len(shape)):
+        constraints = _scalar_constraints(name, items, items_type, constants, dimensions)
+        _validate_bare_array_buffer(name, value, shape, constraints)
+        return
+
     array_value = _coerce_array_value(value, name)
     provided_shape = _nested_shape(array_value, name)
     if len(provided_shape) != len(shape):
@@ -440,6 +445,48 @@ def _validate_array(
 
     constraints = _scalar_constraints(name, items, items_type, constants, dimensions)
     for element in _iter_scalars(array_value):
+        _validate_scalar_value(name, element, constraints)
+
+
+def _is_bare_array_buffer(value: Any, rank: int) -> bool:
+    if isinstance(value, (list, tuple)):
+        return rank > 1 and all(not isinstance(item, (list, tuple)) for item in value)
+    if hasattr(value, "tolist"):
+        coerced = value.tolist()
+        return _is_bare_array_buffer(coerced, rank)
+    return True
+
+
+def _validate_bare_array_buffer(
+    name: str,
+    value: Any,
+    shape: list[int | None],
+    constraints: ScalarConstraints,
+) -> None:
+    if isinstance(value, (list, tuple)):
+        buffer_values = list(value)
+    elif hasattr(value, "tolist"):
+        coerced = value.tolist()
+        buffer_values = coerced if isinstance(coerced, list) else [coerced]
+    else:
+        buffer_values = [value]
+
+    if not buffer_values:
+        raise ValueError(f"array property '{name}' must not be empty")
+    if len(shape) > 1 and any(dimension is None for dimension in shape):
+        raise ValueError(
+            f"array '{name}' bare buffer assignment requires concrete shape"
+        )
+    concrete_shape = [dimension for dimension in shape if dimension is not None]
+    if len(concrete_shape) == len(shape):
+        total_size = math.prod(concrete_shape)
+        if len(buffer_values) > total_size:
+            raise ValueError(
+                f"array '{name}' buffer is longer than shape: "
+                f"{len(buffer_values)} > {total_size}"
+            )
+
+    for element in buffer_values:
         _validate_scalar_value(name, element, constraints)
 
 

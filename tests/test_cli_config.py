@@ -551,6 +551,58 @@ def test_validate_accepts_cli_dimensions(tmp_path: Path) -> None:
         assert result.exit_code == 0, result.output
 
 
+def test_validate_accepts_bare_array_buffer_assignments_from_f90nml(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                title: Demo
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  start_time:
+                    type: array
+                    items:
+                      type: string
+                      x-fortran-len: 32
+                    x-fortran-shape: n_items
+                  layer_depth:
+                    type: array
+                    items:
+                      type: integer
+                    x-fortran-shape: [5, 1]
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text(
+            dedent(
+                """
+                &demo
+                  start_time = "1992-07-05 00:00"
+                  layer_depth = 200, 0, 0, 0, 0
+                /
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "--dimensions",
+                "n_items=1",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+
 def test_validate_resolves_external_references_with_cli_shape_values(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):

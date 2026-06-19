@@ -212,6 +212,76 @@ def test_validate_namelist_accepts_scalar_shape_with_dimension() -> None:
     validate_namelist(schema, {"arr": [1, 2, 3]}, dimensions={"n_values": 3})
 
 
+def test_validate_namelist_accepts_bare_scalar_for_single_element_array() -> None:
+    schema = {
+        "x-fortran-namelist": "config",
+        "type": "object",
+        "properties": {
+            "start_time": {
+                "type": "array",
+                "items": {"type": "string", "x-fortran-len": 32},
+                "x-fortran-shape": "n_items",
+            },
+        },
+    }
+
+    validate_namelist(
+        schema,
+        {"start_time": "1992-07-05 00:00"},
+        dimensions={"n_items": 1},
+    )
+
+
+def test_validate_namelist_accepts_bare_flat_multidimensional_array_buffer() -> None:
+    schema = {
+        "x-fortran-namelist": "profile",
+        "type": "object",
+        "properties": {
+            "layer_depth": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": [5, 1],
+            },
+        },
+    }
+
+    validate_namelist(schema, {"layer_depth": [200, 0, 0, 0, 0]})
+
+
+def test_validate_namelist_rejects_bare_array_buffer_longer_than_shape() -> None:
+    schema = {
+        "x-fortran-namelist": "profile",
+        "type": "object",
+        "properties": {
+            "layer_depth": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": [2, 2],
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="buffer is longer than shape"):
+        validate_namelist(schema, {"layer_depth": [1, 2, 3, 4, 5]})
+
+
+def test_validate_namelist_applies_scalar_constraints_to_bare_array_buffer() -> None:
+    schema = {
+        "x-fortran-namelist": "profile",
+        "type": "object",
+        "properties": {
+            "layer_depth": {
+                "type": "array",
+                "items": {"type": "integer", "enum": [0, 200]},
+                "x-fortran-shape": [5, 1],
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="outside enum"):
+        validate_namelist(schema, {"layer_depth": [200, 0, 1]})
+
+
 def test_validate_namelist_matches_constants_and_dimensions_case_insensitively() -> None:
     schema = {
         "x-fortran-namelist": "config",
