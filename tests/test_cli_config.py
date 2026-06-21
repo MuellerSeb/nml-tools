@@ -415,7 +415,8 @@ def test_file_profiles_resolve_namelist_names(tmp_path: Path) -> None:
                 "title": "Main configuration",
                 "description": "Runtime settings.",
                 "default_file": "run.nml",
-                "namelists": ["run"],
+                "namelists": ["run", "outputs"],
+                "required": ["RUN"],
             }
         ],
     }
@@ -427,8 +428,46 @@ def test_file_profiles_resolve_namelist_names(tmp_path: Path) -> None:
     profiles = cli_module._iter_file_profiles(config, registry)
 
     assert profiles["main"].default_file == "run.nml"
-    assert profiles["main"].namelists == ["run"]
+    assert profiles["main"].namelists == ["run", "outputs"]
+    assert profiles["main"].required == ["run"]
     assert profiles["main"].title == "Main configuration"
+
+
+def test_file_profiles_default_and_empty_required_are_optional(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            title: Run
+            x-fortran-namelist: run
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    config = {
+        "namelists": [{"schema": "run.yml"}],
+        "file_profiles": [
+            {"name": "implicit", "default_file": "run.nml", "namelists": ["run"]},
+            {
+                "name": "explicit",
+                "default_file": "run.nml",
+                "namelists": ["run"],
+                "required": [],
+            },
+        ],
+    }
+    resolver = cli_module.SchemaResolver()
+    registry = cli_module._namelist_registry_by_key(
+        cli_module._load_namelist_registry(config, tmp_path, resolver)
+    )
+
+    profiles = cli_module._iter_file_profiles(config, registry)
+
+    assert profiles["implicit"].required == []
+    assert profiles["explicit"].required == []
 
 
 def test_named_namelists_work_for_profiles_and_templates(tmp_path: Path) -> None:
@@ -475,20 +514,21 @@ def test_named_namelists_work_for_profiles_and_templates(tmp_path: Path) -> None
 
 
 def test_file_profiles_reject_invalid_entries(tmp_path: Path) -> None:
-    (tmp_path / "run.yml").write_text(
-        dedent(
-            """
-            title: Run
-            x-fortran-namelist: run
-            type: object
-            properties:
-              value:
-                type: integer
-            """
-        ),
-        encoding="utf-8",
-    )
-    base_config = {"namelists": [{"schema": "run.yml"}]}
+    for name in ["run", "outputs"]:
+        (tmp_path / f"{name}.yml").write_text(
+            dedent(
+                f"""
+                title: {name}
+                x-fortran-namelist: {name}
+                type: object
+                properties:
+                  value:
+                    type: integer
+                """
+            ),
+            encoding="utf-8",
+        )
+    base_config = {"namelists": [{"schema": "run.yml"}, {"schema": "outputs.yml"}]}
     resolver = cli_module.SchemaResolver()
     registry = cli_module._namelist_registry_by_key(
         cli_module._load_namelist_registry(base_config, tmp_path, resolver)
@@ -535,6 +575,84 @@ def test_file_profiles_reject_invalid_entries(tmp_path: Path) -> None:
         (
             {"file_profiles": [{"default_file": "run.nml", "namelists": ["run"]}]},
             "must define string 'name'",
+        ),
+        (
+            {
+                "file_profiles": [
+                    {
+                        "name": "main",
+                        "default_file": "run.nml",
+                        "namelists": ["run"],
+                        "required": "run",
+                    }
+                ]
+            },
+            "'required' must be a list",
+        ),
+        (
+            {
+                "file_profiles": [
+                    {
+                        "name": "main",
+                        "default_file": "run.nml",
+                        "namelists": ["run"],
+                        "required": [1],
+                    }
+                ]
+            },
+            "'required' entries must be strings",
+        ),
+        (
+            {
+                "file_profiles": [
+                    {
+                        "name": "main",
+                        "default_file": "run.nml",
+                        "namelists": ["run"],
+                        "required": [""],
+                    }
+                ]
+            },
+            "'required' entries must be strings",
+        ),
+        (
+            {
+                "file_profiles": [
+                    {
+                        "name": "main",
+                        "default_file": "run.nml",
+                        "namelists": ["run"],
+                        "required": ["run", "RUN"],
+                    }
+                ]
+            },
+            "required namelist 'RUN' duplicates another name",
+        ),
+        (
+            {
+                "file_profiles": [
+                    {
+                        "name": "main",
+                        "default_file": "run.nml",
+                        "namelists": ["run"],
+                        "required": ["missing"],
+                    }
+                ]
+            },
+            "references unknown namelist",
+        ),
+        (
+            {
+                "file_profiles": [
+                    {
+                        "name": "main",
+                        "default_file": "run.nml",
+                        "namelists": ["run"],
+                        "required": ["outputs"],
+                    }
+                ]
+            },
+            "is not listed in 'namelists'",
         ),
     ]
     for config, message in invalid_configs:
@@ -1218,6 +1336,74 @@ def test_validate_profile_filters_config_schemas(tmp_path: Path) -> None:
         assert "unknown namelist 'outputs'" in unknown.output
         assert explicit_schema.exit_code != 0
         assert "--profile can only be used with config-based validation" in explicit_schema.output
+
+
+def test_validate_profile_requires_only_required_namelists(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        for name in ["run", "outputs"]:
+            Path(f"{name}.yml").write_text(
+                dedent(
+                    f"""
+                    title: {name}
+                    x-fortran-namelist: {name}
+                    type: object
+                    required: [value]
+                    properties:
+                      value:
+                        type: integer
+                    """
+                ),
+                encoding="utf-8",
+            )
+        Path("nml-config.toml").write_text(
+            dedent(
+                """
+                [[namelists]]
+                schema = "run.yml"
+
+                [[namelists]]
+                schema = "outputs.yml"
+
+                [[file_profiles]]
+                name = "main"
+                default_file = "run.nml"
+                namelists = ["run", "outputs"]
+                required = ["run"]
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("run.nml").write_text("&run\nvalue = 1\n/\n", encoding="utf-8")
+        Path("outputs.nml").write_text("&outputs\nvalue = 2\n/\n", encoding="utf-8")
+        Path("full.nml").write_text(
+            "&run\nvalue = 1\n/\n&outputs\nvalue = 2\n/\n",
+            encoding="utf-8",
+        )
+
+        optional_missing = runner.invoke(
+            cli_module.cli,
+            ["validate", "--profile", "main", "run.nml"],
+        )
+        required_missing = runner.invoke(
+            cli_module.cli,
+            ["validate", "--profile", "main", "outputs.nml"],
+        )
+        all_present = runner.invoke(
+            cli_module.cli,
+            ["validate", "--profile", "main", "full.nml"],
+        )
+        explicit_schema_missing = runner.invoke(
+            cli_module.cli,
+            ["validate", "--schema", "run.yml", "--schema", "outputs.yml", "run.nml"],
+        )
+
+        assert optional_missing.exit_code == 0, optional_missing.output
+        assert required_missing.exit_code != 0
+        assert "input is missing namelist 'run'" in required_missing.output
+        assert all_present.exit_code == 0, all_present.output
+        assert explicit_schema_missing.exit_code != 0
+        assert "input is missing namelist 'outputs'" in explicit_schema_missing.output
 
 
 def test_check_command_passes_and_reports_differences(tmp_path: Path) -> None:

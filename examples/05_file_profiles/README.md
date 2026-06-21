@@ -11,8 +11,10 @@ The config defines three namelists:
 
 It groups them into two logical files:
 
-- `main`, with the `run` and `physics` namelists and a `run.nml` default file hint
-- `outputs`, with the `outputs` namelist and an `outputs.nml` default file hint
+- `main`, with the `run` and `physics` namelists and a `run.nml` default file hint;
+  `run` is required and `physics` is optional
+- `outputs`, with the `outputs` namelist and an `outputs.nml` default file hint;
+  `outputs` is required
 
 Generate the templates with:
 
