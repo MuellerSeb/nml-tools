@@ -21,6 +21,7 @@ title = "Main configuration"
 description = "Runtime and physics settings for the example project."
 default_file = "run.nml"
 namelists = ["run", "physics"]
+required = ["run"]
 
 [[file_profiles]]
 name = "outputs"
@@ -28,6 +29,7 @@ title = "Output configuration"
 description = "Output switches and formatting settings."
 default_file = "outputs.nml"
 namelists = ["outputs"]
+required = ["outputs"]
 
 [[templates]]
 profile = "main"

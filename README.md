@@ -570,11 +570,15 @@ Named project-specific namelist file layouts.
 - `default_file` (string): project file-name hint for tools that open/save real
   namelist files.
 - `namelists` (list of strings): configured namelist names in file order.
+- `required` (list of strings, optional): profile namelists that must be present
+  during `validate --profile` (default `[]`). Entries must be listed in
+  `namelists`.
 - `title` / `description` (string, optional): display and documentation metadata.
 
 `default_file` is not used for template output paths. Profiles do not define
 values or defaults; use schema defaults/examples and `[templates.values]` for
-template values.
+template values. `required` controls validation only; it does not affect
+template generation.
 
 ```toml
 [[file_profiles]]
@@ -583,6 +587,7 @@ title = "Main configuration"
 description = "Runtime settings for the model."
 default_file = "run.nml"
 namelists = ["run", "physics"]
+required = ["run"]
 ```
 
 ### templates (array)

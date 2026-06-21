@@ -136,6 +136,7 @@ class FileProfile:
     key: str
     default_file: str
     namelists: list[str]
+    required: list[str]
     title: str | None = None
     description: str | None = None
 
@@ -726,6 +727,40 @@ def _resolve_namelist_members(
     return resolved
 
 
+def _resolve_required_profile_members(
+    raw_names: Any,
+    *,
+    registry: dict[str, LoadedNamelist],
+    profile_members: set[str],
+    label: str,
+) -> list[str]:
+    if raw_names is None:
+        return []
+    if not isinstance(raw_names, list):
+        raise click.ClickException(f"{label} 'required' must be a list")
+    resolved: list[str] = []
+    seen: set[str] = set()
+    for raw_name in raw_names:
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise click.ClickException(f"{label} 'required' entries must be strings")
+        key = raw_name.lower()
+        if key in seen:
+            raise click.ClickException(
+                f"{label} required namelist '{raw_name}' duplicates another name"
+            )
+        seen.add(key)
+        if key not in registry:
+            raise click.ClickException(
+                f"{label} required namelist '{raw_name}' references unknown namelist"
+            )
+        if key not in profile_members:
+            raise click.ClickException(
+                f"{label} required namelist '{raw_name}' is not listed in 'namelists'"
+            )
+        resolved.append(key)
+    return resolved
+
+
 def _resolve_template_schema_members(
     raw_paths: Any,
     *,
@@ -806,11 +841,19 @@ def _iter_file_profiles(
             registry=registry,
             label=f"file profile '{name}'",
         )
+        member_keys = [member.key for member in members]
+        required = _resolve_required_profile_members(
+            entry.get("required"),
+            registry=registry,
+            profile_members=set(member_keys),
+            label=f"file profile '{name}'",
+        )
         profiles[key] = FileProfile(
             name=name,
             key=key,
             default_file=default_file,
-            namelists=[member.key for member in members],
+            namelists=member_keys,
+            required=required,
             title=_optional_string(entry, "title", label=f"file profile '{name}'"),
             description=_optional_string(
                 entry,
@@ -1441,6 +1484,7 @@ def validate(
     dimension_overrides = _parse_cli_dimensions(dimension_args)
     dimensions: dict[str, int] = {}
     schemas: list[dict[str, Any]] = []
+    required_namelist_keys: set[str] | None
     resolver = SchemaResolver()
 
     if schema_paths:
@@ -1461,7 +1505,7 @@ def validate(
                 schemas.append(load_schema(schema_file, resolver=resolver))
             except (FileNotFoundError, ValueError) as exc:
                 raise click.ClickException(str(exc)) from exc
-        require_all = True
+        required_namelist_keys = None
     else:
         config, config_path = _load_config_checked(config_path)
         logger.info("Loading config from %s", config_path)
@@ -1478,9 +1522,11 @@ def validate(
             if profile is None:
                 raise click.ClickException(f"unknown file profile '{profile_name}'")
             loaded_namelists = [loaded_by_key[key] for key in profile.namelists]
+            required_namelist_keys = set(profile.required)
+        else:
+            required_namelist_keys = set()
         logger.info("Found %d schema entries", len(loaded_namelists))
         schemas = [loaded.schema for loaded in loaded_namelists]
-        require_all = False
 
     if not schemas:
         raise click.ClickException("no schemas provided for validation")
@@ -1518,7 +1564,7 @@ def validate(
     validated = 0
     for key, schema in schema_entries.items():
         if key not in file_entries:
-            if require_all:
+            if required_namelist_keys is None or key in required_namelist_keys:
                 raise click.ClickException(
                     f"input is missing namelist '{schema.get('x-fortran-namelist')}'"
                 )
