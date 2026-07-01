@@ -508,18 +508,45 @@ def _validate_user_identifiers(raw: Any, document: _Document, pointer: str) -> N
             _validate_user_identifiers(value, document, _child_pointer(pointer, str(index)))
 
 
-def _validate_format_annotations(raw: Any, document: _Document, pointer: str) -> None:
+def _validate_format_annotations(
+    raw: Any,
+    document: _Document,
+    pointer: str,
+    *,
+    is_schema: bool = True,
+) -> None:
     if isinstance(raw, Mapping):
-        format_value = raw.get("format")
-        if format_value is not None and not isinstance(format_value, str):
+        if is_schema and "format" in raw and not isinstance(raw["format"], str):
             raise ValueError(f"{_location(document, pointer)}: 'format' must be a string")
         for key, value in raw.items():
-            if isinstance(key, str):
-                _validate_format_annotations(value, document, _child_pointer(pointer, key))
+            if not isinstance(key, str):
+                continue
+            child_pointer = _child_pointer(pointer, key)
+            if key in {"$defs", "definitions", "properties"} and isinstance(value, Mapping):
+                for name, child in value.items():
+                    if isinstance(name, str):
+                        _validate_format_annotations(
+                            child,
+                            document,
+                            _child_pointer(child_pointer, name),
+                            is_schema=True,
+                        )
+                continue
+            _validate_format_annotations(
+                value,
+                document,
+                child_pointer,
+                is_schema=key == "items",
+            )
         return
     if isinstance(raw, list):
         for index, value in enumerate(raw):
-            _validate_format_annotations(value, document, _child_pointer(pointer, str(index)))
+            _validate_format_annotations(
+                value,
+                document,
+                _child_pointer(pointer, str(index)),
+                is_schema=False,
+            )
 
 
 def _compose_nodes(

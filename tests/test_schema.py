@@ -265,6 +265,27 @@ def test_resolve_schema_rejects_non_string_format() -> None:
         )
 
 
+def test_resolve_schema_allows_property_named_format() -> None:
+    resolved = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "format": {
+                    "type": "string",
+                    "x-fortran-len": 16,
+                    "enum": ["netcdf", "csv"],
+                    "default": "netcdf",
+                }
+            },
+            "required": ["format"],
+        }
+    )
+
+    assert resolved["properties"]["format"]["type"] == "string"
+    assert "format" not in resolved["properties"]["format"]
+
+
 def test_get_string_format_returns_string_schema_format_only() -> None:
     assert get_string_format({"type": "string", "format": "file-path"}) == "file-path"
     assert get_string_format({"type": "string", "format": "project-specific"}) == (
