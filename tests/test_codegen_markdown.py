@@ -121,6 +121,55 @@ def test_generate_docs_shows_bounds(tmp_path: Path) -> None:
     assert "Minimum: `>= 1`" in rendered
 
 
+def test_generate_docs_shows_string_formats(tmp_path: Path) -> None:
+    schema = resolve_schema(
+        {
+            "title": "Format docs",
+            "x-fortran-namelist": "format_nml",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "start_time": {
+                            "type": "string",
+                            "x-fortran-len": 32,
+                            "format": "date-time",
+                        }
+                    },
+                }
+            },
+            "properties": {
+                "forcing_file": {
+                    "type": "string",
+                    "x-fortran-len": 128,
+                    "format": "file-path",
+                },
+                "search_paths": {
+                    "type": "array",
+                    "x-fortran-shape": 2,
+                    "items": {
+                        "type": "string",
+                        "x-fortran-len": 128,
+                        "format": "path",
+                    },
+                },
+                "period": {"$ref": "#/$defs/period"},
+            },
+        }
+    )
+
+    output = tmp_path / "format.md"
+    _import_generate_docs()(schema, output)
+    rendered = output.read_text()
+
+    assert "- Format: `file-path`" in rendered
+    assert "- Item format: `path`" in rendered
+    assert "`period%start_time`: `character(len=32)`; Format: `date-time`" in rendered
+    assert "- `start_time`: `character(len=32)`; Format: `date-time`" in rendered
+
+
 def test_generate_docs_adds_doxygen_id_and_toc(tmp_path: Path) -> None:
     schema = {
         "title": "TOC docs",

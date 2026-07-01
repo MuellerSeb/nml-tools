@@ -19,7 +19,7 @@ from nml_tools.codegen_f2py import (
 from nml_tools.codegen_fortran import collect_local_derived_types, render_fortran, render_helper
 from nml_tools.codegen_markdown import render_docs
 from nml_tools.codegen_template import render_template
-from nml_tools.schema import SchemaResolver, load_schema, resolve_schema
+from nml_tools.schema import SchemaResolver, get_string_format, load_schema, resolve_schema
 from nml_tools.validate import validate_namelist
 
 
@@ -183,6 +183,118 @@ def test_array_default_override_replaces_referenced_control_bundle() -> None:
                 },
             }
         )
+
+
+def test_resolve_schema_preserves_string_format_annotations() -> None:
+    resolved = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "forcing_file": {
+                    "type": "string",
+                    "format": "file-path",
+                },
+                "output_files": {
+                    "type": "array",
+                    "x-fortran-shape": 2,
+                    "items": {
+                        "type": "string",
+                        "format": "path",
+                    },
+                },
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "properties": {
+                        "start_time": {
+                            "type": "string",
+                            "format": "date-time",
+                        }
+                    },
+                },
+            },
+        }
+    )
+
+    properties = resolved["properties"]
+    assert properties["forcing_file"]["format"] == "file-path"
+    assert properties["output_files"]["items"]["format"] == "path"
+    assert properties["period"]["properties"]["start_time"]["format"] == "date-time"
+
+
+def test_resolve_schema_composes_format_as_use_site_annotation() -> None:
+    resolved = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "path": {
+                    "type": "string",
+                    "format": "path",
+                    "x-fortran-len": 128,
+                }
+            },
+            "properties": {
+                "input": {"$ref": "#/$defs/path"},
+                "output": {
+                    "$ref": "#/$defs/path",
+                    "format": "directory-path",
+                },
+            },
+        }
+    )
+
+    assert resolved["properties"]["input"]["format"] == "path"
+    assert resolved["properties"]["output"]["format"] == "directory-path"
+
+
+def test_resolve_schema_rejects_non_string_format() -> None:
+    with pytest.raises(ValueError, match="'format' must be a string"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "start_time": {
+                        "type": "string",
+                        "format": 7,
+                    }
+                },
+            }
+        )
+
+
+def test_resolve_schema_allows_property_named_format() -> None:
+    resolved = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "format": {
+                    "type": "string",
+                    "x-fortran-len": 16,
+                    "enum": ["netcdf", "csv"],
+                    "default": "netcdf",
+                }
+            },
+            "required": ["format"],
+        }
+    )
+
+    assert resolved["properties"]["format"]["type"] == "string"
+    assert "format" not in resolved["properties"]["format"]
+
+
+def test_get_string_format_returns_string_schema_format_only() -> None:
+    assert get_string_format({"type": "string", "format": "file-path"}) == "file-path"
+    assert get_string_format({"type": "string", "format": "project-specific"}) == (
+        "project-specific"
+    )
+    assert get_string_format({"type": "string"}) is None
+    assert get_string_format({"type": "integer", "format": "date"}) is None
+    with pytest.raises(ValueError, match="'format' must be a string"):
+        get_string_format({"type": "string", "format": 1})
 
 
 def test_use_site_default_must_satisfy_referenced_constraints() -> None:
