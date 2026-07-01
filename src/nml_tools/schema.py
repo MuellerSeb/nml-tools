@@ -102,7 +102,6 @@ class SchemaResolver:
         document = self._load_document(Path(path))
         _reject_reserved_marker(document.data, document, "")
         _validate_user_identifiers(document.data, document, "")
-        _validate_format_annotations(document.data, document, "")
         if not _requires_normalization(document.data, position="root"):
             return copy.deepcopy(document.data)
         self._validate_document_metadata(document)
