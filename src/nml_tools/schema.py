@@ -30,7 +30,7 @@ _REPRESENTATION_KEYS = {
     "x-fortran-type",
     "x-fortran-module",
 }
-_ANNOTATION_KEYS = {"title", "description", "examples", "$comment"}
+_ANNOTATION_KEYS = {"title", "description", "examples", "$comment", "format"}
 _DEFAULT_CONTROL_KEYS = {
     "x-fortran-default-order",
     "x-fortran-default-repeat",
@@ -102,6 +102,7 @@ class SchemaResolver:
         document = self._load_document(Path(path))
         _reject_reserved_marker(document.data, document, "")
         _validate_user_identifiers(document.data, document, "")
+        _validate_format_annotations(document.data, document, "")
         if not _requires_normalization(document.data, position="root"):
             return copy.deepcopy(document.data)
         self._validate_document_metadata(document)
@@ -122,6 +123,7 @@ class SchemaResolver:
             self._documents[path] = document
         _reject_reserved_marker(data, document, "")
         _validate_user_identifiers(data, document, "")
+        _validate_format_annotations(data, document, "")
         if not _requires_normalization(data, position="root"):
             return copy.deepcopy(data)
         self._validate_document_metadata(document)
@@ -144,6 +146,7 @@ class SchemaResolver:
         if not isinstance(data, dict):
             raise ValueError(f"schema root must be an object: {canonical_path}")
         document = _Document(data, canonical_path)
+        _validate_format_annotations(data, document, "")
         self._documents[canonical_path] = document
         return document
 
@@ -366,6 +369,18 @@ def resolve_schema(
     return active_resolver.resolve_mapping(schema, source_path=source_path)
 
 
+def get_string_format(schema: Mapping[str, Any]) -> str | None:
+    """Return the string ``format`` annotation for a string schema, if present."""
+    if schema.get("type") != "string":
+        return None
+    value = schema.get("format")
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("'format' must be a string")
+    return value
+
+
 def _contains_reachable_ref(raw: Mapping[str, Any], *, position: str) -> bool:
     if "$ref" in raw:
         return True
@@ -491,6 +506,20 @@ def _validate_user_identifiers(raw: Any, document: _Document, pointer: str) -> N
     if isinstance(raw, list):
         for index, value in enumerate(raw):
             _validate_user_identifiers(value, document, _child_pointer(pointer, str(index)))
+
+
+def _validate_format_annotations(raw: Any, document: _Document, pointer: str) -> None:
+    if isinstance(raw, Mapping):
+        format_value = raw.get("format")
+        if format_value is not None and not isinstance(format_value, str):
+            raise ValueError(f"{_location(document, pointer)}: 'format' must be a string")
+        for key, value in raw.items():
+            if isinstance(key, str):
+                _validate_format_annotations(value, document, _child_pointer(pointer, key))
+        return
+    if isinstance(raw, list):
+        for index, value in enumerate(raw):
+            _validate_format_annotations(value, document, _child_pointer(pointer, str(index)))
 
 
 def _compose_nodes(

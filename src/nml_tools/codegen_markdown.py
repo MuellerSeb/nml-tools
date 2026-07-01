@@ -29,6 +29,7 @@ from .codegen_fortran import (
     _reject_runtime_dimension_lengths,
 )
 from .codegen_template import render_template
+from .schema import get_string_format
 from .validate import validate_schema_defaults
 
 _DEFAULT_MISSING = object()
@@ -183,6 +184,9 @@ def render_docs(
 
             lines.append("Summary:")
             lines.append(f"- Type: `{_format_specific_type(type_info)}`")
+            format_label = _get_format_label(prop, type_info)
+            if format_label is not None:
+                lines.append(format_label)
             if type_info.category == "array" and flex_tail_dims > 0:
                 lines.append(f"- Flexible tail dims: {flex_tail_dims}")
             lines.append(f"- Required: {required_label}")
@@ -299,6 +303,9 @@ def _append_derived_field_components(
             details.append(f"default `{default[0]}`")
         elif default is not None:
             details.append(f"default `{default}`")
+        format_label = _get_format_label(child, type_info)
+        if format_label is not None:
+            details.append(format_label[2:] if format_label.startswith("- ") else format_label)
         bounds = _get_bounds_labels(child, type_info)
         details.extend(label[2:] if label.startswith("- ") else label for label in bounds)
         enum = _get_enum_values(child, type_info, constants)
@@ -353,7 +360,11 @@ def _append_derived_type_documentation(
             if not isinstance(child_name, str) or not isinstance(child, dict):
                 continue
             info = _field_type_info(child, constants)
-            lines.append(f"- `{child_name}`: `{_format_specific_type(info)}`")
+            details = [f"`{_format_specific_type(info)}`"]
+            format_label = _get_format_label(child, info)
+            if format_label is not None:
+                details.append(format_label[2:] if format_label.startswith("- ") else format_label)
+            lines.append(f"- `{child_name}`: " + "; ".join(details))
     lines.append("")
 
 
@@ -402,6 +413,21 @@ def _get_description(prop: dict[str, Any]) -> str | None:
         raise ValueError("property description must be a string")
     description = description.strip()
     return description or None
+
+
+def _get_format_label(prop: dict[str, Any], type_info: FieldTypeInfo) -> str | None:
+    if type_info.category == "array":
+        items = prop.get("items")
+        if not isinstance(items, dict):
+            return None
+        value = get_string_format(items)
+        if value is None:
+            return None
+        return f"- Item format: `{value}`"
+    value = get_string_format(prop)
+    if value is None:
+        return None
+    return f"- Format: `{value}`"
 
 
 def _get_enum_values(

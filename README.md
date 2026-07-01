@@ -9,7 +9,8 @@ Generate Fortran namelist modules, Markdown docs, and template namelists from a 
 ## Features
 
 - Schema input in YAML or JSON.
-- Core keywords from JSON schema: `type`, `properties`, `required`, `default`, `examples`, `title`, `description`.
+- Core keywords from JSON schema: `type`, `properties`, `required`, `default`,
+  `examples`, `title`, `description`, `format`.
 - Fortran extensions: `x-fortran-namelist`, `x-fortran-kind`,
   `x-fortran-len`, `x-fortran-shape`, `x-fortran-flex-tail-dims`,
   `x-fortran-default-*`, `x-fortran-type`, `x-fortran-module`.
@@ -25,7 +26,7 @@ Generate Fortran namelist modules, Markdown docs, and template namelists from a 
   - Could be emulated with:
     - Lists of length 2 with metadata, like f90nml does for JSON conversion.
     - Objects with `real` and `imag` properties.
-    - Strings with a specific format like pydantic does.
+    - Strings with a project-defined `format` convention.
 
 ## Fortran extensions (x-fortran-*)
 
@@ -303,6 +304,34 @@ required array can be partly set without an immediate setter error, but
 Generated Python wrappers use the same semantics: scalar and lower-rank array
 inputs are normalized to singleton trailing dimensions before calling the
 Fortran setter.
+
+## String format annotations
+
+String schemas may use JSON Schema's `format` keyword as lightweight metadata
+for documentation and downstream editor UIs. nml-tools preserves the annotation
+and shows it in generated Markdown, but does not validate the runtime value,
+check file existence, or parse date/time strings.
+
+Common useful formats include standard JSON Schema values such as `date`,
+`time`, and `date-time`, plus nml-tools path-oriented custom values:
+
+```yaml
+forcing_file:
+  type: string
+  format: file-path
+
+output_dir:
+  type: string
+  format: directory-path
+
+start_time:
+  type: string
+  format: date-time
+```
+
+Omitting `format` means the string is ordinary free text. Downstream tools may
+interpret `path` as a generic filesystem path, `file-path` as a file picker, and
+`directory-path` as a directory picker.
 
 ## Validation keywords
 
@@ -862,7 +891,7 @@ Main missing features compared to JSON Schema:
 - No advanced array constraints: tuple typing, `contains`, `minItems`,
   `maxItems`, `uniqueItems`.
 - No numeric or string validation keywords like `multipleOf`, `minLength`,
-  `maxLength`, `pattern`, `format` (bounds are supported via `minimum`,
+  `maxLength`, `pattern` (bounds are supported via `minimum`,
   `maximum`, `exclusiveMinimum`, and `exclusiveMaximum`).
 - Object schemas are supported only as one-level inline or referenced Fortran
   derived types with intrinsic scalar members.
