@@ -403,6 +403,43 @@ def _derived_schema(*, optional: bool = False) -> dict[str, object]:
     }
 
 
+def _setting_schema(
+    *,
+    required_components: list[str] | None = None,
+    array_shape: object = 2,
+    include_array: bool = False,
+) -> dict[str, object]:
+    required = required_components if required_components is not None else ["flag", "value"]
+    setting = {
+        "type": "object",
+        "x-fortran-type": "setting_t",
+        "_nml_tools_ref_origin": {
+            "identity": ["<mapping>", "/$defs/setting"],
+            "definition": {},
+        },
+        "properties": {
+            "flag": {"type": "boolean"},
+            "value": {"type": "integer", "minimum": 1},
+        },
+        "required": required,
+    }
+    properties: dict[str, object] = {"setting": setting}
+    required_fields = ["setting"]
+    if include_array:
+        properties["settings"] = {
+            "type": "array",
+            "x-fortran-shape": array_shape,
+            "items": setting,
+        }
+        required_fields.append("settings")
+    return {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": properties,
+        "required": required_fields,
+    }
+
+
 def test_validate_namelist_accepts_nested_derived_values() -> None:
     validate_namelist(
         _derived_schema(),
@@ -427,6 +464,97 @@ def test_validate_namelist_accepts_nested_derived_values() -> None:
                 "period": {"start_year": 2001},
                 "periods": [{"start_year": 1980}, {"start_year": 2001, "missing": 1}],
             },
+        )
+
+
+def test_validate_namelist_accepts_derived_buffer_values() -> None:
+    validate_namelist(
+        _setting_schema(include_array=True),
+        {
+            "setting": [True, 1],
+            "settings": [True, 1, False, 2],
+        },
+    )
+
+
+def test_validate_namelist_accepts_single_value_derived_buffer() -> None:
+    validate_namelist(
+        _setting_schema(required_components=["flag"]),
+        {"setting": True},
+    )
+
+
+def test_validate_namelist_skips_omitted_derived_buffer_values() -> None:
+    validate_namelist(
+        _setting_schema(required_components=["value"]),
+        {"setting": [None, 1]},
+    )
+
+    with pytest.raises(ValueError, match=r"missing required 'setting\.flag'"):
+        validate_namelist(
+            _setting_schema(required_components=["flag"]),
+            {"setting": [None, 1]},
+        )
+
+
+def test_validate_namelist_rejects_overlong_derived_buffer() -> None:
+    with pytest.raises(ValueError, match="buffer has too many values"):
+        validate_namelist(
+            _setting_schema(),
+            {"setting": [True, 1, 3]},
+        )
+
+
+def test_validate_namelist_applies_constraints_to_derived_buffer_values() -> None:
+    with pytest.raises(ValueError, match=r"setting\.value.*>= 1"):
+        validate_namelist(
+            _setting_schema(),
+            {"setting": [True, 0]},
+        )
+
+
+def test_validate_namelist_accepts_derived_array_buffers_with_concrete_shapes() -> None:
+    validate_namelist(
+        _setting_schema(include_array=True),
+        {"setting": [True, 1], "settings": [True, 1, False, 2]},
+    )
+
+    validate_namelist(
+        _setting_schema(array_shape="n_settings", include_array=True),
+        {"setting": [True, 1], "settings": [True, 1, False, 2]},
+        dimensions={"n_settings": 2},
+    )
+
+
+def test_validate_namelist_rejects_partial_required_derived_array_buffer_element() -> None:
+    with pytest.raises(ValueError, match=r"missing required 'settings\[2\]\.value'"):
+        validate_namelist(
+            _setting_schema(include_array=True),
+            {"setting": [True, 1], "settings": [True, 1, False]},
+        )
+
+
+def test_validate_namelist_rejects_null_only_required_derived_array_buffer() -> None:
+    with pytest.raises(ValueError, match=r"missing required 'settings\[1\]\.flag'"):
+        validate_namelist(
+            _setting_schema(include_array=True),
+            {"setting": [True, 1], "settings": [None, None]},
+        )
+
+
+def test_validate_namelist_rejects_overlong_derived_array_buffer() -> None:
+    with pytest.raises(ValueError, match="buffer is longer than shape"):
+        validate_namelist(
+            _setting_schema(include_array=True),
+            {"setting": [True, 1], "settings": [True, 1, False, 2, True]},
+        )
+
+
+def test_validate_namelist_rejects_multirank_derived_array_buffer_without_shape() -> None:
+    with pytest.raises(ValueError, match="requires concrete shape"):
+        validate_namelist(
+            _setting_schema(array_shape=[":", ":"], include_array=True),
+            {"setting": [True, 1], "settings": [True, 1]},
         )
 
 

@@ -870,6 +870,219 @@ def test_validate_accepts_f90nml_derived_array_bookkeeping(tmp_path: Path) -> No
         assert result.exit_code == 0, result.output
 
 
+def test_validate_accepts_f90nml_derived_buffer_assignment(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: run
+                type: object
+                properties:
+                  setting:
+                    type: object
+                    x-fortran-type: setting_t
+                    properties:
+                      flag:
+                        type: boolean
+                      value:
+                        type: integer
+                    required: [flag, value]
+                required: [setting]
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text(
+            "&run\nsetting = .true., 1\n/\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+
+def test_validate_accepts_f90nml_derived_array_buffer_assignment(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: run
+                type: object
+                properties:
+                  settings:
+                    type: array
+                    x-fortran-shape: n_settings
+                    items:
+                      type: object
+                      x-fortran-type: setting_t
+                      properties:
+                        flag:
+                          type: boolean
+                        value:
+                          type: integer
+                      required: [flag, value]
+                required: [settings]
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text(
+            "&run\nsettings = .true., 1, .false., 2\n/\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "--dimensions",
+                "n_settings=2",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+
+def test_validate_rejects_f90nml_null_only_required_derived_array_buffer(
+    tmp_path: Path,
+) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: run
+                type: object
+                properties:
+                  settings:
+                    type: array
+                    x-fortran-shape: n_settings
+                    items:
+                      type: object
+                      x-fortran-type: setting_t
+                      properties:
+                        flag:
+                          type: boolean
+                        value:
+                          type: integer
+                      required: [flag, value]
+                required: [settings]
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text(
+            "&run\nsettings = 2*\n/\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "--dimensions",
+                "n_settings=1",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "missing required 'settings[1].flag'" in result.output
+
+
+def test_validate_treats_f90nml_derived_buffer_nulls_as_omitted(
+    tmp_path: Path,
+) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: run
+                type: object
+                properties:
+                  setting:
+                    type: object
+                    x-fortran-type: setting_t
+                    properties:
+                      flag:
+                        type: boolean
+                      value:
+                        type: integer
+                    required: [value]
+                required: [setting]
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text(
+            "&run\nsetting = , 1\n/\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: run
+                type: object
+                properties:
+                  setting:
+                    type: object
+                    x-fortran-type: setting_t
+                    properties:
+                      flag:
+                        type: boolean
+                      value:
+                        type: integer
+                    required: [flag]
+                required: [setting]
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "missing required 'setting.flag'" in result.output
+
+
 def test_validate_cli_dimensions_override_config_dimensions(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):
