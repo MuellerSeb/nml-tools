@@ -551,11 +551,39 @@ def test_validate_namelist_rejects_overlong_derived_array_buffer() -> None:
 
 
 def test_validate_namelist_rejects_multirank_derived_array_buffer_without_shape() -> None:
-    with pytest.raises(ValueError, match="requires concrete shape"):
+    with pytest.raises(
+        ValueError,
+        match="derived array 'settings' flat buffer assignment requires concrete shape",
+    ):
         validate_namelist(
             _setting_schema(array_shape=[":", ":"], include_array=True),
             {"setting": [True, 1], "settings": [True, 1]},
         )
+
+
+def test_validate_namelist_reports_missing_derived_array_item_properties() -> None:
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "settings": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "items": {
+                    "type": "object",
+                    "x-fortran-type": "setting_t",
+                    "properties": {},
+                },
+            }
+        },
+        "required": ["settings"],
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="derived array 'settings' items must define non-empty object 'properties'",
+    ):
+        validate_namelist(schema, {"settings": [True, 1]})
 
 
 def test_validate_namelist_rejects_optional_derived_values_with_required_members() -> None:

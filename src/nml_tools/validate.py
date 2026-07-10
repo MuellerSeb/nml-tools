@@ -614,11 +614,13 @@ def _validate_derived_array_buffer(
         raise ValueError(f"array property '{name}' must not be empty")
     if len(shape) > 1 and any(dimension is None for dimension in shape):
         raise ValueError(
-            f"array '{name}' bare buffer assignment requires concrete shape"
+            f"derived array '{name}' flat buffer assignment requires concrete shape"
         )
     properties_raw = items.get("properties")
     if not isinstance(properties_raw, Mapping) or not properties_raw:
-        raise ValueError(f"derived property '{name}' must define object 'properties'")
+        raise ValueError(
+            f"derived array '{name}' items must define non-empty object 'properties'"
+        )
     properties = _normalize_properties(properties_raw, name)
     component_count = len(properties)
     concrete_shape = [dimension for dimension in shape if dimension is not None]
