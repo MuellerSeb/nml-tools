@@ -594,6 +594,8 @@ def _normalize_derived_buffer(
 
 
 def _is_derived_array_buffer(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return False
     if isinstance(value, (list, tuple)):
         return all(not isinstance(item, (Mapping, list, tuple)) for item in value)
     if hasattr(value, "tolist"):

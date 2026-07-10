@@ -550,6 +550,17 @@ def test_validate_namelist_rejects_overlong_derived_array_buffer() -> None:
         )
 
 
+def test_validate_namelist_rejects_mapping_as_derived_array() -> None:
+    with pytest.raises(ValueError, match="array property 'settings' must be a list"):
+        validate_namelist(
+            _setting_schema(include_array=True),
+            {
+                "setting": [True, 1],
+                "settings": {"flag": True, "value": 1},
+            },
+        )
+
+
 def test_validate_namelist_rejects_multirank_derived_array_buffer_without_shape() -> None:
     with pytest.raises(
         ValueError,
