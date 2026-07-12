@@ -484,6 +484,13 @@ def test_validate_namelist_accepts_single_value_derived_buffer() -> None:
     )
 
 
+def test_validate_namelist_accepts_single_value_derived_array_buffer() -> None:
+    validate_namelist(
+        _setting_schema(required_components=["flag"], include_array=True),
+        {"setting": True, "settings": True},
+    )
+
+
 def test_validate_namelist_skips_omitted_derived_buffer_values() -> None:
     validate_namelist(
         _setting_schema(required_components=["value"]),

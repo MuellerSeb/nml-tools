@@ -957,6 +957,52 @@ def test_validate_accepts_f90nml_derived_array_buffer_assignment(tmp_path: Path)
         assert result.exit_code == 0, result.output
 
 
+def test_validate_accepts_f90nml_single_value_derived_array_buffer(
+    tmp_path: Path,
+) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: run
+                type: object
+                properties:
+                  settings:
+                    type: array
+                    x-fortran-shape: 1
+                    items:
+                      type: object
+                      x-fortran-type: setting_t
+                      properties:
+                        flag:
+                          type: boolean
+                        value:
+                          type: integer
+                      required: [flag]
+                required: [settings]
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text(
+            "&run\nsettings = .true.\n/\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli_module.cli,
+            [
+                "validate",
+                "--schema",
+                "schema.yml",
+                "input.nml",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+
+
 def test_validate_rejects_f90nml_null_only_required_derived_array_buffer(
     tmp_path: Path,
 ) -> None:

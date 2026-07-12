@@ -600,6 +600,7 @@ def _is_derived_array_buffer(value: Any) -> bool:
         return all(not isinstance(item, (Mapping, list, tuple)) for item in value)
     if hasattr(value, "tolist"):
         return _is_derived_array_buffer(value.tolist())
+    # f90nml represents a one-value namelist buffer as a scalar.
     return True
 
 
