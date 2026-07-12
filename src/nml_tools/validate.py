@@ -410,6 +410,10 @@ def _validate_array(
             f"derived array property '{name}' must not define x-fortran-flex-tail-dims"
         )
 
+    if items_type == "object" and _is_derived_array_buffer(value):
+        _validate_derived_array_buffer(name, items, value, shape, constants, dimensions)
+        return
+
     if items_type != "object" and _is_bare_array_buffer(value, len(shape)):
         constraints = _scalar_constraints(name, items, items_type, constants, dimensions)
         _validate_bare_array_buffer(name, value, shape, constraints)
@@ -522,17 +526,38 @@ def _validate_derived_value(
     constants: dict[str, int] | None,
     dimensions: dict[str, int] | None,
 ) -> None:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"derived property '{name}' must be an object")
     properties_raw = prop.get("properties")
     if not isinstance(properties_raw, Mapping) or not properties_raw:
         raise ValueError(f"derived property '{name}' must define object 'properties'")
     properties = _normalize_properties(properties_raw, name)
     required = _parse_required(prop.get("required", []), properties, name)
-    supplied = _normalize_namelist(value, name)
-    for key, (child_name, _) in supplied.items():
-        if key not in properties:
-            raise ValueError(f"property '{name}.{child_name}' is unknown")
+    if isinstance(value, Mapping):
+        supplied = _normalize_namelist(value, name)
+        for key, (child_name, _) in supplied.items():
+            if key not in properties:
+                raise ValueError(f"property '{name}.{child_name}' is unknown")
+    else:
+        supplied = _normalize_derived_buffer(name, properties, value)
+
+    _validate_derived_supplied(
+        name,
+        properties,
+        required,
+        supplied,
+        constants=constants,
+        dimensions=dimensions,
+    )
+
+
+def _validate_derived_supplied(
+    name: str,
+    properties: Mapping[str, tuple[str, dict[str, Any]]],
+    required: set[str],
+    supplied: Mapping[str, tuple[str, Any]],
+    *,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
+) -> None:
     for key, (child_name, child) in properties.items():
         child_path = f"{name}.{child_name}"
         if key in supplied:
@@ -545,6 +570,111 @@ def _validate_derived_value(
             )
         elif key in required:
             raise ValueError(f"derived property '{name}' is missing required '{child_path}'")
+
+
+def _normalize_derived_buffer(
+    name: str,
+    properties: Mapping[str, tuple[str, dict[str, Any]]],
+    value: Any,
+) -> dict[str, tuple[str, Any]]:
+    values = _coerce_buffer_values(value)
+    if not values:
+        raise ValueError(f"derived property '{name}' buffer must not be empty")
+    if len(values) > len(properties):
+        raise ValueError(
+            f"derived property '{name}' buffer has too many values: "
+            f"{len(values)} > {len(properties)}"
+        )
+    supplied: dict[str, tuple[str, Any]] = {}
+    for (key, (child_name, _)), item in zip(properties.items(), values):
+        if item is None:
+            continue
+        supplied[key] = (child_name, item)
+    return supplied
+
+
+def _is_derived_array_buffer(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return False
+    if isinstance(value, (list, tuple)):
+        return all(not isinstance(item, (Mapping, list, tuple)) for item in value)
+    if hasattr(value, "tolist"):
+        return _is_derived_array_buffer(value.tolist())
+    # f90nml represents a one-value namelist buffer as a scalar.
+    return True
+
+
+def _validate_derived_array_buffer(
+    name: str,
+    items: Mapping[str, Any],
+    value: Any,
+    shape: list[int | None],
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
+) -> None:
+    buffer_values = _coerce_buffer_values(value)
+    if not buffer_values:
+        raise ValueError(f"array property '{name}' must not be empty")
+    if len(shape) > 1 and any(dimension is None for dimension in shape):
+        raise ValueError(
+            f"derived array '{name}' flat buffer assignment requires concrete shape"
+        )
+    properties_raw = items.get("properties")
+    if not isinstance(properties_raw, Mapping) or not properties_raw:
+        raise ValueError(
+            f"derived array '{name}' items must define non-empty object 'properties'"
+        )
+    properties = _normalize_properties(properties_raw, name)
+    component_count = len(properties)
+    concrete_shape = [dimension for dimension in shape if dimension is not None]
+    if len(concrete_shape) == len(shape):
+        total_size = math.prod(concrete_shape)
+        max_values = total_size * component_count
+        if len(buffer_values) > max_values:
+            raise ValueError(
+                f"array '{name}' buffer is longer than shape: "
+                f"{len(buffer_values)} > {max_values}"
+            )
+    required = _parse_required(items.get("required", []), properties, name)
+    for offset in range(0, len(buffer_values), component_count):
+        element_values = buffer_values[offset : offset + component_count]
+        element_index = offset // component_count
+        path = _derived_array_element_path(name, element_index, shape)
+        supplied = _normalize_derived_buffer(path, properties, element_values)
+        _validate_derived_supplied(
+            path,
+            properties,
+            required,
+            supplied,
+            constants=constants,
+            dimensions=dimensions,
+        )
+
+
+def _derived_array_element_path(
+    name: str,
+    zero_based_index: int,
+    shape: list[int | None],
+) -> str:
+    if len(shape) == 1:
+        return f"{name}[{zero_based_index + 1}]"
+    remaining = zero_based_index
+    indexes: list[int] = []
+    for dimension in shape:
+        if dimension is None:
+            return f"{name}[{zero_based_index + 1}]"
+        indexes.append(remaining % dimension + 1)
+        remaining //= dimension
+    return f"{name}[{','.join(str(index) for index in indexes)}]"
+
+
+def _coerce_buffer_values(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if hasattr(value, "tolist"):
+        coerced = value.tolist()
+        return _coerce_buffer_values(coerced)
+    return [value]
 
 
 def _iter_object_elements(
