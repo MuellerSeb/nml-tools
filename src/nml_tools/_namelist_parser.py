@@ -355,12 +355,9 @@ class _Parser:
         values: list[ParsedValue] = []
         expecting_value = True
         saw_separator = False
-        trailing_null_span: SourceSpan | None = None
         while True:
             self._skip_eor()
             if self._at("SLASH") or self._at("EOF") or self._starts_assignment():
-                if trailing_null_span is not None:
-                    values.append(NullValue(trailing_null_span))
                 return values
             if self._at("AMP"):
                 self._unexpected_group_start()
@@ -369,9 +366,6 @@ class _Parser:
                 self.index += 1
                 if expecting_value and (not values or saw_separator):
                     values.append(NullValue(separator.span))
-                    trailing_null_span = None
-                else:
-                    trailing_null_span = separator.span
                 expecting_value = True
                 saw_separator = True
                 continue
@@ -379,7 +373,6 @@ class _Parser:
             values.append(value)
             expecting_value = False
             saw_separator = False
-            trailing_null_span = None
 
     def _parse_value(self) -> ParsedValue:
         token = self._peek()

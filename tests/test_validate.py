@@ -399,26 +399,6 @@ def test_null_only_required_value_does_not_establish_presence() -> None:
         _evaluate(schema, "settings = 2*")
 
 
-def test_trailing_separator_null_consumes_the_next_effective_item() -> None:
-    schema = {
-        "x-fortran-namelist": "run",
-        "type": "object",
-        "properties": {
-            "values": {
-                "type": "array",
-                "x-fortran-shape": 2,
-                "items": {"type": "integer"},
-            }
-        },
-    }
-
-    result = _evaluate(schema, "values = 1,")
-    assert result.states[("values", (1,), None)].value == 1
-    trailing = result.states[("values", (2,), None)]
-    assert trailing.has_value is False
-    assert trailing.null_consumed is True
-
-
 def test_defaults_are_tracked_but_do_not_satisfy_required_input() -> None:
     schema = {
         "x-fortran-namelist": "run",
