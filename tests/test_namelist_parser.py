@@ -102,6 +102,10 @@ def test_point_and_comma_decimal_modes_have_distinct_value_separators() -> None:
     [
         ("$run\nvalue=1\n$end", "'\\$' group syntax is not standard"),
         ("&run\nvalue=1\n&end", "'&end' is not a standard group terminator"),
+        (
+            "&run\nvalue=1\n&next\nvalue=2\n/",
+            "terminate the current namelist group with '/' before starting '&next'",
+        ),
         ("&run\n# comment\nvalue=1\n/", "'#' comments are not standard"),
         ("&run/value=1/", "group name must be separated"),
         ("& run\nvalue=1\n/", "group name must follow '&' immediately"),

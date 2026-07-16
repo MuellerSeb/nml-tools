@@ -334,7 +334,7 @@ class _Parser:
             if self._at("EOF"):
                 self._error(f"unterminated namelist group '{name_token.text}'", self._peek().span)
             if self._at("AMP"):
-                self._error("'&end' is not a standard group terminator; use '/'", self._peek().span)
+                self._unexpected_group_start()
             if self._at_value_separator():
                 self.index += 1
                 self._skip_eor()
@@ -360,7 +360,7 @@ class _Parser:
             if self._at("SLASH") or self._at("EOF") or self._starts_assignment():
                 return values
             if self._at("AMP"):
-                self._error("'&end' is not a standard group terminator; use '/'", self._peek().span)
+                self._unexpected_group_start()
             if self._at_value_separator():
                 separator = self._peek()
                 self.index += 1
@@ -578,6 +578,21 @@ class _Parser:
         if self.decimal_mode is DecimalMode.POINT:
             return self._at("COMMA")
         return self._at("SEMICOLON")
+
+    def _unexpected_group_start(self) -> NoReturn:
+        amp = self._peek()
+        name = self._peek(1)
+        if (
+            name.kind == "WORD"
+            and name.span.start.offset == amp.span.end.offset
+            and name.text.lower() == "end"
+        ):
+            self._error("'&end' is not a standard group terminator; use '/'", amp.span)
+        spelling = f"&{name.text}" if name.kind == "WORD" else "&"
+        self._error(
+            f"terminate the current namelist group with '/' before starting '{spelling}'",
+            amp.span,
+        )
 
     def _skip_eor(self) -> None:
         while self._at("EOR"):
