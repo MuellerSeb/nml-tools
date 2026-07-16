@@ -1,24 +1,83 @@
-"""Tests for namelist validation."""
+"""Tests for schema-aware namelist evaluation and schema defaults."""
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 
+from nml_tools._namelist_eval import evaluate_file, evaluate_group
+from nml_tools._namelist_parser import DecimalMode, parse_namelist
 from nml_tools._utils import normalize_constant_values, normalize_runtime_dimensions
-from nml_tools.validate import validate_namelist, validate_schema_defaults
+from nml_tools.schema import load_schema
+from nml_tools.validate import validate_schema_defaults
 
 
-def test_validate_namelist_rejects_unknown_property() -> None:
+def _evaluate(
+    schema: dict[str, Any],
+    body: str,
+    *,
+    constants: dict[str, int] | None = None,
+    dimensions: dict[str, int] | None = None,
+    decimal_mode: DecimalMode = DecimalMode.POINT,
+) -> Any:
+    name = schema.get("x-fortran-namelist", "run")
+    parsed = parse_namelist(
+        f"&{name}\n{body}\n/",
+        source="input.nml",
+        decimal_mode=decimal_mode,
+    )
+    return evaluate_group(
+        parsed.groups[0],
+        schema,
+        source="input.nml",
+        constants=constants,
+        dimensions=dimensions,
+        decimal_mode=decimal_mode,
+    )
+
+
+def test_evaluator_rejects_unknown_property_with_source_location() -> None:
     schema = {
         "x-fortran-namelist": "config",
         "type": "object",
-        "properties": {
-            "foo": {"type": "integer"},
-        },
+        "properties": {"foo": {"type": "integer"}},
     }
-    namelist = {"foo": 1, "bar": 2}
-    with pytest.raises(ValueError, match="unknown property"):
-        validate_namelist(schema, namelist)
+    with pytest.raises(ValueError, match=r"input\.nml:2:1:.*unknown property 'bar'"):
+        _evaluate(schema, "bar = 2")
+
+
+def test_evaluate_file_preserves_group_order_and_rejects_duplicate_groups() -> None:
+    first = {
+        "x-fortran-namelist": "first",
+        "type": "object",
+        "properties": {"value": {"type": "integer"}},
+    }
+    second = {**first, "x-fortran-namelist": "second"}
+    parsed = parse_namelist("&first\nvalue=1\n/\n&second\nvalue=2\n/")
+    assert [group.name for group in evaluate_file(parsed, [first, second])] == [
+        "first",
+        "second",
+    ]
+
+    duplicate = parse_namelist("&first\nvalue=1\n/\n&FIRST\nvalue=2\n/")
+    with pytest.raises(ValueError, match="appears multiple times"):
+        evaluate_file(duplicate, [first])
+
+
+def test_shared_fortran_conformance_fixture_has_expected_effective_values() -> None:
+    fixture_dir = Path(__file__).parent / "fortran_namelist"
+    parsed = parse_namelist(
+        (fixture_dir / "standard.nml").read_text(encoding="utf-8"),
+        source=str(fixture_dir / "standard.nml"),
+    )
+    result = evaluate_group(parsed.groups[0], load_schema(fixture_dir / "run.yml"))
+    assert result.states[("values", (1, 2), None)].value == 3
+    assert result.states[("values", (2, 2), None)].value == 2
+    assert result.states[("settings", (1,), "flag")].value is True
+    assert result.states[("settings", (2,), "value")].value == 2
+    assert result.states[("label", (), None)].value == "abc     "
 
 
 @pytest.mark.parametrize(
@@ -29,7 +88,7 @@ def test_validate_namelist_rejects_unknown_property() -> None:
         ("config ", "valid Fortran identifier"),
     ],
 )
-def test_validate_namelist_rejects_invalid_schema_namelist_names(
+def test_evaluator_rejects_invalid_schema_namelist_names(
     namelist_name: str, match: str
 ) -> None:
     schema = {
@@ -37,584 +96,386 @@ def test_validate_namelist_rejects_invalid_schema_namelist_names(
         "type": "object",
         "properties": {"foo": {"type": "integer"}},
     }
+    parsed = parse_namelist("&config\nfoo = 1\n/")
     with pytest.raises(ValueError, match=match):
-        validate_namelist(schema, {"foo": 1})
+        evaluate_group(parsed.groups[0], schema)
 
 
-def test_normalize_config_values_accept_none_and_reject_empty_names() -> None:
+def test_normalize_config_values_accept_none_and_reject_invalid_values() -> None:
     assert normalize_constant_values(None) == {}
     assert normalize_runtime_dimensions(None) == {}
 
     with pytest.raises(ValueError, match="constant names must be non-empty"):
         normalize_constant_values({"": 1})
-
     with pytest.raises(ValueError, match="runtime dimension names must be non-empty"):
         normalize_runtime_dimensions({"": 1})
-
     with pytest.raises(ValueError, match="duplicates another dimension"):
         normalize_runtime_dimensions({"n": 1, "N": 2})
 
 
-def test_validate_namelist_rejects_invalid_schema_defaults() -> None:
-    scalar_schema = {
-        "x-fortran-namelist": "config",
-        "type": "object",
-        "properties": {"count": {"type": "integer", "minimum": 1, "default": 0}},
-    }
-    with pytest.raises(ValueError, match="must be >= 1"):
-        validate_namelist(scalar_schema, {})
-
-    array_schema = {
-        "x-fortran-namelist": "config",
-        "type": "object",
-        "properties": {
-            "values": {
+@pytest.mark.parametrize(
+    ("prop", "match"),
+    [
+        ({"type": "integer", "minimum": 1, "default": 0}, "must be >= 1"),
+        (
+            {
                 "type": "array",
                 "x-fortran-shape": 2,
                 "items": {"type": "integer", "enum": [1, 2]},
                 "default": [1],
                 "x-fortran-default-pad": 3,
-            }
-        },
-    }
-    with pytest.raises(ValueError, match="outside enum"):
-        validate_namelist(array_schema, {})
-
-    partial_schema = {
-        "x-fortran-namelist": "config",
-        "type": "object",
-        "properties": {
-            "values": {
+            },
+            "outside enum",
+        ),
+        (
+            {
                 "type": "array",
                 "x-fortran-shape": 2,
                 "items": {"type": "integer"},
                 "default": [1],
-            }
-        },
-    }
-    with pytest.raises(ValueError, match="shorter than declared x-fortran-shape"):
-        validate_namelist(partial_schema, {})
-
-    scalar_array_default_schema = {
-        "x-fortran-namelist": "config",
-        "type": "object",
-        "properties": {
-            "values": {
+            },
+            "shorter than declared x-fortran-shape",
+        ),
+        (
+            {
                 "type": "array",
                 "x-fortran-shape": 1,
                 "items": {"type": "integer"},
                 "default": 1,
-            }
-        },
-    }
-    with pytest.raises(ValueError, match="array default must be a list"):
-        validate_namelist(scalar_array_default_schema, {})
-
-    missing_items_schema = {
+            },
+            "array default must be a list",
+        ),
+    ],
+)
+def test_validate_schema_defaults_rejects_invalid_defaults(
+    prop: dict[str, Any], match: str
+) -> None:
+    schema = {
         "x-fortran-namelist": "config",
         "type": "object",
-        "properties": {
-            "values": {
-                "type": "array",
-                "x-fortran-shape": 1,
-                "default": [1],
-            }
-        },
+        "properties": {"value": prop},
     }
-    with pytest.raises(ValueError, match="must define object 'items'"):
-        validate_namelist(missing_items_schema, {})
-
-    options_without_default_schema = {
-        "x-fortran-namelist": "config",
-        "type": "object",
-        "properties": {
-            "values": {
-                "type": "array",
-                "x-fortran-default-repeat": True,
-            }
-        },
-    }
-    with pytest.raises(ValueError, match="default options require an array default"):
-        validate_namelist(options_without_default_schema, {})
+    with pytest.raises(ValueError, match=match):
+        validate_schema_defaults(schema)
 
 
 def test_validation_rejects_unresolved_schema_references() -> None:
     schema = {
         "x-fortran-namelist": "config",
         "type": "object",
-        "$defs": {"count": {"type": "integer"}},
-        "properties": {"count": {"$ref": "#/$defs/count"}},
+        "properties": {"value": {"$ref": "#/$defs/value"}},
+        "$defs": {"value": {"type": "integer"}},
     }
-
-    with pytest.raises(ValueError, match=r"use load_schema\(\) or resolve_schema\(\)"):
+    with pytest.raises(ValueError, match="unresolved '\\$ref'"):
         validate_schema_defaults(schema)
 
-    with pytest.raises(ValueError, match=r"use load_schema\(\) or resolve_schema\(\)"):
-        validate_namelist(schema, {})
 
-
-def test_validate_namelist_flex_array_shape() -> None:
+def test_intrinsic_values_constraints_and_character_storage() -> None:
     schema = {
         "x-fortran-namelist": "config",
         "type": "object",
+        "required": ["count", "ratio", "enabled", "label"],
         "properties": {
-            "arr": {
+            "count": {"type": "integer", "minimum": 1, "maximum": 5},
+            "ratio": {"type": "number", "minimum": 100.0},
+            "enabled": {"type": "boolean"},
+            "label": {"type": "string", "x-fortran-len": 4, "enum": ["abcd"]},
+        },
+    }
+    result = _evaluate(
+        schema,
+        "count = +3\nratio = 1.5+2\nenabled = .TEXAS$\nlabel = 'abcdef'",
+    )
+    assert result.states[("count", (), None)].value == 3
+    assert result.states[("ratio", (), None)].value == 150.0
+    assert result.states[("enabled", (), None)].value is True
+    assert result.states[("label", (), None)].value == "abcd"
+
+    with pytest.raises(ValueError, match=r"count.*must be >= 1"):
+        _evaluate(schema, "count = 0\nratio = 100\nenabled = F\nlabel = 'abcd'")
+    with pytest.raises(ValueError, match="character input must be.*delimited"):
+        _evaluate(schema, "count = 1\nratio = 100\nenabled = F\nlabel = abcd")
+
+
+def test_real_forms_and_nonfinite_values() -> None:
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "required": ["values"],
+        "properties": {
+            "values": {
                 "type": "array",
-                "items": {"type": "integer"},
-                "x-fortran-shape": [3, 2, 4],
-                "x-fortran-flex-tail-dims": 2,
+                "x-fortran-shape": 5,
+                "items": {"type": "number"},
             }
         },
     }
-    # f90nml-style nesting: outermost dimension is the last Fortran index.
-    namelist = {"arr": [[[1, 2, 3], [4, 5, 6]]]}
-    validate_namelist(schema, namelist)
+    result = _evaluate(schema, "values = .5, 1., 1d2, 1.25-1, 0x1.0p+2")
+    assert [state.value for state in result.states.values()] == [0.5, 1.0, 100.0, 0.125, 4.0]
+    with pytest.raises(ValueError, match="must not be infinite"):
+        _evaluate(schema, "values(1) = inf")
+    with pytest.raises(ValueError, match="must not be NaN"):
+        _evaluate(schema, "values(1) = nan")
+    with pytest.raises(ValueError, match="must not be NaN"):
+        _evaluate(schema, "values(1) = NaN(payload)")
+    with pytest.raises(ValueError, match="expected a standard real input value"):
+        _evaluate(schema, "values(1) = 1q2")
 
-
-def test_validate_namelist_allows_dimensions_only_for_array_shapes() -> None:
-    schema = {
-        "x-fortran-namelist": "config",
+    comma_schema = {
+        "x-fortran-namelist": "run",
         "type": "object",
-        "properties": {
-            "arr": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "x-fortran-shape": ["n_values"],
-            },
-            "name": {
-                "type": "string",
-                "x-fortran-len": "n_values",
-            },
-        },
+        "properties": {"value": {"type": "number"}},
     }
-
-    with pytest.raises(ValueError, match="must not use runtime dimension"):
-        validate_namelist(
-            schema,
-            {"arr": [1, 2, 3], "name": "abc"},
-            dimensions={"n_values": 3},
-        )
-
-
-def test_validate_namelist_accepts_scalar_shape_with_dimension() -> None:
-    schema = {
-        "x-fortran-namelist": "config",
-        "type": "object",
-        "properties": {
-            "arr": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "x-fortran-shape": "n_values",
-            },
-        },
-    }
-
-    validate_namelist(schema, {"arr": [1, 2, 3]}, dimensions={"n_values": 3})
-
-
-def test_validate_namelist_accepts_bare_scalar_for_single_element_array() -> None:
-    schema = {
-        "x-fortran-namelist": "config",
-        "type": "object",
-        "properties": {
-            "start_time": {
-                "type": "array",
-                "items": {"type": "string", "x-fortran-len": 32},
-                "x-fortran-shape": "n_items",
-            },
-        },
-    }
-
-    validate_namelist(
-        schema,
-        {"start_time": "1992-07-05 00:00"},
-        dimensions={"n_items": 1},
+    comma_result = _evaluate(
+        comma_schema,
+        "value = 1,25",
+        decimal_mode=DecimalMode.COMMA,
     )
+    assert comma_result.states[("value", (), None)].value == 1.25
 
 
-def test_validate_namelist_accepts_bare_flat_multidimensional_array_buffer() -> None:
+def test_arrays_use_fortran_order_sections_and_serial_assignment() -> None:
     schema = {
-        "x-fortran-namelist": "profile",
+        "x-fortran-namelist": "run",
         "type": "object",
+        "required": ["values"],
         "properties": {
-            "layer_depth": {
+            "values": {
                 "type": "array",
+                "x-fortran-shape": [2, 3],
                 "items": {"type": "integer"},
-                "x-fortran-shape": [5, 1],
-            },
+            }
         },
     }
-
-    validate_namelist(schema, {"layer_depth": [200, 0, 0, 0, 0]})
-
-
-def test_validate_namelist_rejects_bare_array_buffer_longer_than_shape() -> None:
-    schema = {
-        "x-fortran-namelist": "profile",
-        "type": "object",
-        "properties": {
-            "layer_depth": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "x-fortran-shape": [2, 2],
-            },
-        },
-    }
-
-    with pytest.raises(ValueError, match="buffer is longer than shape"):
-        validate_namelist(schema, {"layer_depth": [1, 2, 3, 4, 5]})
-
-
-def test_validate_namelist_applies_scalar_constraints_to_bare_array_buffer() -> None:
-    schema = {
-        "x-fortran-namelist": "profile",
-        "type": "object",
-        "properties": {
-            "layer_depth": {
-                "type": "array",
-                "items": {"type": "integer", "enum": [0, 200]},
-                "x-fortran-shape": [5, 1],
-            },
-        },
-    }
-
-    with pytest.raises(ValueError, match="outside enum"):
-        validate_namelist(schema, {"layer_depth": [200, 0, 1]})
-
-
-def test_validate_namelist_matches_constants_and_dimensions_case_insensitively() -> None:
-    schema = {
-        "x-fortran-namelist": "config",
-        "type": "object",
-        "properties": {
-            "arr": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "x-fortran-shape": "MAX_VALUES",
-            },
-            "name": {
-                "type": "string",
-                "x-fortran-len": "BUF",
-            },
-        },
-    }
-
-    validate_namelist(
+    result = _evaluate(
         schema,
-        {"arr": [1, 2, 3], "name": "abc"},
-        constants={"buf": 16},
-        dimensions={"max_values": 3},
+        "values = 6*0\nvalues(:,2) = 1, 2\nvalues(2:1:-1,3) = 3, 4\nvalues(1,2) = 9",
     )
+    assert [key[1] for key in result.states] == [
+        (1, 1),
+        (2, 1),
+        (1, 2),
+        (2, 2),
+        (1, 3),
+        (2, 3),
+    ]
+    assert result.states[("values", (1, 2), None)].value == 9
+    assert result.states[("values", (2, 2), None)].value == 2
+    assert result.states[("values", (2, 3), None)].value == 3
+    assert result.states[("values", (1, 3), None)].value == 4
 
 
-def test_validate_namelist_rejects_constant_dimension_name_overlap() -> None:
+def test_array_bounds_rank_and_excess_values_are_diagnosed() -> None:
     schema = {
-        "x-fortran-namelist": "config",
-        "type": "object",
-        "properties": {
-            "arr": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "x-fortran-shape": "n_values",
-            },
-        },
-    }
-
-    with pytest.raises(ValueError, match="constants and dimensions"):
-        validate_namelist(
-            schema,
-            {"arr": [1, 2, 3]},
-            constants={"n_values": 3},
-            dimensions={"N_VALUES": 3},
-        )
-
-    with pytest.raises(ValueError, match="duplicates another constant"):
-        validate_namelist(
-            schema,
-            {"arr": [1, 2, 3]},
-            constants={"n_values": 3, "N_VALUES": 4},
-        )
-
-    with pytest.raises(ValueError, match="must be an integer"):
-        validate_namelist(
-            schema,
-            {"arr": [1, 2, 3]},
-            constants={"n_values": 3.5},
-        )
-
-
-def test_validate_namelist_rejects_invalid_dimensions() -> None:
-    schema = {
-        "x-fortran-namelist": "config",
-        "type": "object",
-        "properties": {
-            "arr": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "x-fortran-shape": "n_values",
-            },
-        },
-    }
-
-    with pytest.raises(ValueError, match="valid Fortran identifier"):
-        validate_namelist(schema, {"arr": [1]}, dimensions={"1bad": 1})
-
-    with pytest.raises(ValueError, match="must be an integer"):
-        validate_namelist(schema, {"arr": [1]}, dimensions={"n_values": True})
-
-    with pytest.raises(ValueError, match="must be positive"):
-        validate_namelist(schema, {"arr": [1]}, dimensions={"n_values": 0})
-
-
-def _derived_schema(*, optional: bool = False) -> dict[str, object]:
-    return {
         "x-fortran-namelist": "run",
         "type": "object",
         "properties": {
-            "period": {
-                "type": "object",
-                "x-fortran-type": "period_t",
-                "_nml_tools_ref_origin": {
-                    "identity": ["<mapping>", "/$defs/period"],
-                    "definition": {},
-                },
-                "properties": {
-                    "start_year": {"type": "integer", "minimum": 1900},
-                    "label": {"type": "string", "x-fortran-len": 8, "default": "default"},
-                },
-                "required": ["start_year"],
-            },
-            "periods": {
+            "values": {
                 "type": "array",
-                "x-fortran-shape": 2,
-                "items": {
-                    "type": "object",
-                    "x-fortran-type": "period_t",
-                    "_nml_tools_ref_origin": {
-                        "identity": ["<mapping>", "/$defs/period"],
-                        "definition": {},
-                    },
-                    "properties": {"start_year": {"type": "integer", "minimum": 1900}},
-                    "required": ["start_year"],
-                },
-            },
+                "x-fortran-shape": [2, 2],
+                "items": {"type": "integer"},
+            }
         },
-        "required": [] if optional else ["period", "periods"],
     }
+    with pytest.raises(ValueError, match="outside 1:2"):
+        _evaluate(schema, "values(3,1) = 1")
+    with pytest.raises(ValueError, match="rank mismatch"):
+        _evaluate(schema, "values(1) = 1")
+    with pytest.raises(ValueError, match="supplies 5 values for 4 effective items"):
+        _evaluate(schema, "values = 1, 2, 3, 4, 5")
+    with pytest.raises(ValueError, match="supplies 10000000 values for 4 effective items"):
+        _evaluate(schema, "values = 10000000*0")
+    with pytest.raises(ValueError, match="must not be empty"):
+        _evaluate(schema, "values(2:1,1) = 1")
 
 
-def _setting_schema(
-    *,
-    required_components: list[str] | None = None,
-    array_shape: object = 2,
-    include_array: bool = False,
-) -> dict[str, object]:
-    required = required_components if required_components is not None else ["flag", "value"]
+def test_runtime_and_deferred_rank_one_shapes() -> None:
+    runtime = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "required": ["values"],
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": "n_values",
+                "items": {"type": "integer"},
+            }
+        },
+    }
+    _evaluate(runtime, "values = 1, 2, 3", dimensions={"N_VALUES": 3})
+    with pytest.raises(ValueError, match="supplies 4 values for 3"):
+        _evaluate(runtime, "values = 1, 2, 3, 4", dimensions={"n_values": 3})
+
+    deferred = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": ":",
+                "items": {"type": "integer"},
+            }
+        },
+    }
+    result = _evaluate(deferred, "values = 1, 2, 3")
+    assert len(result.states) == 3
+    with pytest.raises(ValueError, match="expands to 100000000 items.*safety limit"):
+        _evaluate(deferred, "values = 100000000*0")
+
+
+def _setting_schema(*, shape: object | None = None) -> dict[str, Any]:
     setting = {
         "type": "object",
         "x-fortran-type": "setting_t",
-        "_nml_tools_ref_origin": {
-            "identity": ["<mapping>", "/$defs/setting"],
-            "definition": {},
-        },
         "properties": {
-            "flag": {"type": "boolean"},
+            "flag": {"type": "boolean", "default": False},
             "value": {"type": "integer", "minimum": 1},
         },
-        "required": required,
+        "required": ["value"],
     }
-    properties: dict[str, object] = {"setting": setting}
-    required_fields = ["setting"]
-    if include_array:
-        properties["settings"] = {
-            "type": "array",
-            "x-fortran-shape": array_shape,
-            "items": setting,
-        }
-        required_fields.append("settings")
+    prop: dict[str, Any]
+    if shape is None:
+        prop = setting
+    else:
+        prop = {"type": "array", "x-fortran-shape": shape, "items": setting}
     return {
         "x-fortran-namelist": "run",
         "type": "object",
-        "properties": properties,
-        "required": required_fields,
+        "required": ["settings"],
+        "properties": {"settings": prop},
     }
 
 
-def test_validate_namelist_accepts_nested_derived_values() -> None:
-    validate_namelist(
-        _derived_schema(),
-        {
-            "period": {"start_year": 2001, "label": "eval"},
-            "periods": [{"start_year": 1980}, {"start_year": 2001}],
-        },
-    )
+def test_derived_scalar_positional_component_and_null_assignment() -> None:
+    schema = _setting_schema()
+    result = _evaluate(schema, "settings = , 2\nsettings%flag = T")
+    assert result.states[("settings", (), "flag")].value is True
+    assert result.states[("settings", (), "value")].value == 2
 
-    with pytest.raises(ValueError, match=r"period\.start_year.*>= 1900"):
-        validate_namelist(
-            _derived_schema(),
-            {
-                "period": {"start_year": 1800},
-                "periods": [{"start_year": 1980}, {"start_year": 2001}],
-            },
-        )
-    with pytest.raises(ValueError, match=r"periods\[2\]\.missing.*unknown"):
-        validate_namelist(
-            _derived_schema(),
-            {
-                "period": {"start_year": 2001},
-                "periods": [{"start_year": 1980}, {"start_year": 2001, "missing": 1}],
-            },
-        )
+    with pytest.raises(ValueError, match=r"missing required 'settings%value'"):
+        _evaluate(schema, "settings = T")
+    with pytest.raises(ValueError, match="supplies 3 values for 2"):
+        _evaluate(schema, "settings = T, 1, 2")
 
 
-def test_validate_namelist_accepts_derived_buffer_values() -> None:
-    validate_namelist(
-        _setting_schema(include_array=True),
-        {
-            "setting": [True, 1],
-            "settings": [True, 1, False, 2],
-        },
-    )
+def test_derived_required_components_must_exist_during_schema_compilation() -> None:
+    schema = _setting_schema()
+    schema["properties"]["settings"]["required"].append("missing")
 
-
-def test_validate_namelist_accepts_single_value_derived_buffer() -> None:
-    validate_namelist(
-        _setting_schema(required_components=["flag"]),
-        {"setting": True},
-    )
-
-
-def test_validate_namelist_accepts_single_value_derived_array_buffer() -> None:
-    validate_namelist(
-        _setting_schema(required_components=["flag"], include_array=True),
-        {"setting": True, "settings": True},
-    )
-
-
-def test_validate_namelist_skips_omitted_derived_buffer_values() -> None:
-    validate_namelist(
-        _setting_schema(required_components=["value"]),
-        {"setting": [None, 1]},
-    )
-
-    with pytest.raises(ValueError, match=r"missing required 'setting\.flag'"):
-        validate_namelist(
-            _setting_schema(required_components=["flag"]),
-            {"setting": [None, 1]},
-        )
-
-
-def test_validate_namelist_rejects_overlong_derived_buffer() -> None:
-    with pytest.raises(ValueError, match="buffer has too many values"):
-        validate_namelist(
-            _setting_schema(),
-            {"setting": [True, 1, 3]},
-        )
-
-
-def test_validate_namelist_applies_constraints_to_derived_buffer_values() -> None:
-    with pytest.raises(ValueError, match=r"setting\.value.*>= 1"):
-        validate_namelist(
-            _setting_schema(),
-            {"setting": [True, 0]},
-        )
-
-
-def test_validate_namelist_accepts_derived_array_buffers_with_concrete_shapes() -> None:
-    validate_namelist(
-        _setting_schema(include_array=True),
-        {"setting": [True, 1], "settings": [True, 1, False, 2]},
-    )
-
-    validate_namelist(
-        _setting_schema(array_shape="n_settings", include_array=True),
-        {"setting": [True, 1], "settings": [True, 1, False, 2]},
-        dimensions={"n_settings": 2},
-    )
-
-
-def test_validate_namelist_rejects_partial_required_derived_array_buffer_element() -> None:
-    with pytest.raises(ValueError, match=r"missing required 'settings\[2\]\.value'"):
-        validate_namelist(
-            _setting_schema(include_array=True),
-            {"setting": [True, 1], "settings": [True, 1, False]},
-        )
-
-
-def test_validate_namelist_rejects_null_only_required_derived_array_buffer() -> None:
-    with pytest.raises(ValueError, match=r"missing required 'settings\[1\]\.flag'"):
-        validate_namelist(
-            _setting_schema(include_array=True),
-            {"setting": [True, 1], "settings": [None, None]},
-        )
-
-
-def test_validate_namelist_rejects_overlong_derived_array_buffer() -> None:
-    with pytest.raises(ValueError, match="buffer is longer than shape"):
-        validate_namelist(
-            _setting_schema(include_array=True),
-            {"setting": [True, 1], "settings": [True, 1, False, 2, True]},
-        )
-
-
-def test_validate_namelist_rejects_mapping_as_derived_array() -> None:
-    with pytest.raises(ValueError, match="array property 'settings' must be a list"):
-        validate_namelist(
-            _setting_schema(include_array=True),
-            {
-                "setting": [True, 1],
-                "settings": {"flag": True, "value": 1},
-            },
-        )
-
-
-def test_validate_namelist_rejects_multirank_derived_array_buffer_without_shape() -> None:
     with pytest.raises(
         ValueError,
-        match="derived array 'settings' flat buffer assignment requires concrete shape",
+        match="derived property 'settings' required component 'missing'.*not declared",
     ):
-        validate_namelist(
-            _setting_schema(array_shape=[":", ":"], include_array=True),
-            {"setting": [True, 1], "settings": [True, 1]},
-        )
+        _evaluate(schema, "settings = T, 1")
 
 
-def test_validate_namelist_reports_missing_derived_array_item_properties() -> None:
+def test_derived_components_must_be_unique_case_insensitively() -> None:
+    schema = _setting_schema()
+    schema["properties"]["settings"]["properties"]["Flag"] = {"type": "boolean"}
+
+    with pytest.raises(
+        ValueError,
+        match="derived property 'settings' defines duplicate component 'Flag'.*'flag'",
+    ):
+        _evaluate(schema, "settings = T, 1")
+
+
+def test_indexed_and_sectioned_derived_arrays_preserve_record_boundaries() -> None:
+    schema = _setting_schema(shape=[2, 2])
+    result = _evaluate(
+        schema,
+        "settings(1,1) = T, 1\n"
+        "settings(2,1) = F, 2\n"
+        "settings(:,2)%value = 3, 4",
+    )
+    assert result.states[("settings", (1, 1), "value")].value == 1
+    assert result.states[("settings", (2, 1), "value")].value == 2
+    assert result.states[("settings", (1, 2), "value")].value == 3
+    assert result.states[("settings", (2, 2), "value")].value == 4
+    assert ("settings", (2, 2), "flag") not in result.states
+
+
+def test_whole_derived_array_expands_element_then_component() -> None:
+    schema = _setting_schema(shape=2)
+    result = _evaluate(schema, "settings = T, 1, F, 2")
+    assert [state.value for state in result.states.values()] == [True, 1, False, 2]
+
+    with pytest.raises(ValueError, match=r"settings\(2\).*settings\(2\)%value"):
+        _evaluate(schema, "settings = T, 1, F")
+
+
+def test_null_only_required_value_does_not_establish_presence() -> None:
+    schema = _setting_schema(shape=1)
+    with pytest.raises(ValueError, match="missing required 'settings'"):
+        _evaluate(schema, "settings = 2*")
+
+
+def test_defaults_are_tracked_but_do_not_satisfy_required_input() -> None:
     schema = {
         "x-fortran-namelist": "run",
         "type": "object",
-        "properties": {
-            "settings": {
-                "type": "array",
-                "x-fortran-shape": 2,
-                "items": {
-                    "type": "object",
-                    "x-fortran-type": "setting_t",
-                    "properties": {},
-                },
-            }
-        },
-        "required": ["settings"],
+        "required": ["count"],
+        "properties": {"count": {"type": "integer", "default": 4}},
     }
+    with pytest.raises(ValueError, match="missing required 'count'"):
+        _evaluate(schema, "count = ")
 
-    with pytest.raises(
-        ValueError,
-        match="derived array 'settings' items must define non-empty object 'properties'",
-    ):
-        validate_namelist(schema, {"settings": [True, 1]})
+    optional = {**schema, "required": []}
+    result = _evaluate(optional, "count = ,")
+    state = result.states[("count", (), None)]
+    assert state.value == 4
+    assert state.initialized_by_default is True
+    assert state.explicitly_assigned is False
+    assert state.null_consumed is True
+
+    string_schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "x-fortran-len": 4, "default": "a"}
+        },
+    }
+    string_state = _evaluate(string_schema, "label = ,").states[("label", (), None)]
+    assert string_state.value == "a   "
 
 
-def test_validate_namelist_rejects_optional_derived_values_with_required_members() -> None:
-    with pytest.raises(ValueError, match="optional derived property 'period'.*required"):
-        validate_schema_defaults(_derived_schema(optional=True))
+def test_character_substrings_and_component_arrays_are_capability_errors() -> None:
+    string_schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {"label": {"type": "string", "x-fortran-len": 8}},
+    }
+    with pytest.raises(ValueError, match="substring assignment.*not yet supported"):
+        _evaluate(string_schema, "label(2:4) = 'abc'")
+
+    derived = _setting_schema()
+    with pytest.raises(ValueError, match="array-valued component selection"):
+        _evaluate(derived, "settings%value(1) = 2")
+
+    complex_schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {"value": {"type": "complex"}},
+    }
+    with pytest.raises(ValueError, match="complex.*not supported"):
+        _evaluate(complex_schema, "value = (1.0, -2.0)")
+
+
+def test_optional_derived_values_with_required_members_remain_rejected() -> None:
+    schema = _setting_schema()
+    schema["required"] = []
+    with pytest.raises(ValueError, match="optional derived property 'settings'.*required"):
+        validate_schema_defaults(schema)
 
 
 def test_validate_schema_defaults_traverses_derived_members() -> None:
-    schema = _derived_schema()
-    period = schema["properties"]["period"]  # type: ignore[index]
-    period["properties"]["label"]["default"] = "too-long-value"  # type: ignore[index]
-
-    with pytest.raises(ValueError, match=r"period\.label.*exceeds length"):
+    schema = _setting_schema()
+    schema["properties"]["settings"]["properties"]["flag"] = {
+        "type": "string",
+        "x-fortran-len": 3,
+        "default": "long",
+    }
+    with pytest.raises(ValueError, match=r"settings\.flag.*exceeds length"):
         validate_schema_defaults(schema)
 
 
@@ -637,45 +498,19 @@ def test_validate_schema_defaults_traverses_derived_members() -> None:
             {
                 "type": "object",
                 "x-fortran-type": "period_t",
-                "x-fortran-module": "not-a-module",
-                "properties": {"year": {"type": "integer"}},
-            },
-            "x-fortran-module must be a valid identifier",
-        ),
-        (
-            {
-                "type": "object",
-                "x-fortran-type": "period_t",
-                "properties": {
-                    "years": {"type": "array", "items": {"type": "integer"}}
-                },
+                "properties": {"years": {"type": "array", "items": {"type": "integer"}}},
             },
             "component 'years' must define an intrinsic scalar type",
-        ),
-        (
-            {
-                "type": "object",
-                "x-fortran-type": "period_t",
-                "properties": {
-                    "child": {
-                        "type": "object",
-                        "x-fortran-type": "child_t",
-                        "properties": {"year": {"type": "integer"}},
-                    }
-                },
-            },
-            "component 'child' must define an intrinsic scalar type",
         ),
     ],
 )
 def test_validation_rejects_invalid_raw_derived_declarations(
-    prop: dict[str, object], match: str
+    prop: dict[str, Any], match: str
 ) -> None:
     schema = {
         "x-fortran-namelist": "run",
         "type": "object",
         "properties": {"period": prop},
     }
-
     with pytest.raises(ValueError, match=match):
-        validate_namelist(schema, {})
+        validate_schema_defaults(schema)

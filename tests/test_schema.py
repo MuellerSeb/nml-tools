@@ -8,6 +8,8 @@ from textwrap import dedent
 
 import pytest
 
+from nml_tools._namelist_eval import evaluate_group
+from nml_tools._namelist_parser import parse_namelist
 from nml_tools.codegen_f2py import (
     F2pyCTypeMap,
     build_f2py_namelist_spec,
@@ -20,7 +22,7 @@ from nml_tools.codegen_fortran import collect_local_derived_types, render_fortra
 from nml_tools.codegen_markdown import render_docs
 from nml_tools.codegen_template import render_template
 from nml_tools.schema import SchemaResolver, get_string_format, load_schema, resolve_schema
-from nml_tools.validate import validate_namelist
+from nml_tools.validate import validate_schema_defaults
 
 
 def test_resolve_schema_composes_inline_scalar_reference() -> None:
@@ -521,7 +523,8 @@ def test_resolved_schema_is_equivalent_for_outputs_and_validation(tmp_path: Path
     assert render_f2cmap(usage, F2pyCTypeMap(real={"dp": "double"}, integer={})) == (
         "dict(real=dict(dp='double'), integer=dict(c_intptr_t='long_long'))\n"
     )
-    validate_namelist(referenced, {"values": [1.0, 2.0]}, dimensions={"n_values": 2})
+    parsed = parse_namelist("&demo\nvalues = 1.0, 2.0\n/")
+    evaluate_group(parsed.groups[0], referenced, dimensions={"n_values": 2})
 
 
 def test_resolve_schema_preserves_referenced_derived_type_origin_and_refinements() -> None:
@@ -633,7 +636,10 @@ def test_resolve_schema_accepts_inline_single_use_derived_definitions() -> None:
     assert station["_nml_tools_ref_origin"]["identity"][1] == "/properties/station"
     assert station["_nml_tools_ref_origin"]["definition"]["title"] == "Selected station"
     assert periods["_nml_tools_ref_origin"]["identity"][1] == "/properties/periods/items"
-    validate_namelist(resolved, {"station": {"code": 7}, "periods": [{"year": 1}, {"year": 2}]})
+    parsed = parse_namelist(
+        "&run\nstation%code = 7\nperiods(1)%year = 1\nperiods(2)%year = 2\n/"
+    )
+    evaluate_group(parsed.groups[0], resolved)
 
 
 def test_inline_optional_derived_type_rejects_required_members_during_validation() -> None:
@@ -653,7 +659,7 @@ def test_inline_optional_derived_type_rejects_required_members_during_validation
     )
 
     with pytest.raises(ValueError, match="optional derived property 'period'.*required"):
-        validate_namelist(resolved, {})
+        validate_schema_defaults(resolved)
 
 
 def test_inline_derived_type_is_equivalent_to_one_use_reference_for_outputs() -> None:

@@ -77,52 +77,6 @@ def _has_reachable_reference(raw: Mapping[str, Any], *, position: str) -> bool:
     return isinstance(items, Mapping) and _has_reachable_reference(items, position="items")
 
 
-def validate_namelist(
-    schema: dict[str, Any],
-    namelist: dict[str, Any],
-    *,
-    constants: dict[str, int] | None = None,
-    dimensions: dict[str, int] | None = None,
-) -> None:
-    """Validate *namelist* against *schema*."""
-    constants = normalize_constant_values(constants)
-    dimensions = normalize_runtime_dimensions(dimensions)
-    reject_constant_dimension_overlap(constants, dimensions)
-    validate_schema_defaults(schema, constants=constants, dimensions=dimensions)
-
-    namelist_name = schema.get("x-fortran-namelist")
-    if not isinstance(namelist_name, str) or not namelist_name.strip():
-        raise ValueError("schema must define non-empty 'x-fortran-namelist'")
-    validate_user_fortran_identifier(namelist_name, label="'x-fortran-namelist'")
-    if schema.get("type") != "object":
-        raise ValueError(f"schema '{namelist_name}' must be of type 'object'")
-    properties_raw = schema.get("properties")
-    if not isinstance(properties_raw, dict) or not properties_raw:
-        raise ValueError(f"schema '{namelist_name}' must define object 'properties'")
-
-    properties = _normalize_properties(properties_raw, namelist_name)
-    required = _parse_required(schema.get("required", []), properties, namelist_name)
-    values = _normalize_namelist(namelist, namelist_name)
-
-    for key in values:
-        if key not in properties:
-            raise ValueError(
-                f"namelist '{namelist_name}' has unknown property '{values[key][0]}'"
-            )
-
-    for key, (prop_name, prop) in properties.items():
-        if key in values:
-            _validate_property(
-                prop_name,
-                prop,
-                values[key][1],
-                constants=constants,
-                dimensions=dimensions,
-            )
-        elif key in required:
-            raise ValueError(f"namelist '{namelist_name}' is missing required '{prop_name}'")
-
-
 def _validate_property_defaults(
     name: str,
     prop: Mapping[str, Any],
@@ -159,7 +113,7 @@ def _validate_property_defaults(
 
     if prop.get("type") != "array":
         if "default" in prop:
-            _validate_property(
+            _validate_scalar_default(
                 name,
                 prop,
                 prop["default"],
@@ -211,7 +165,7 @@ def _validate_property_defaults(
             raise ValueError(f"array default must be a list for property '{name}'")
         _validate_array_default_layout(name, prop, default, constants, dimensions)
         for value in _iter_scalars(default):
-            _validate_property(
+            _validate_scalar_default(
                 name,
                 items,
                 value,
@@ -219,7 +173,7 @@ def _validate_property_defaults(
                 dimensions=dimensions,
             )
     elif "default" in items:
-        _validate_property(
+        _validate_scalar_default(
             name,
             items,
             items["default"],
@@ -231,13 +185,28 @@ def _validate_property_defaults(
         pad = prop["x-fortran-default-pad"]
         pad_values = pad if isinstance(pad, list) else [pad]
         for value in _iter_scalars(pad_values):
-            _validate_property(
+            _validate_scalar_default(
                 name,
                 items,
                 value,
                 constants=constants,
                 dimensions=dimensions,
             )
+
+
+def _validate_scalar_default(
+    name: str,
+    prop: Mapping[str, Any],
+    value: Any,
+    *,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
+) -> None:
+    category = prop.get("type")
+    if category not in {"integer", "number", "boolean", "string"}:
+        raise ValueError(f"property '{name}' has unsupported type '{category}'")
+    constraints = _scalar_constraints(name, prop, category, constants, dimensions)
+    _validate_scalar_value(name, value, constraints)
 
 
 def _validate_derived_declaration(name: str, prop: Mapping[str, Any]) -> None:
@@ -347,153 +316,6 @@ def _parse_required(
     return required
 
 
-def _normalize_namelist(
-    namelist: Mapping[str, Any],
-    namelist_name: str,
-) -> dict[str, tuple[str, Any]]:
-    normalized: dict[str, tuple[str, Any]] = {}
-    for name, value in namelist.items():
-        if not isinstance(name, str):
-            raise ValueError(f"namelist '{namelist_name}' keys must be strings")
-        key = name.lower()
-        if key in normalized:
-            raise ValueError(
-                f"namelist '{namelist_name}' defines duplicate key '{name}'"
-            )
-        normalized[key] = (name, value)
-    return normalized
-
-
-def _validate_property(
-    name: str,
-    prop: Mapping[str, Any],
-    value: Any,
-    *,
-    constants: dict[str, int] | None,
-    dimensions: dict[str, int] | None,
-) -> None:
-    prop_type = prop.get("type")
-    if prop_type == "array":
-        _validate_array(name, prop, value, constants, dimensions)
-        return
-    if prop_type == "object":
-        _validate_derived_value(name, prop, value, constants, dimensions)
-        return
-    if prop_type in {"integer", "number", "boolean", "string"}:
-        constraints = _scalar_constraints(name, prop, prop_type, constants, dimensions)
-        _validate_scalar_value(name, value, constraints)
-        return
-    raise ValueError(f"property '{name}' has unsupported type '{prop_type}'")
-
-
-def _validate_array(
-    name: str,
-    prop: Mapping[str, Any],
-    value: Any,
-    constants: dict[str, int] | None,
-    dimensions: dict[str, int] | None,
-) -> None:
-    items = prop.get("items")
-    if not isinstance(items, dict):
-        raise ValueError(f"array property '{name}' must define 'items'")
-    items_type = items.get("type")
-    if items_type == "array":
-        raise ValueError(f"array property '{name}' must not nest arrays")
-    if items_type not in {"integer", "number", "boolean", "string", "object"}:
-        raise ValueError(f"array property '{name}' items must define a scalar type")
-
-    shape_constants = {**(constants or {}), **(dimensions or {})}
-    shape = _parse_shape(prop.get("x-fortran-shape"), shape_constants, name)
-    flex_tail_dims = _parse_flex_tail_dims(prop, len(shape), name, shape)
-    if items_type == "object" and flex_tail_dims:
-        raise ValueError(
-            f"derived array property '{name}' must not define x-fortran-flex-tail-dims"
-        )
-
-    if items_type == "object" and _is_derived_array_buffer(value):
-        _validate_derived_array_buffer(name, items, value, shape, constants, dimensions)
-        return
-
-    if items_type != "object" and _is_bare_array_buffer(value, len(shape)):
-        constraints = _scalar_constraints(name, items, items_type, constants, dimensions)
-        _validate_bare_array_buffer(name, value, shape, constraints)
-        return
-
-    array_value = _coerce_array_value(value, name)
-    provided_shape = _nested_shape(array_value, name)
-    if len(provided_shape) != len(shape):
-        raise ValueError(
-            f"array '{name}' rank mismatch: expected {len(shape)} got {len(provided_shape)}"
-        )
-    shape_fortran = list(reversed(provided_shape))
-    for idx, (provided, expected) in enumerate(zip(shape_fortran, shape), start=1):
-        if provided <= 0:
-            raise ValueError(f"array '{name}' has empty dimension {idx}")
-        if expected is None:
-            continue
-        if flex_tail_dims > 0 and idx <= len(shape) - flex_tail_dims:
-            if provided != expected:
-                raise ValueError(
-                    f"array '{name}' dimension {idx} must be {expected}, got {provided}"
-                )
-        else:
-            if provided > expected:
-                raise ValueError(
-                    f"array '{name}' dimension {idx} must be <= {expected}, got {provided}"
-                )
-
-    if items_type == "object":
-        for path, element in _iter_object_elements(array_value, name):
-            _validate_derived_value(path, items, element, constants, dimensions)
-        return
-
-    constraints = _scalar_constraints(name, items, items_type, constants, dimensions)
-    for element in _iter_scalars(array_value):
-        _validate_scalar_value(name, element, constraints)
-
-
-def _is_bare_array_buffer(value: Any, rank: int) -> bool:
-    if isinstance(value, (list, tuple)):
-        return rank > 1 and all(not isinstance(item, (list, tuple)) for item in value)
-    if hasattr(value, "tolist"):
-        coerced = value.tolist()
-        return _is_bare_array_buffer(coerced, rank)
-    return True
-
-
-def _validate_bare_array_buffer(
-    name: str,
-    value: Any,
-    shape: list[int | None],
-    constraints: ScalarConstraints,
-) -> None:
-    if isinstance(value, (list, tuple)):
-        buffer_values = list(value)
-    elif hasattr(value, "tolist"):
-        coerced = value.tolist()
-        buffer_values = coerced if isinstance(coerced, list) else [coerced]
-    else:
-        buffer_values = [value]
-
-    if not buffer_values:
-        raise ValueError(f"array property '{name}' must not be empty")
-    if len(shape) > 1 and any(dimension is None for dimension in shape):
-        raise ValueError(
-            f"array '{name}' bare buffer assignment requires concrete shape"
-        )
-    concrete_shape = [dimension for dimension in shape if dimension is not None]
-    if len(concrete_shape) == len(shape):
-        total_size = math.prod(concrete_shape)
-        if len(buffer_values) > total_size:
-            raise ValueError(
-                f"array '{name}' buffer is longer than shape: "
-                f"{len(buffer_values)} > {total_size}"
-            )
-
-    for element in buffer_values:
-        _validate_scalar_value(name, element, constraints)
-
-
 def _validate_derived_presence_policy(
     name: str,
     prop: Mapping[str, Any],
@@ -517,177 +339,6 @@ def _derived_object_schema(prop: Mapping[str, Any]) -> Mapping[str, Any] | None:
         if isinstance(items, Mapping) and items.get("type") == "object":
             return items
     return None
-
-
-def _validate_derived_value(
-    name: str,
-    prop: Mapping[str, Any],
-    value: Any,
-    constants: dict[str, int] | None,
-    dimensions: dict[str, int] | None,
-) -> None:
-    properties_raw = prop.get("properties")
-    if not isinstance(properties_raw, Mapping) or not properties_raw:
-        raise ValueError(f"derived property '{name}' must define object 'properties'")
-    properties = _normalize_properties(properties_raw, name)
-    required = _parse_required(prop.get("required", []), properties, name)
-    if isinstance(value, Mapping):
-        supplied = _normalize_namelist(value, name)
-        for key, (child_name, _) in supplied.items():
-            if key not in properties:
-                raise ValueError(f"property '{name}.{child_name}' is unknown")
-    else:
-        supplied = _normalize_derived_buffer(name, properties, value)
-
-    _validate_derived_supplied(
-        name,
-        properties,
-        required,
-        supplied,
-        constants=constants,
-        dimensions=dimensions,
-    )
-
-
-def _validate_derived_supplied(
-    name: str,
-    properties: Mapping[str, tuple[str, dict[str, Any]]],
-    required: set[str],
-    supplied: Mapping[str, tuple[str, Any]],
-    *,
-    constants: dict[str, int] | None,
-    dimensions: dict[str, int] | None,
-) -> None:
-    for key, (child_name, child) in properties.items():
-        child_path = f"{name}.{child_name}"
-        if key in supplied:
-            _validate_property(
-                child_path,
-                child,
-                supplied[key][1],
-                constants=constants,
-                dimensions=dimensions,
-            )
-        elif key in required:
-            raise ValueError(f"derived property '{name}' is missing required '{child_path}'")
-
-
-def _normalize_derived_buffer(
-    name: str,
-    properties: Mapping[str, tuple[str, dict[str, Any]]],
-    value: Any,
-) -> dict[str, tuple[str, Any]]:
-    values = _coerce_buffer_values(value)
-    if not values:
-        raise ValueError(f"derived property '{name}' buffer must not be empty")
-    if len(values) > len(properties):
-        raise ValueError(
-            f"derived property '{name}' buffer has too many values: "
-            f"{len(values)} > {len(properties)}"
-        )
-    supplied: dict[str, tuple[str, Any]] = {}
-    for (key, (child_name, _)), item in zip(properties.items(), values):
-        if item is None:
-            continue
-        supplied[key] = (child_name, item)
-    return supplied
-
-
-def _is_derived_array_buffer(value: Any) -> bool:
-    if isinstance(value, Mapping):
-        return False
-    if isinstance(value, (list, tuple)):
-        return all(not isinstance(item, (Mapping, list, tuple)) for item in value)
-    if hasattr(value, "tolist"):
-        return _is_derived_array_buffer(value.tolist())
-    # f90nml represents a one-value namelist buffer as a scalar.
-    return True
-
-
-def _validate_derived_array_buffer(
-    name: str,
-    items: Mapping[str, Any],
-    value: Any,
-    shape: list[int | None],
-    constants: dict[str, int] | None,
-    dimensions: dict[str, int] | None,
-) -> None:
-    buffer_values = _coerce_buffer_values(value)
-    if not buffer_values:
-        raise ValueError(f"array property '{name}' must not be empty")
-    if len(shape) > 1 and any(dimension is None for dimension in shape):
-        raise ValueError(
-            f"derived array '{name}' flat buffer assignment requires concrete shape"
-        )
-    properties_raw = items.get("properties")
-    if not isinstance(properties_raw, Mapping) or not properties_raw:
-        raise ValueError(
-            f"derived array '{name}' items must define non-empty object 'properties'"
-        )
-    properties = _normalize_properties(properties_raw, name)
-    component_count = len(properties)
-    concrete_shape = [dimension for dimension in shape if dimension is not None]
-    if len(concrete_shape) == len(shape):
-        total_size = math.prod(concrete_shape)
-        max_values = total_size * component_count
-        if len(buffer_values) > max_values:
-            raise ValueError(
-                f"array '{name}' buffer is longer than shape: "
-                f"{len(buffer_values)} > {max_values}"
-            )
-    required = _parse_required(items.get("required", []), properties, name)
-    for offset in range(0, len(buffer_values), component_count):
-        element_values = buffer_values[offset : offset + component_count]
-        element_index = offset // component_count
-        path = _derived_array_element_path(name, element_index, shape)
-        supplied = _normalize_derived_buffer(path, properties, element_values)
-        _validate_derived_supplied(
-            path,
-            properties,
-            required,
-            supplied,
-            constants=constants,
-            dimensions=dimensions,
-        )
-
-
-def _derived_array_element_path(
-    name: str,
-    zero_based_index: int,
-    shape: list[int | None],
-) -> str:
-    if len(shape) == 1:
-        return f"{name}[{zero_based_index + 1}]"
-    remaining = zero_based_index
-    indexes: list[int] = []
-    for dimension in shape:
-        if dimension is None:
-            return f"{name}[{zero_based_index + 1}]"
-        indexes.append(remaining % dimension + 1)
-        remaining //= dimension
-    return f"{name}[{','.join(str(index) for index in indexes)}]"
-
-
-def _coerce_buffer_values(value: Any) -> list[Any]:
-    if isinstance(value, (list, tuple)):
-        return list(value)
-    if hasattr(value, "tolist"):
-        coerced = value.tolist()
-        return _coerce_buffer_values(coerced)
-    return [value]
-
-
-def _iter_object_elements(
-    value: Any,
-    name: str,
-    indexes: tuple[int, ...] = (),
-) -> Iterable[tuple[str, Any]]:
-    if isinstance(value, (list, tuple)):
-        for index, item in enumerate(value, start=1):
-            yield from _iter_object_elements(item, name, indexes + (index,))
-        return
-    suffix = ",".join(str(index) for index in indexes)
-    yield f"{name}[{suffix}]", value
 
 
 def _scalar_constraints(
@@ -1002,29 +653,6 @@ def _parse_flex_tail_dims(
     if any(dim is None for dim in dimensions):
         raise ValueError(f"array property '{name}' flex tail dims require concrete shape")
     return flex
-
-
-def _coerce_array_value(value: Any, name: str) -> Any:
-    if isinstance(value, (list, tuple)):
-        return value
-    if hasattr(value, "tolist"):
-        return value.tolist()
-    raise ValueError(f"array property '{name}' must be a list")
-
-
-def _nested_shape(value: Any, name: str) -> list[int]:
-    if isinstance(value, (list, tuple)):
-        if not value:
-            raise ValueError(f"array property '{name}' must not be empty")
-        first_shape: list[int] | None = None
-        for item in value:
-            item_shape = _nested_shape(item, name)
-            if first_shape is None:
-                first_shape = item_shape
-            elif item_shape != first_shape:
-                raise ValueError(f"array property '{name}' must be rectangular")
-        return [len(value)] + (first_shape or [])
-    return []
 
 
 def _iter_scalars(value: Any) -> Iterable[Any]:

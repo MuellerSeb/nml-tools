@@ -714,7 +714,34 @@ def test_validate_accepts_cli_dimensions(tmp_path: Path) -> None:
         assert result.exit_code == 0, result.output
 
 
-def test_validate_accepts_bare_array_buffer_assignments_from_f90nml(tmp_path: Path) -> None:
+def test_validate_reports_parse_errors_separately_from_read_errors(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  value:
+                    type: integer
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text("&demo\nvalue = 1\n", encoding="utf-8")
+
+        result = runner.invoke(
+            cli_module.cli,
+            ["validate", "--schema", "schema.yml", "input.nml"],
+        )
+
+        assert result.exit_code == 1
+        assert "failed to parse namelist:" in result.output
+        assert "failed to read namelist:" not in result.output
+
+
+def test_validate_accepts_whole_array_buffer_assignments(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):
         Path("schema.yml").write_text(
@@ -823,7 +850,7 @@ def test_validate_resolves_external_references_with_cli_shape_values(tmp_path: P
         assert result.exit_code == 0, result.output
 
 
-def test_validate_accepts_f90nml_derived_array_bookkeeping(tmp_path: Path) -> None:
+def test_validate_accepts_indexed_derived_array_components(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):
         Path("schema.yml").write_text(
@@ -870,7 +897,7 @@ def test_validate_accepts_f90nml_derived_array_bookkeeping(tmp_path: Path) -> No
         assert result.exit_code == 0, result.output
 
 
-def test_validate_accepts_f90nml_derived_buffer_assignment(tmp_path: Path) -> None:
+def test_validate_accepts_derived_buffer_assignment(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):
         Path("schema.yml").write_text(
@@ -911,7 +938,7 @@ def test_validate_accepts_f90nml_derived_buffer_assignment(tmp_path: Path) -> No
         assert result.exit_code == 0, result.output
 
 
-def test_validate_accepts_f90nml_derived_array_buffer_assignment(tmp_path: Path) -> None:
+def test_validate_accepts_derived_array_buffer_assignment(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):
         Path("schema.yml").write_text(
@@ -957,7 +984,7 @@ def test_validate_accepts_f90nml_derived_array_buffer_assignment(tmp_path: Path)
         assert result.exit_code == 0, result.output
 
 
-def test_validate_accepts_f90nml_single_value_derived_array_buffer(
+def test_validate_accepts_single_value_derived_array_buffer(
     tmp_path: Path,
 ) -> None:
     runner = CliRunner()
@@ -1003,7 +1030,7 @@ def test_validate_accepts_f90nml_single_value_derived_array_buffer(
         assert result.exit_code == 0, result.output
 
 
-def test_validate_rejects_f90nml_null_only_required_derived_array_buffer(
+def test_validate_rejects_null_only_required_derived_array_buffer(
     tmp_path: Path,
 ) -> None:
     runner = CliRunner()
@@ -1049,10 +1076,10 @@ def test_validate_rejects_f90nml_null_only_required_derived_array_buffer(
         )
 
         assert result.exit_code != 0
-        assert "missing required 'settings[1].flag'" in result.output
+        assert "missing required 'settings'" in result.output
 
 
-def test_validate_treats_f90nml_derived_buffer_nulls_as_omitted(
+def test_validate_treats_derived_buffer_nulls_as_omitted(
     tmp_path: Path,
 ) -> None:
     runner = CliRunner()
@@ -1126,7 +1153,7 @@ def test_validate_treats_f90nml_derived_buffer_nulls_as_omitted(
         )
 
         assert result.exit_code != 0
-        assert "missing required 'setting.flag'" in result.output
+        assert "missing required 'setting%flag'" in result.output
 
 
 def test_validate_cli_dimensions_override_config_dimensions(tmp_path: Path) -> None:

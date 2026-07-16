@@ -1,0 +1,8 @@
+&run
+  values = 4*0
+  values(:,2) = 1, 2
+  values(1,2) = 3
+  settings(1) = .true., 1
+  settings(2) = .false., 2
+  label = "abc"
+/

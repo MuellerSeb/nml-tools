@@ -1,0 +1,24 @@
+x-fortran-namelist: run
+type: object
+required: [values, settings, label]
+properties:
+  values:
+    type: array
+    x-fortran-shape: [2, 2]
+    items:
+      type: integer
+  settings:
+    type: array
+    x-fortran-shape: 2
+    items:
+      type: object
+      x-fortran-type: setting_t
+      required: [flag, value]
+      properties:
+        flag:
+          type: boolean
+        value:
+          type: integer
+  label:
+    type: string
+    x-fortran-len: 8
