@@ -37,6 +37,8 @@ from .validate import (
     validate_schema_defaults,
 )
 
+_MAX_DEFERRED_ARRAY_ITEMS = 100_000
+
 
 class NamelistEvaluationError(NamelistError):
     category = "evaluation"
@@ -566,6 +568,7 @@ def _select_coordinates(
             ]
             return _fortran_product(full_selections)
         if prop.rank == 1:
+            _check_deferred_expansion(prop, dynamic_count, source, span)
             return [(index,) for index in range(1, dynamic_count + 1)]
         _raise(
             NamelistCapabilityError,
@@ -605,18 +608,44 @@ def _select_coordinates(
             assert extent is not None
             upper = int(extent) if stride > 0 else 1
         stop = upper + (1 if stride > 0 else -1)
-        indexes = list(range(lower, stop, stride))
-        if not indexes:
+        index_range = range(lower, stop, stride)
+        if not index_range:
             _raise(
                 NamelistBoundsError,
                 f"section for dimension {dimension} of '{prop.name}' must not be empty",
                 source,
                 selector.span,
             )
-        for index in indexes:
+        if extent is None:
+            _check_deferred_expansion(prop, len(index_range), source, selector.span)
+        for index in index_range:
             _check_index(prop, dimension, index, extent, source, selector.span)
-        selections.append(indexes)
+        selections.append(list(index_range))
+    if any(extent is None for extent in prop.shape):
+        _check_deferred_expansion(
+            prop,
+            math.prod(len(selection) for selection in selections),
+            source,
+            group.span,
+        )
     return _fortran_product(selections)
+
+
+def _check_deferred_expansion(
+    prop: _Property,
+    item_count: int,
+    source: str,
+    span: SourceSpan,
+) -> None:
+    if item_count <= _MAX_DEFERRED_ARRAY_ITEMS:
+        return
+    _raise(
+        NamelistCapabilityError,
+        f"selection of deferred-shape array '{prop.name}' expands to {item_count} items; "
+        f"the safety limit is {_MAX_DEFERRED_ARRAY_ITEMS}",
+        source,
+        span,
+    )
 
 
 def _check_index(

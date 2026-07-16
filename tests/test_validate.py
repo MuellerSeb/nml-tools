@@ -319,6 +319,8 @@ def test_runtime_and_deferred_rank_one_shapes() -> None:
     }
     result = _evaluate(deferred, "values = 1, 2, 3")
     assert len(result.states) == 3
+    with pytest.raises(ValueError, match="expands to 100000000 items.*safety limit"):
+        _evaluate(deferred, "values = 100000000*0")
 
 
 def _setting_schema(*, shape: object | None = None) -> dict[str, Any]:
