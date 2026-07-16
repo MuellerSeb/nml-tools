@@ -65,6 +65,8 @@ Simulation period
 Start and end years for a configured time window.
 
 - Ownership: `nml_helper`
+- Buffer-compatible: yes
+- Component order: start_year, end_year, label
 - `start_year`: `integer(i4)`
 - `end_year`: `integer(i4)`
 - `label`: `character(len=period_label_len)`
@@ -76,6 +78,9 @@ Selected station
 Application-owned station descriptor with schema-matched label storage.
 
 - Ownership: imported from `application_types`
+- Buffer-compatible: yes
+- Component order: code, label
+- **Declaration-order contract:** the imported Fortran type must declare components in the resolved schema order shown above.
 - `code`: `integer(i4)`
 - `label`: `character(len=station_label_len)`
 

@@ -632,6 +632,7 @@ Template namelist output configuration.
 - `title` / `description` (string, optional): documented-template header metadata.
 - `doc_mode`: `plain` or `documented`.
 - `value_mode`: `empty`, `filled`, `minimal-empty`, or `minimal-filled`.
+- `simple_derived_mode`: `components` (the default) or `buffer`.
 
 Each template must define exactly one of `profile`, `namelists`, or legacy
 `schemas`. If `schemas` is used, neither `profile` nor `namelists` may be
@@ -639,6 +640,26 @@ present. Template entries using `profile` inherit the profile `title` and
 `description` unless they override them. In documented mode, title and
 description are emitted as leading comments before the first namelist block;
 plain templates omit them.
+
+The default `simple_derived_mode = "components"` writes derived values with
+explicit component designators and is the most robust representation. The
+optional `buffer` mode writes simple derived values as concise positional
+records in resolved schema `properties` order:
+
+```fortran
+setting = .true., 1
+settings(1) = .true., 1
+settings(2) = .false., 2
+```
+
+Derived-array records are always separate indexed assignments, including
+complete subscripts for higher-rank arrays; records are never concatenated into
+one whole-array buffer. This preserves record boundaries and prevents a missing
+value from shifting later records. Imported Fortran types must declare their
+components in exactly the resolved schema order. Buffer templates require the
+built-in schema-aware namelist evaluator used by current nml-tools releases;
+the former f90nml validation path cannot reliably read indexed positional
+derived assignments.
 
 Optional values can override per-namelist fields for filled modes:
 
@@ -660,6 +681,10 @@ start_year = 1980
 [[templates.values.run.periods]]
 start_year = 2001
 ```
+
+Overrides remain name-based mappings in both derived modes. For higher-rank
+derived arrays, a flat array of tables supplies leading elements in Fortran
+element order (the first subscript varies fastest).
 
 ## CLI
 
