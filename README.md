@@ -24,7 +24,7 @@ Generate Fortran namelist modules, Markdown docs, and template namelists from a 
 - No support for complex types:
   - JSON doesn't have a native complex type.
   - Could be emulated with:
-    - Lists of length 2 with metadata, like f90nml does for JSON conversion.
+    - Lists containing the real and imaginary parts plus explicit metadata.
     - Objects with `real` and `imag` properties.
     - Strings with a project-defined `format` convention.
 
@@ -709,10 +709,17 @@ jobs that should ensure checked-in generated files are current.
 
 ### Validation
 
-Validation is check-only (defaults are not applied) and implements only a
-subset of JSON Schema constraints (types, required, enums, bounds, string
-length, array shape/flex). Unknown keys in a namelist or namelist blocks not
-covered by provided schemas are errors.
+Validation is check-only and implements a focused set of schema constraints
+(types, required, enums, bounds, string length, and array shape/flex).
+Operational defaults are tracked as the prior value for standard null-input
+semantics, but they do not count as explicitly supplied required input.
+Unknown keys or namelist groups not covered by the provided schemas are errors.
+
+The input parser follows standard formatted Fortran namelist syntax. It does
+not accept processor or legacy-parser extensions such as `$group`, `$end`,
+`&end`, `#` comments, kind-suffixed constants, or undelimited character
+values. Groups and object names are matched case-insensitively, while errors
+report the original spelling and source location.
 
 Config-driven:
 
@@ -753,8 +760,20 @@ array shapes. `--dimensions` supplies runtime array dimensions. Names are
 matched case-insensitively, normalized to lowercase, and must stay unique across
 both sets.
 
-Array values are validated as rectangular lists in Fortran order
-(outer list corresponds to the last Fortran index), matching `f90nml` parsing.
+Array assignments use one-based schema bounds and Fortran element order, with
+the first subscript varying fastest. Scalar subscripts and sections are
+supported, including omitted bounds and positive or negative strides. Values
+may use standard null and repetition syntax; nulls leave the prior effective
+value unchanged and later overlapping assignments take precedence.
+
+Simple derived values accept component notation and standard positional
+effective-item input. For example, `setting = .true., 1` assigns components in
+resolved schema-property order, while `settings(2) = .false., 3` assigns one
+complete derived-array element without spilling into adjacent elements.
+
+Character substring assignment, complex schema values, nested derived values,
+component arrays, nondefault lower bounds, and user-defined formatted I/O are
+currently explicit capability boundaries.
 
 ## Error handling
 
