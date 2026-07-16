@@ -714,6 +714,33 @@ def test_validate_accepts_cli_dimensions(tmp_path: Path) -> None:
         assert result.exit_code == 0, result.output
 
 
+def test_validate_reports_parse_errors_separately_from_read_errors(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  value:
+                    type: integer
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("input.nml").write_text("&demo\nvalue = 1\n", encoding="utf-8")
+
+        result = runner.invoke(
+            cli_module.cli,
+            ["validate", "--schema", "schema.yml", "input.nml"],
+        )
+
+        assert result.exit_code == 1
+        assert "failed to parse namelist:" in result.output
+        assert "failed to read namelist:" not in result.output
+
+
 def test_validate_accepts_whole_array_buffer_assignments(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):

@@ -15,7 +15,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from ._namelist_eval import evaluate_group
-from ._namelist_parser import ParsedGroup, parse_namelist
+from ._namelist_parser import NamelistSyntaxError, ParsedGroup, parse_namelist
 from ._utils import constant_dimension_overlap, validate_user_fortran_identifier
 from ._version import __version__
 from .codegen_f2py import (
@@ -1522,12 +1522,13 @@ def validate(
 
     try:
         logger.info("Reading namelist %s", input_path)
-        parsed_file = parse_namelist(
-            input_path.read_text(encoding="utf-8"),
-            source=str(input_path),
-        )
-    except (OSError, UnicodeError, ValueError) as exc:
+        namelist_text = input_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
         raise click.ClickException(f"failed to read namelist: {exc}") from exc
+    try:
+        parsed_file = parse_namelist(namelist_text, source=str(input_path))
+    except NamelistSyntaxError as exc:
+        raise click.ClickException(f"failed to parse namelist: {exc}") from exc
 
     file_entries: dict[str, tuple[str, ParsedGroup]] = {}
     for group in parsed_file.groups:
