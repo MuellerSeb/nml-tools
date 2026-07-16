@@ -513,6 +513,75 @@ def test_named_namelists_work_for_profiles_and_templates(tmp_path: Path) -> None
     assert "value = 3" in rendered
 
 
+def test_templates_validate_simple_derived_mode_per_entry(tmp_path: Path) -> None:
+    (tmp_path / "run.yml").write_text(
+        dedent(
+            """
+            x-fortran-namelist: run
+            type: object
+            properties:
+              value:
+                type: integer
+            """
+        ),
+        encoding="utf-8",
+    )
+    resolver = cli_module.SchemaResolver()
+    registry = cli_module._namelist_registry_by_key(
+        cli_module._load_namelist_registry(
+            {"namelists": [{"schema": "run.yml"}]}, tmp_path, resolver
+        )
+    )
+
+    entries = cli_module._iter_templates(
+        {
+            "templates": [
+                {"path": "out/default.nml", "namelists": ["run"]},
+                {
+                    "path": "out/buffer.nml",
+                    "namelists": ["run"],
+                    "simple_derived_mode": " BUFFER ",
+                },
+            ]
+        },
+        tmp_path,
+        registry,
+        {},
+    )
+    assert [entry["simple_derived_mode"] for entry in entries] == ["components", "buffer"]
+
+    with pytest.raises(click.ClickException, match="simple_derived_mode.*string"):
+        cli_module._iter_templates(
+            {
+                "templates": [
+                    {
+                        "path": "out/run.nml",
+                        "namelists": ["run"],
+                        "simple_derived_mode": 1,
+                    }
+                ]
+            },
+            tmp_path,
+            registry,
+            {},
+        )
+    with pytest.raises(click.ClickException, match="simple_derived_mode.*components.*buffer"):
+        cli_module._iter_templates(
+            {
+                "templates": [
+                    {
+                        "path": "out/run.nml",
+                        "namelists": ["run"],
+                        "simple_derived_mode": "positional",
+                    }
+                ]
+            },
+            tmp_path,
+            registry,
+            {},
+        )
+
+
 def test_file_profiles_reject_invalid_entries(tmp_path: Path) -> None:
     for name in ["run", "outputs"]:
         (tmp_path / f"{name}.yml").write_text(
@@ -936,6 +1005,68 @@ def test_validate_accepts_derived_buffer_assignment(tmp_path: Path) -> None:
         )
 
         assert result.exit_code == 0, result.output
+
+
+def test_generated_multirank_derived_buffer_template_validates(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: run
+                type: object
+                properties:
+                  settings:
+                    type: array
+                    x-fortran-shape: [2, 2]
+                    items:
+                      type: object
+                      x-fortran-type: setting_t
+                      properties:
+                        flag:
+                          type: boolean
+                          default: false
+                        value:
+                          type: integer
+                          default: 1
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("nml-config.toml").write_text(
+            dedent(
+                """
+                [kinds]
+                module = "iso_fortran_env"
+                real = []
+                integer = []
+
+                [[namelists]]
+                schema = "schema.yml"
+
+                [[templates]]
+                path = "out/run.nml"
+                namelists = ["run"]
+                value_mode = "filled"
+                simple_derived_mode = "buffer"
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        generated = runner.invoke(
+            cli_module.cli, ["gen-template", "--config", "nml-config.toml"]
+        )
+        assert generated.exit_code == 0, generated.output
+        output = Path("out/run.nml").read_text(encoding="ascii")
+        assert "settings(1,1) = .false., 1" in output
+        assert "settings(2,2) = .false., 1" in output
+
+        validated = runner.invoke(
+            cli_module.cli,
+            ["validate", "--config", "nml-config.toml", "out/run.nml"],
+        )
+        assert validated.exit_code == 0, validated.output
 
 
 def test_validate_accepts_derived_array_buffer_assignment(tmp_path: Path) -> None:

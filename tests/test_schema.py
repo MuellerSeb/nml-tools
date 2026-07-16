@@ -21,8 +21,34 @@ from nml_tools.codegen_f2py import (
 from nml_tools.codegen_fortran import collect_local_derived_types, render_fortran, render_helper
 from nml_tools.codegen_markdown import render_docs
 from nml_tools.codegen_template import render_template
-from nml_tools.schema import SchemaResolver, get_string_format, load_schema, resolve_schema
+from nml_tools.schema import (
+    SchemaResolver,
+    _is_simple_derived_schema,
+    get_string_format,
+    load_schema,
+    resolve_schema,
+)
 from nml_tools.validate import validate_schema_defaults
+
+
+def test_simple_derived_schema_eligibility_is_structural() -> None:
+    base = {
+        "type": "object",
+        "properties": {
+            "flag": {"type": "boolean"},
+            "future_value": {"type": "complex"},
+        },
+    }
+
+    assert _is_simple_derived_schema(base)
+    assert not _is_simple_derived_schema(
+        {
+            **base,
+            "properties": {
+                "values": {"type": "array", "items": {"type": "integer"}},
+            },
+        }
+    )
 
 
 def test_resolve_schema_composes_inline_scalar_reference() -> None:

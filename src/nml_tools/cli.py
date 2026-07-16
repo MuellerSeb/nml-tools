@@ -921,6 +921,14 @@ def _iter_templates(
         value_mode = entry.get("value_mode", "empty")
         if not isinstance(value_mode, str):
             raise click.ClickException("templates 'value_mode' must be a string")
+        simple_derived_mode = entry.get("simple_derived_mode", "components")
+        if not isinstance(simple_derived_mode, str):
+            raise click.ClickException("templates 'simple_derived_mode' must be a string")
+        simple_derived_mode = simple_derived_mode.strip().lower()
+        if simple_derived_mode not in {"components", "buffer"}:
+            raise click.ClickException(
+                "templates 'simple_derived_mode' must be 'components' or 'buffer'"
+            )
         values_raw = entry.get("values", {})
         if values_raw is None:
             values_raw = {}
@@ -933,6 +941,7 @@ def _iter_templates(
                 "schemas": [loaded.schema for loaded in loaded_namelists],
                 "doc_mode": doc_mode,
                 "value_mode": value_mode,
+                "simple_derived_mode": simple_derived_mode,
                 "title": title,
                 "description": description,
                 "values": values_raw,
@@ -1077,6 +1086,7 @@ def _collect_generated_outputs(
                         template_entry["schemas"],
                         doc_mode=template_entry["doc_mode"],
                         value_mode=template_entry["value_mode"],
+                        simple_derived_mode=template_entry["simple_derived_mode"],
                         title=template_entry["title"],
                         description=template_entry["description"],
                         constants=constants,
@@ -1652,6 +1662,7 @@ def gen_template(config_path: Path | None) -> None:
                 entry["path"],
                 doc_mode=entry["doc_mode"],
                 value_mode=entry["value_mode"],
+                simple_derived_mode=entry["simple_derived_mode"],
                 title=entry["title"],
                 description=entry["description"],
                 constants=constants,

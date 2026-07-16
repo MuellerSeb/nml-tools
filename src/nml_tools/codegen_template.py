@@ -22,6 +22,7 @@ from .codegen_fortran import (
     _parse_default_dimensions,
     _reject_runtime_dimension_lengths,
 )
+from .schema import _is_simple_derived_schema
 from .validate import validate_schema_defaults
 
 _MISSING = object()
@@ -33,6 +34,7 @@ def generate_template(
     *,
     doc_mode: str = "plain",
     value_mode: str = "empty",
+    simple_derived_mode: str = "components",
     title: str | None = None,
     description: str | None = None,
     constants: dict[str, int] | None = None,
@@ -46,6 +48,7 @@ def generate_template(
         schemas,
         doc_mode=doc_mode,
         value_mode=value_mode,
+        simple_derived_mode=simple_derived_mode,
         title=title,
         description=description,
         constants=constants,
@@ -64,6 +67,7 @@ def render_template(
     *,
     doc_mode: str = "plain",
     value_mode: str = "empty",
+    simple_derived_mode: str = "components",
     title: str | None = None,
     description: str | None = None,
     constants: dict[str, int] | None = None,
@@ -75,17 +79,21 @@ def render_template(
     """Render a template namelist file for *schemas*."""
     doc_mode = doc_mode.strip().lower()
     value_mode = value_mode.strip().lower()
+    simple_derived_mode = simple_derived_mode.strip().lower()
     if doc_mode not in {"plain", "documented"}:
         raise ValueError("template doc_mode must be 'plain' or 'documented'")
     if value_mode not in {"empty", "filled", "minimal-empty", "minimal-filled"}:
         raise ValueError(
             "template value_mode must be one of: empty, filled, minimal-empty, minimal-filled"
         )
+    if simple_derived_mode not in {"components", "buffer"}:
+        raise ValueError("template simple_derived_mode must be 'components' or 'buffer'")
 
     return _render_template(
         schemas,
         doc_mode=doc_mode,
         value_mode=value_mode,
+        simple_derived_mode=simple_derived_mode,
         title=title,
         description=description,
         constants=constants,
@@ -101,6 +109,7 @@ def _render_template(
     *,
     doc_mode: str,
     value_mode: str,
+    simple_derived_mode: str,
     title: str | None,
     description: str | None,
     constants: dict[str, int] | None,
@@ -214,9 +223,20 @@ def _render_template(
                     prop,
                     type_info,
                     value_mode=value_mode,
+                    simple_derived_mode=simple_derived_mode,
                     override=override_values.get(name, _MISSING),
                     constants=shape_constants,
                 )
+                derived = _derived_schema(prop)
+                if (
+                    doc_mode == "documented"
+                    and simple_derived_mode == "buffer"
+                    and derived is not None
+                    and _is_simple_derived_schema(derived)
+                    and entries
+                ):
+                    component_names = ", ".join(str(key) for key in derived["properties"])
+                    lines.append(f"  ! Component order: {component_names}")
                 for entry_name, value_text in entries:
                     if value_text is None:
                         lines.append(f"  {entry_name} =")
@@ -255,11 +275,21 @@ def _value_entries(
     type_info: FieldTypeInfo,
     *,
     value_mode: str,
+    simple_derived_mode: str,
     override: Any,
     constants: dict[str, int] | None,
 ) -> list[tuple[str, str | None]]:
     derived = _derived_schema(prop)
     if derived is not None:
+        if simple_derived_mode == "buffer" and _is_simple_derived_schema(derived):
+            return _derived_buffer_entries(
+                name,
+                derived,
+                type_info,
+                value_mode=value_mode,
+                override=override,
+                constants=constants,
+            )
         return _derived_value_entries(
             name,
             prop,
@@ -411,11 +441,113 @@ def _derived_component_entries(
                 child,
                 child_type,
                 value_mode=value_mode,
+                simple_derived_mode="components",
                 override=overrides.get(child_name, _MISSING),
                 constants=constants,
             )
         )
     return entries
+
+
+def _derived_buffer_entries(
+    name: str,
+    derived: dict[str, Any],
+    type_info: FieldTypeInfo,
+    *,
+    value_mode: str,
+    override: Any,
+    constants: dict[str, int] | None,
+) -> list[tuple[str, str | None]]:
+    properties = derived.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        raise ValueError(f"derived property '{name}' must define properties")
+
+    is_array = type_info.category == "array"
+    coordinates: list[list[int]] = [[]]
+    if is_array:
+        dimensions = _parse_default_dimensions(type_info.dimensions, constants)
+        coordinates = [
+            [index + 1 for index in coordinate]
+            for coordinate in _iter_fixed_indices(dimensions, "F")
+        ]
+
+    if value_mode in {"empty", "minimal-empty"}:
+        return [(_derived_element_name(name, coordinate), None) for coordinate in coordinates]
+
+    override_maps: list[dict[str, Any]]
+    if is_array and override is not _MISSING:
+        if not isinstance(override, list):
+            raise ValueError(f"derived array template value '{name}' must be an array of tables")
+        if len(override) > len(coordinates):
+            raise ValueError(f"derived array template value '{name}' is longer than its shape")
+        coordinates = coordinates[: len(override)]
+        override_maps = []
+        for index, value in enumerate(override, start=1):
+            override_maps.append(
+                _as_str_keyed_table(
+                    value,
+                    f"derived array template value '{name}[{index}]'",
+                )
+            )
+    else:
+        if override is not _MISSING and not isinstance(override, dict):
+            raise ValueError(f"derived template value '{name}' must be a table")
+        override_map = (
+            _as_str_keyed_table(override, f"derived template value '{name}'")
+            if override is not _MISSING
+            else {}
+        )
+        override_maps = [override_map for _ in coordinates]
+
+    entries: list[tuple[str, str | None]] = []
+    for coordinate, overrides in zip(coordinates, override_maps):
+        prefix = _derived_element_name(name, coordinate)
+        entries.append(
+            (
+                prefix,
+                _derived_buffer_value(prefix, properties, overrides, value_mode, constants),
+            )
+        )
+    return entries
+
+
+def _derived_element_name(name: str, coordinate: list[int]) -> str:
+    if not coordinate:
+        return name
+    return f"{name}({','.join(str(index) for index in coordinate)})"
+
+
+def _derived_buffer_value(
+    prefix: str,
+    properties: dict[str, Any],
+    overrides: dict[str, Any],
+    value_mode: str,
+    constants: dict[str, int] | None,
+) -> str | None:
+    for key in overrides:
+        if key not in properties:
+            raise ValueError(f"derived template value '{prefix}%{key}' is unknown")
+    slots: list[str | None] = []
+    for child_name, child in properties.items():
+        if not isinstance(child_name, str) or not isinstance(child, dict):
+            raise ValueError(f"derived property '{prefix}' components must be schema objects")
+        child_entries = _value_entries(
+            child_name,
+            child,
+            _field_type_info(child, constants),
+            value_mode=value_mode,
+            simple_derived_mode="components",
+            override=overrides.get(child_name, _MISSING),
+            constants=constants,
+        )
+        if len(child_entries) != 1:
+            raise ValueError(f"derived property '{prefix}%{child_name}' must be scalar")
+        slots.append(child_entries[0][1])
+    while slots and slots[-1] is None:
+        slots.pop()
+    if not slots:
+        return None
+    return ", ".join("" if slot is None else slot for slot in slots)
 
 
 def _array_list_entries(

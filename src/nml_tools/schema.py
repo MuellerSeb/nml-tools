@@ -37,6 +37,8 @@ _DEFAULT_CONTROL_KEYS = {
     "x-fortran-default-pad",
 }
 _BOUND_KEYS = {"minimum", "exclusiveMinimum", "maximum", "exclusiveMaximum"}
+_INTRINSIC_SCALAR_TYPES = frozenset({"integer", "number", "boolean", "string"})
+_SIMPLE_DERIVED_COMPONENT_TYPES = _INTRINSIC_SCALAR_TYPES | {"complex"}
 _COMPOSITION_KEYS = {
     "$ref",
     "$defs",
@@ -837,12 +839,7 @@ def _validate_derived_object(schema: Mapping[str, Any]) -> None:
         if key in canonical:
             raise ValueError(f"derived-type object defines duplicate component '{name}'")
         canonical.add(key)
-        if not isinstance(prop, Mapping) or prop.get("type") not in {
-            "integer",
-            "number",
-            "boolean",
-            "string",
-        }:
+        if not _is_intrinsic_scalar_schema(prop):
             raise ValueError(
                 f"derived-type component '{name}' must define an intrinsic scalar type"
             )
@@ -852,6 +849,33 @@ def _validate_derived_object(schema: Mapping[str, Any]) -> None:
     for name in required:
         if not isinstance(name, str) or name.lower() not in canonical:
             raise ValueError(f"derived-type required component '{name}' is not a property")
+
+
+def _is_intrinsic_scalar_schema(
+    schema: object,
+    *,
+    include_future_complex: bool = False,
+) -> bool:
+    """Return whether *schema* describes one intrinsic scalar value."""
+    if not isinstance(schema, Mapping):
+        return False
+    supported = (
+        _SIMPLE_DERIVED_COMPONENT_TYPES
+        if include_future_complex
+        else _INTRINSIC_SCALAR_TYPES
+    )
+    return schema.get("type") in supported
+
+
+def _is_simple_derived_schema(schema: Mapping[str, Any]) -> bool:
+    """Return whether a resolved derived schema is positional-buffer compatible."""
+    if schema.get("type") != "object":
+        return False
+    properties = schema.get("properties")
+    return isinstance(properties, Mapping) and bool(properties) and all(
+        _is_intrinsic_scalar_schema(prop, include_future_complex=True)
+        for prop in properties.values()
+    )
 
 
 def _scalar_satisfies_static_constraints(value: Any, schema: Mapping[str, Any]) -> bool:
