@@ -75,6 +75,21 @@ def test_end_of_record_is_not_a_null_separator() -> None:
     assert second.designator.source_text == "next"
 
 
+def test_trailing_value_separator_is_preserved_as_a_null() -> None:
+    parsed = parse_namelist("&run\nvalues = 1,\nnext = 2\n/")
+    first, second = parsed.groups[0].assignments
+
+    assert len(first.values) == 2
+    assert isinstance(first.values[-1], NullValue)
+    assert second.designator.source_text == "next"
+
+    before_slash = parse_namelist("&run\nvalues = 1,\n/")
+    assert isinstance(before_slash.groups[0].assignments[0].values[-1], NullValue)
+
+    only_separator = parse_namelist("&run\nvalues = ,\n/")
+    assert len(only_separator.groups[0].assignments[0].values) == 1
+
+
 def test_point_and_comma_decimal_modes_have_distinct_value_separators() -> None:
     point = parse_namelist("&run\nvalues = 1.5, 2.5\n/")
     comma = parse_namelist(
