@@ -254,21 +254,18 @@ class _Scanner:
             self._advance(self.text[self.offset])
 
     def _comment_is_permitted(self) -> bool:
-        record_start = max(
-            self.text.rfind("\n", 0, self.offset),
-            self.text.rfind("\r", 0, self.offset),
-        ) + 1
+        record_start = self._record_start_offset()
         prefix = self.text[record_start : self.offset]
         if not prefix.strip():
             return True
         return bool(prefix) and (prefix[-1].isspace() or prefix[-1] in {",", ";"})
 
     def _at_first_nonblank_of_record(self) -> bool:
-        record_start = max(
-            self.text.rfind("\n", 0, self.offset),
-            self.text.rfind("\r", 0, self.offset),
-        ) + 1
+        record_start = self._record_start_offset()
         return not self.text[record_start : self.offset].strip()
+
+    def _record_start_offset(self) -> int:
+        return self.offset - (self.column - 1)
 
     def _consume_newline(self) -> None:
         if self.text[self.offset] == "\r":
