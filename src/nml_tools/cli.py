@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import logging
 import sys
-from collections.abc import Mapping
 from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
 from typing import Any, cast
 
 import click
-import f90nml  # type: ignore
 from click.exceptions import Exit
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
+from ._namelist_eval import evaluate_group
+from ._namelist_parser import ParsedGroup, parse_namelist
 from ._utils import constant_dimension_overlap, validate_user_fortran_identifier
 from ._version import __version__
 from .codegen_f2py import (
@@ -38,7 +38,6 @@ from .codegen_fortran import (
 from .codegen_markdown import generate_docs, render_docs
 from .codegen_template import generate_template, render_template
 from .schema import SchemaResolver, load_schema
-from .validate import validate_namelist
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -48,17 +47,6 @@ else:  # pragma: no cover - python<3.11
 logger = logging.getLogger(__name__)
 
 
-def _normalize_f90nml_values(value: Any) -> Any:
-    """Remove parser bookkeeping while preserving nested derived values."""
-    if isinstance(value, Mapping):
-        return {
-            key: _normalize_f90nml_values(item)
-            for key, item in value.items()
-            if not (isinstance(key, str) and key.lower() == "_start_index")
-        }
-    if isinstance(value, list):
-        return [_normalize_f90nml_values(item) for item in value]
-    return value
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 _DEFAULT_CONFIG = Path("nml-config.toml")
 _PYPROJECT_CONFIG = Path("pyproject.toml")
@@ -1534,18 +1522,19 @@ def validate(
 
     try:
         logger.info("Reading namelist %s", input_path)
-        namelist_file = f90nml.read(input_path)
-    except Exception as exc:  # pragma: no cover - f90nml raises custom errors
+        parsed_file = parse_namelist(
+            input_path.read_text(encoding="utf-8"),
+            source=str(input_path),
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
         raise click.ClickException(f"failed to read namelist: {exc}") from exc
 
-    file_entries: dict[str, tuple[str, Any]] = {}
-    for name, values in namelist_file.items():
-        if not isinstance(name, str):
-            raise click.ClickException("namelist names must be strings")
-        key = name.lower()
+    file_entries: dict[str, tuple[str, ParsedGroup]] = {}
+    for group in parsed_file.groups:
+        key = group.name.lower()
         if key in file_entries:
-            raise click.ClickException(f"namelist '{name}' appears multiple times")
-        file_entries[key] = (name, values)
+            raise click.ClickException(f"namelist '{group.name}' appears multiple times")
+        file_entries[key] = (group.name, group)
 
     schema_entries: dict[str, dict[str, Any]] = {}
     for schema in schemas:
@@ -1570,9 +1559,10 @@ def validate(
                 )
             continue
         try:
-            validate_namelist(
+            evaluate_group(
+                file_entries[key][1],
                 schema,
-                _normalize_f90nml_values(file_entries[key][1]),
+                source=str(input_path),
                 constants=constants,
                 dimensions=dimensions,
             )
