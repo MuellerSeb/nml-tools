@@ -13,6 +13,7 @@ from ._utils import (
     reject_constant_dimension_overlap,
     validate_user_fortran_identifier,
 )
+from .schema import _is_intrinsic_scalar_schema
 
 
 @dataclass(frozen=True)
@@ -96,9 +97,7 @@ def _validate_property_defaults(
                 validate_user_fortran_identifier(
                     child_name, label=f"derived property '{name}' component '{child_name}'"
                 )
-            if not isinstance(child_name, str) or not isinstance(child, Mapping) or child.get(
-                "type"
-            ) not in {"integer", "number", "boolean", "string"}:
+            if not isinstance(child_name, str) or not _is_intrinsic_scalar_schema(child):
                 raise ValueError(
                     f"derived property '{name}' component '{child_name}' "
                     "must define an intrinsic scalar type"

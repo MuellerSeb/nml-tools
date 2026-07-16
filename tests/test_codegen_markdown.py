@@ -244,6 +244,8 @@ def test_generate_docs_documents_derived_fields_and_reusable_types(tmp_path: Pat
     assert rendered.count("### `period_t`") == 1
     assert "Bounds for one interval." in rendered
     assert "- Ownership: `nml_helper`" in rendered
+    assert "- Buffer-compatible: yes" in rendered
+    assert "- Component order: start_year, label" in rendered
     assert "period%start_year = 0" in rendered
 
 
@@ -274,3 +276,6 @@ def test_generate_docs_documents_inline_single_use_derived_type(tmp_path: Path) 
     assert "Selected station" in rendered
     assert "Application-owned station." in rendered
     assert "- Ownership: imported from `application_types`" in rendered
+    assert "- Buffer-compatible: yes" in rendered
+    assert "- Component order: code" in rendered
+    assert "**Declaration-order contract:**" in rendered

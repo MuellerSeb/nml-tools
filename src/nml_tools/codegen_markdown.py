@@ -29,7 +29,7 @@ from .codegen_fortran import (
     _reject_runtime_dimension_lengths,
 )
 from .codegen_template import render_template
-from .schema import get_string_format
+from .schema import _is_simple_derived_schema, get_string_format
 from .validate import validate_schema_defaults
 
 _DEFAULT_MISSING = object()
@@ -356,6 +356,15 @@ def _append_derived_type_documentation(
     lines.append(f"- Ownership: {ownership}")
     components = derived.get("properties")
     if isinstance(components, dict):
+        lines.append(
+            "- Buffer-compatible: " + ("yes" if _is_simple_derived_schema(derived) else "no")
+        )
+        lines.append(f"- Component order: {', '.join(str(name) for name in components)}")
+        if isinstance(module, str):
+            lines.append(
+                "- **Declaration-order contract:** the imported Fortran type must declare "
+                "components in the resolved schema order shown above."
+            )
         for child_name, child in components.items():
             if not isinstance(child_name, str) or not isinstance(child, dict):
                 continue
