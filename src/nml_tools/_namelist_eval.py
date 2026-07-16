@@ -87,6 +87,7 @@ class _Property:
     shape: tuple[int | None, ...]
     flex_tail_dims: int
     components: Mapping[str, tuple[str, Mapping[str, Any]]]
+    required_components: frozenset[str]
 
     @property
     def rank(self) -> int:
@@ -250,6 +251,7 @@ def _compile_schema(
             flex = _parse_flex_tail_dims(prop, len(parsed_shape), property_name, parsed_shape)
             shape = tuple(parsed_shape)
         components: dict[str, tuple[str, Mapping[str, Any]]] = {}
+        required_components: frozenset[str] = frozenset()
         if value_schema.get("type") == "object":
             raw_components = value_schema.get("properties")
             if not isinstance(raw_components, Mapping) or not raw_components:
@@ -262,6 +264,11 @@ def _compile_schema(
                         f"derived property '{property_name}' has invalid component declaration"
                     )
                 components[component_name.lower()] = (component_name, component_schema)
+            required_components = _parse_derived_required(
+                value_schema.get("required", []),
+                components,
+                property_name,
+            )
         properties[key] = _Property(
             property_name,
             key,
@@ -270,6 +277,7 @@ def _compile_schema(
             shape,
             flex,
             components,
+            required_components,
         )
     return _CompiledSchema(name, properties, required)
 
@@ -289,23 +297,23 @@ def _evaluate_group_model(
     instance_spans: dict[tuple[str, tuple[int, ...]], SourceSpan] = {}
 
     for assignment in group.assignments:
-        expanded = list(_expand_values(assignment))
+        value_count = _value_count(assignment)
         targets = _resolve_targets(
             assignment.designator,
             model,
-            value_count=len(expanded),
+            value_count=value_count,
             source=source,
             assignment_span=assignment.span,
         )
-        if len(expanded) > len(targets):
+        if value_count > len(targets):
             _raise(
                 NamelistEvaluationError,
                 f"assignment to '{assignment.designator.source_text}' supplies "
-                f"{len(expanded)} values for {len(targets)} effective items",
+                f"{value_count} values for {len(targets)} effective items",
                 source,
                 assignment.span,
             )
-        for parsed_value, target in zip(expanded, targets):
+        for parsed_value, target in zip(_expand_values(assignment), targets):
             state = states.get(target.state_key)
             if state is None:
                 initial_value = _initialized_default_value(
@@ -354,11 +362,7 @@ def _evaluate_group_model(
 
     for (root_key, coordinates), supplied in explicit_components.items():
         prop = model.properties[root_key]
-        raw_required = prop.value_schema.get("required", [])
-        component_required = {
-            item.lower() for item in raw_required if isinstance(item, str)
-        }
-        for missing in component_required - supplied:
+        for missing in prop.required_components - supplied:
             component_name = prop.components[missing][0]
             path = _format_path(prop.name, coordinates, component_name)
             _raise(
@@ -392,6 +396,38 @@ def _expand_values(assignment: Assignment) -> Iterable[RawValue | NullValue]:
                 yield value.value
         else:
             yield value
+
+
+def _value_count(assignment: Assignment) -> int:
+    return sum(
+        value.count if isinstance(value, RepeatedValue) else 1
+        for value in assignment.values
+    )
+
+
+def _parse_derived_required(
+    raw: Any,
+    components: Mapping[str, tuple[str, Mapping[str, Any]]],
+    property_name: str,
+) -> frozenset[str]:
+    if raw is None:
+        return frozenset()
+    if not isinstance(raw, list):
+        raise ValueError(f"derived property '{property_name}' required must be a list")
+    required: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str):
+            raise ValueError(
+                f"derived property '{property_name}' required entries must be strings"
+            )
+        key = item.lower()
+        if key not in components:
+            raise ValueError(
+                f"derived property '{property_name}' required component '{item}' "
+                "is not declared in properties"
+            )
+        required.add(key)
+    return frozenset(required)
 
 
 def _resolve_targets(

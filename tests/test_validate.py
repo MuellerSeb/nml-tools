@@ -283,6 +283,8 @@ def test_array_bounds_rank_and_excess_values_are_diagnosed() -> None:
         _evaluate(schema, "values(1) = 1")
     with pytest.raises(ValueError, match="supplies 5 values for 4 effective items"):
         _evaluate(schema, "values = 1, 2, 3, 4, 5")
+    with pytest.raises(ValueError, match="supplies 10000000 values for 4 effective items"):
+        _evaluate(schema, "values = 10000000*0")
     with pytest.raises(ValueError, match="must not be empty"):
         _evaluate(schema, "values(2:1,1) = 1")
 
@@ -352,6 +354,17 @@ def test_derived_scalar_positional_component_and_null_assignment() -> None:
         _evaluate(schema, "settings = T")
     with pytest.raises(ValueError, match="supplies 3 values for 2"):
         _evaluate(schema, "settings = T, 1, 2")
+
+
+def test_derived_required_components_must_exist_during_schema_compilation() -> None:
+    schema = _setting_schema()
+    schema["properties"]["settings"]["required"].append("missing")
+
+    with pytest.raises(
+        ValueError,
+        match="derived property 'settings' required component 'missing'.*not declared",
+    ):
+        _evaluate(schema, "settings = T, 1")
 
 
 def test_indexed_and_sectioned_derived_arrays_preserve_record_boundaries() -> None:
