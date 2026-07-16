@@ -369,6 +369,17 @@ def test_derived_required_components_must_exist_during_schema_compilation() -> N
         _evaluate(schema, "settings = T, 1")
 
 
+def test_derived_components_must_be_unique_case_insensitively() -> None:
+    schema = _setting_schema()
+    schema["properties"]["settings"]["properties"]["Flag"] = {"type": "boolean"}
+
+    with pytest.raises(
+        ValueError,
+        match="derived property 'settings' defines duplicate component 'Flag'.*'flag'",
+    ):
+        _evaluate(schema, "settings = T, 1")
+
+
 def test_indexed_and_sectioned_derived_arrays_preserve_record_boundaries() -> None:
     schema = _setting_schema(shape=[2, 2])
     result = _evaluate(

@@ -265,7 +265,14 @@ def _compile_schema(
                     raise ValueError(
                         f"derived property '{property_name}' has invalid component declaration"
                     )
-                components[component_name.lower()] = (component_name, component_schema)
+                component_key = component_name.lower()
+                if component_key in components:
+                    previous_name = components[component_key][0]
+                    raise ValueError(
+                        f"derived property '{property_name}' defines duplicate component "
+                        f"'{component_name}' matching '{previous_name}' case-insensitively"
+                    )
+                components[component_key] = (component_name, component_schema)
             required_components = _parse_derived_required(
                 value_schema.get("required", []),
                 components,
