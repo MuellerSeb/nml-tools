@@ -398,3 +398,86 @@ def test_render_template_default_and_explicit_components_are_unchanged() -> None
     assert implicit == explicit == "&run\n  setting%value = 1\n/\n"
     with pytest.raises(ValueError, match="simple_derived_mode"):
         render_template([schema], simple_derived_mode="positional")
+
+
+def test_render_template_derived_object_default_precedence_in_both_styles() -> None:
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "setting": {
+                "type": "object",
+                "x-fortran-type": "setting_t",
+                "default": {"mode": 3, "value": 4},
+                "properties": {
+                    "mode": {"type": "integer", "default": 1, "examples": [5]},
+                    "value": {"type": "integer", "default": 2},
+                },
+            },
+            "settings": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "items": {
+                    "type": "object",
+                    "x-fortran-type": "setting_t",
+                    "default": {"mode": 6, "value": 7},
+                    "properties": {
+                        "mode": {"type": "integer"},
+                        "value": {"type": "integer"},
+                    },
+                },
+            },
+        },
+    }
+    render_template = _import_render_template()
+
+    components = render_template(
+        [schema],
+        value_mode="filled",
+        values={"run": {"setting": {"value": 9}}},
+    )
+    assert "setting%mode = 5" in components
+    assert "setting%value = 9" in components
+    assert "settings(:)%mode = 6" in components
+    assert "settings(:)%value = 7" in components
+
+    buffer = render_template(
+        [schema],
+        value_mode="filled",
+        simple_derived_mode="buffer",
+        values={"run": {"setting": {"value": 9}}},
+    )
+    assert "setting = 5, 9" in buffer
+    assert "settings(1) = 6, 7" in buffer
+    assert "settings(2) = 6, 7" in buffer
+
+
+def test_render_template_minimal_omits_only_fully_initialized_derived_fields() -> None:
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "required": ["complete", "partial"],
+        "properties": {
+            "complete": {
+                "type": "object",
+                "x-fortran-type": "complete_t",
+                "properties": {"value": {"type": "integer", "default": 1}},
+            },
+            "partial": {
+                "type": "object",
+                "x-fortran-type": "partial_t",
+                "default": {"value": 2},
+                "required": ["value"],
+                "properties": {
+                    "value": {"type": "integer"},
+                    "note": {"type": "integer"},
+                },
+            },
+        },
+    }
+
+    rendered = _import_render_template()([schema], value_mode="minimal-filled")
+
+    assert "complete%value" not in rendered
+    assert "partial%value = 2" in rendered
+    assert "partial%note = 0" in rendered

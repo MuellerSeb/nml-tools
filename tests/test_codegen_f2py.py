@@ -343,6 +343,7 @@ def test_derived_abi_names_avoid_identifier_overflow() -> None:
                     "type": "object",
                     "x-fortran-type": "period_t",
                     "properties": {long_member: {"type": "integer"}},
+                    "required": [long_member],
                 }
             },
             "required": [long_field],
@@ -356,6 +357,38 @@ def test_derived_abi_names_avoid_identifier_overflow() -> None:
     assert first_leaf.encoded_name == second_leaf.encoded_name
     assert len(first_leaf.encoded_name) <= 63
     assert len(first_leaf.has_name) <= 63
+
+
+def test_f2py_regroups_required_defaults_as_optional_with_presence_flags() -> None:
+    codegen = _import_codegen_f2py()
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "required": ["count", "mode", "setting"],
+            "properties": {
+                "count": {"type": "integer", "default": 4},
+                "mode": {"type": "integer"},
+                "setting": {
+                    "type": "object",
+                    "x-fortran-type": "setting_t",
+                    "default": {"value": 2},
+                    "required": ["value"],
+                    "properties": {"value": {"type": "integer"}},
+                },
+            },
+        }
+    )
+
+    spec = codegen.build_f2py_namelist_spec(schema)
+    assert [arg.name for arg in spec.required_args] == ["mode"]
+    assert [arg.name for arg in spec.optional_args] == ["count", "setting"]
+
+    generated = codegen.render_f2py_wrappers([schema], file_name="f2py_run.f90")
+    assert "logical, intent(in) :: has__count" in generated
+    assert "logical, intent(in) :: has__setting" in generated
+    assert "if (has__setting) then" in generated
+    assert "status = this%init_type(setting=maybe__setting, errmsg=errmsg)" in generated
 
 
 def test_generate_f2cmap_requires_explicit_kind_mappings(tmp_path: Path) -> None:

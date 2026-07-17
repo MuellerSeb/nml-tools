@@ -26,8 +26,7 @@ module nml_run
     period_t, &
     period_label_len, &
     n_periods__default, &
-    station_label_len, &
-    NML_ERR_PARTLY_SET
+    station_label_len
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
     i4=>int32
@@ -176,6 +175,7 @@ contains
       period%start_year = -huge(period%start_year) ! sentinel for derived component start_year
       period%end_year = -huge(period%end_year) ! sentinel for derived component end_year
       period%label = "main"
+      period%start_year = 2000_i4
     end if
     if (present(periods)) then
       if (allocated(periods)) deallocate(periods)
@@ -183,6 +183,8 @@ contains
       periods%start_year = -huge(periods%start_year) ! sentinel for derived component start_year
       periods%end_year = -huge(periods%end_year) ! sentinel for derived component end_year
       periods%label = "period"
+      periods%start_year = 1980_i4
+      periods%end_year = 1999_i4
     end if
     if (present(station)) then
       station%code = -huge(station%code) ! sentinel for derived component code
@@ -296,8 +298,8 @@ contains
     class(nml_run_t), intent(inout) :: this !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     type(period_t), intent(in) :: period !< Main simulation period
-    type(period_t), dimension(:), intent(in) :: periods !< Comparison periods
     type(station_t), intent(in) :: station !< Selected station
+    type(period_t), dimension(:), intent(in), optional :: periods !< Comparison periods
     integer :: &
       lb__1, &
       ub__1
@@ -307,15 +309,18 @@ contains
 
     ! required parameters
     this%period = period
-    if (size(periods, 1) > size(this%periods, 1)) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'periods'"
-      return
-    end if
-    lb__1 = lbound(this%periods, 1)
-    ub__1 = lb__1 + size(periods, 1) - 1
-    this%periods(lb__1:ub__1) = periods
     this%station = station
+    ! override with provided values
+    if (present(periods)) then
+      if (size(periods, 1) > size(this%periods, 1)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'periods'"
+        return
+      end if
+      lb__1 = lbound(this%periods, 1)
+      ub__1 = lb__1 + size(periods, 1) - 1
+      this%periods(lb__1:ub__1) = periods
+    end if
 
     ! mark as configured
     this%is_configured = .true.
@@ -343,7 +348,6 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'period'"
         return
       end if
-      if (this%period%start_year == -huge(this%period%start_year)) status = NML_ERR_NOT_SET
     case ("period%end_year")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
@@ -363,12 +367,8 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'period'"
         return
       end if
-      if (this%period%start_year == -huge(this%period%start_year) .and. &
-            this%period%end_year == -huge(this%period%end_year)) then
+      if (this%period%end_year == -huge(this%period%end_year)) then
         status = NML_ERR_NOT_SET
-      else if (this%period%start_year == -huge(this%period%start_year) .or. &
-                 this%period%end_year == -huge(this%period%end_year)) then
-        status = NML_ERR_PARTLY_SET
       end if
     case ("periods%start_year")
       if (.not. allocated(this%periods)) then
@@ -379,9 +379,6 @@ contains
         status = idx_check(idx, lbound(this%periods), ubound(this%periods), &
           "periods", errmsg)
         if (status /= NML_OK) return
-        if (this%periods(idx(1))%start_year == -huge(this%periods(idx(1))%start_year)) status = NML_ERR_NOT_SET
-      else
-        if (all(this%periods%start_year == -huge(this%periods%start_year))) status = NML_ERR_NOT_SET
       end if
     case ("periods%end_year")
       if (.not. allocated(this%periods)) then
@@ -392,9 +389,6 @@ contains
         status = idx_check(idx, lbound(this%periods), ubound(this%periods), &
           "periods", errmsg)
         if (status /= NML_OK) return
-        if (this%periods(idx(1))%end_year == -huge(this%periods(idx(1))%end_year)) status = NML_ERR_NOT_SET
-      else
-        if (all(this%periods%end_year == -huge(this%periods%end_year))) status = NML_ERR_NOT_SET
       end if
     case ("periods%label")
       if (.not. allocated(this%periods)) then
@@ -405,7 +399,6 @@ contains
         status = idx_check(idx, lbound(this%periods), ubound(this%periods), &
           "periods", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case ("periods")
       if (.not. allocated(this%periods)) then
@@ -416,21 +409,6 @@ contains
         status = idx_check(idx, lbound(this%periods), ubound(this%periods), &
           "periods", errmsg)
         if (status /= NML_OK) return
-        if (this%periods(idx(1))%start_year == -huge(this%periods(idx(1))%start_year) .and. &
-              this%periods(idx(1))%end_year == -huge(this%periods(idx(1))%end_year)) then
-          status = NML_ERR_NOT_SET
-        else if (this%periods(idx(1))%start_year == -huge(this%periods(idx(1))%start_year) .or. &
-                   this%periods(idx(1))%end_year == -huge(this%periods(idx(1))%end_year)) then
-          status = NML_ERR_PARTLY_SET
-        end if
-      else
-        if (all(this%periods%start_year == -huge(this%periods%start_year) .and. &
-                  this%periods%end_year == -huge(this%periods%end_year))) then
-          status = NML_ERR_NOT_SET
-        else if (any(this%periods%start_year == -huge(this%periods%start_year) .or. &
-                       this%periods%end_year == -huge(this%periods%end_year))) then
-          status = NML_ERR_PARTLY_SET
-        end if
       end if
     case ("station%code")
       if (present(idx)) then
@@ -484,21 +462,6 @@ contains
       if (present(errmsg)) then
         if (len_trim(errmsg) == 0) then
           errmsg = "field not set: period"
-        end if
-        errmsg = "required " // trim(errmsg)
-      end if
-      return
-    end if
-    if (istat /= NML_OK) then
-      status = istat
-      return
-    end if
-    istat = this%is_set("periods", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
-      if (present(errmsg)) then
-        if (len_trim(errmsg) == 0) then
-          errmsg = "field not set: periods"
         end if
         errmsg = "required " // trim(errmsg)
       end if

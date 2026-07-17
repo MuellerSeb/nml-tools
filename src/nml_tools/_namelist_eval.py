@@ -34,6 +34,8 @@ from .validate import (
     _parse_shape,
     _scalar_constraints,
     _validate_scalar_value,
+    analyze_property_requirement,
+    derived_component_defaults,
     validate_schema_defaults,
 )
 
@@ -90,6 +92,7 @@ class _Property:
     flex_tail_dims: int
     components: Mapping[str, tuple[str, Mapping[str, Any]]]
     required_components: frozenset[str]
+    component_defaults: Mapping[str, Any]
 
     @property
     def rank(self) -> int:
@@ -131,7 +134,7 @@ class _MutableState:
 class _CompiledSchema:
     name: str
     properties: Mapping[str, _Property]
-    required: frozenset[str]
+    required_inputs: frozenset[str]
 
 
 def evaluate_file(
@@ -236,7 +239,10 @@ def _compile_schema(
     if not isinstance(raw_properties, dict) or not raw_properties:
         raise ValueError(f"schema '{name}' must define object 'properties'")
     normalized = _normalize_properties(raw_properties, name)
-    required = frozenset(_parse_required(schema.get("required", []), normalized, name))
+    declared_required = frozenset(
+        _parse_required(schema.get("required", []), normalized, name)
+    )
+    required_inputs: set[str] = set()
     shape_values = {**normalized_constants, **normalized_dimensions}
     properties: dict[str, _Property] = {}
     for key, (property_name, raw) in normalized.items():
@@ -273,11 +279,15 @@ def _compile_schema(
                         f"'{component_name}' matching '{previous_name}' case-insensitively"
                     )
                 components[component_key] = (component_name, component_schema)
-            required_components = _parse_derived_required(
-                value_schema.get("required", []),
-                components,
-                property_name,
-            )
+        requirement = analyze_property_requirement(
+            property_name,
+            prop,
+            declared_required=key in declared_required,
+        )
+        if requirement.requires_input:
+            required_inputs.add(key)
+        required_components = requirement.uncovered_required_components
+        component_defaults = derived_component_defaults(property_name, prop)
         properties[key] = _Property(
             property_name,
             key,
@@ -287,8 +297,9 @@ def _compile_schema(
             flex,
             components,
             required_components,
+            component_defaults,
         )
-    return _CompiledSchema(name, properties, required)
+    return _CompiledSchema(name, properties, frozenset(required_inputs))
 
 
 def _evaluate_group_model(
@@ -359,7 +370,7 @@ def _evaluate_group_model(
                 explicit_components.setdefault(instance, set()).add(target.component_key)
                 instance_spans[instance] = assignment.span
 
-    for key in model.required:
+    for key in model.required_inputs:
         if key not in explicit_roots:
             prop = model.properties[key]
             _raise(
@@ -369,18 +380,24 @@ def _evaluate_group_model(
                 group.span,
             )
 
-    for (root_key, coordinates), supplied in explicit_components.items():
-        prop = model.properties[root_key]
-        for missing in prop.required_components - supplied:
-            component_name = prop.components[missing][0]
-            path = _format_path(prop.name, coordinates, component_name)
-            _raise(
-                NamelistConstraintError,
-                f"derived property '{_format_path(prop.name, coordinates)}' "
-                f"is missing required '{path}'",
-                source,
-                instance_spans[(root_key, coordinates)],
-            )
+    for root_key, prop in model.properties.items():
+        if not prop.derived or not prop.required_components or root_key not in explicit_roots:
+            continue
+        coordinates_to_check = _required_derived_coordinates(prop, explicit_components)
+        for coordinates in coordinates_to_check:
+            supplied = explicit_components.get((root_key, coordinates), set())
+            for component_key in prop.components:
+                if component_key not in prop.required_components or component_key in supplied:
+                    continue
+                component_name = prop.components[component_key][0]
+                path = _format_path(prop.name, coordinates, component_name)
+                _raise(
+                    NamelistConstraintError,
+                    f"derived property '{_format_path(prop.name, coordinates)}' "
+                    f"is missing required '{path}'",
+                    source,
+                    instance_spans.get((root_key, coordinates), group.span),
+                )
 
     frozen = {
         key: LeafState(
@@ -412,31 +429,6 @@ def _value_count(assignment: Assignment) -> int:
         value.count if isinstance(value, RepeatedValue) else 1
         for value in assignment.values
     )
-
-
-def _parse_derived_required(
-    raw: Any,
-    components: Mapping[str, tuple[str, Mapping[str, Any]]],
-    property_name: str,
-) -> frozenset[str]:
-    if raw is None:
-        return frozenset()
-    if not isinstance(raw, list):
-        raise ValueError(f"derived property '{property_name}' required must be a list")
-    required: set[str] = set()
-    for item in raw:
-        if not isinstance(item, str):
-            raise ValueError(
-                f"derived property '{property_name}' required entries must be strings"
-            )
-        key = item.lower()
-        if key not in components:
-            raise ValueError(
-                f"derived property '{property_name}' required component '{item}' "
-                "is not declared in properties"
-            )
-        required.add(key)
-    return frozenset(required)
 
 
 def _resolve_targets(
@@ -685,7 +677,7 @@ def _make_target(
     component_name: str | None,
     schema: Mapping[str, Any],
 ) -> _Target:
-    has_default, default = _target_default(root, coordinates, schema)
+    has_default, default = _target_default(root, coordinates, component_key, schema)
     return _Target(
         root,
         coordinates,
@@ -701,8 +693,11 @@ def _make_target(
 def _target_default(
     root: _Property,
     coordinates: tuple[int, ...],
+    component_key: str | None,
     leaf_schema: Mapping[str, Any],
 ) -> tuple[bool, Any]:
+    if component_key is not None and component_key in root.component_defaults:
+        return True, root.component_defaults[component_key]
     if root.rank == 0:
         if "default" in leaf_schema:
             return True, leaf_schema["default"]
@@ -730,6 +725,26 @@ def _target_default(
     if flat_index < len(values):
         return True, values[flat_index]
     return False, None
+
+
+def _required_derived_coordinates(
+    prop: _Property,
+    explicit_components: Mapping[tuple[str, tuple[int, ...]], set[str]],
+) -> list[tuple[int, ...]]:
+    if prop.rank == 0:
+        return [()]
+    if all(extent is not None for extent in prop.shape):
+        selections = [
+            list(range(1, int(extent) + 1))
+            for extent in prop.shape
+            if extent is not None
+        ]
+        return _fortran_product(selections)
+    return [
+        coordinates
+        for (root_key, coordinates) in explicit_components
+        if root_key == prop.key
+    ]
 
 
 def _initialized_default_value(

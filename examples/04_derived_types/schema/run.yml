@@ -8,6 +8,8 @@ properties:
   period:
     $ref: "definitions.yml#/$defs/period"
     title: Main simulation period
+    default:
+      start_year: 2000
     properties:
       label:
         description: Use-site default overriding the reusable period definition.
@@ -18,6 +20,9 @@ properties:
     x-fortran-shape: n_periods
     items:
       $ref: "definitions.yml#/$defs/period"
+      default:
+        start_year: 1980
+        end_year: 1999
   station:
     title: Selected station
     description: Application-owned station descriptor with schema-matched label storage.

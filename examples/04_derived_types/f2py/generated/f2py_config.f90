@@ -37,6 +37,7 @@ contains
     has__period__end_year, &
     period__label, &
     has__period__label, &
+    has__periods, &
     periods__n1, &
     periods__start_year, &
     has__periods__start_year, &
@@ -56,6 +57,7 @@ contains
     logical, intent(in) :: has__period__end_year !< whether period%end_year was provided
     character(len=*), intent(in) :: period__label !< period%label
     logical, intent(in) :: has__period__label !< whether period%label was provided
+    logical, intent(in) :: has__periods !< whether periods was provided
     integer, intent(in) :: periods__n1 !< extent for periods
     integer(i4), dimension(periods__n1), intent(in) :: periods__start_year !< periods%start_year
     logical, dimension(periods__n1), intent(in) :: has__periods__start_year !< provided mask for periods%start_year
@@ -83,22 +85,24 @@ contains
     if (has__period__start_year) maybe__period%start_year = period__start_year
     if (has__period__end_year) maybe__period%end_year = period__end_year
     if (has__period__label) maybe__period%label = period__label
-    status = this%init_type(periods=maybe__periods, errmsg=errmsg)
-    if (status /= NML_OK) return
-    if (periods__n1 > size(maybe__periods, 1)) then
-      status = NML_ERR_INVALID_INDEX
-      errmsg = "dimension 1 exceeds bounds for 'periods'"
-      return
+    if (has__periods) then
+      status = this%init_type(periods=maybe__periods, errmsg=errmsg)
+      if (status /= NML_OK) return
+      if (periods__n1 > size(maybe__periods, 1)) then
+        status = NML_ERR_INVALID_INDEX
+        errmsg = "dimension 1 exceeds bounds for 'periods'"
+        return
+      end if
+      where (has__periods__start_year)
+        maybe__periods(1:periods__n1)%start_year = periods__start_year
+      end where
+      where (has__periods__end_year)
+        maybe__periods(1:periods__n1)%end_year = periods__end_year
+      end where
+      where (has__periods__label)
+        maybe__periods(1:periods__n1)%label = periods__label
+      end where
     end if
-    where (has__periods__start_year)
-      maybe__periods(1:periods__n1)%start_year = periods__start_year
-    end where
-    where (has__periods__end_year)
-      maybe__periods(1:periods__n1)%end_year = periods__end_year
-    end where
-    where (has__periods__label)
-      maybe__periods(1:periods__n1)%label = periods__label
-    end where
     status = this%init_type(station=maybe__station, errmsg=errmsg)
     if (status /= NML_OK) return
     if (has__station__code) maybe__station%code = station__code

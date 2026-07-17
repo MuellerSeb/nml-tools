@@ -6,13 +6,13 @@ Configuration composed from a reusable root schema and local fields.
 
 ## Fields
 
-| Name | Type | Required | Info |
-| --- | --- | --- | --- |
-| [label](#label) | string | no | Run label |
-| [steps](#steps) | integer | yes | Simulation steps |
-| [station_weights](#station_weights) | real array | no | Station weights |
-| [method](#method) | string | no | Time integration method |
-| [relaxation](#relaxation) | real | no | Relaxation factor |
+| Name | Type | Declared required | Input required | Info |
+| --- | --- | --- | --- | --- |
+| [label](#label) | string | no | no | Run label |
+| [steps](#steps) | integer | yes | yes | Simulation steps |
+| [station_weights](#station_weights) | real array | no | no | Station weights |
+| [method](#method) | string | no | no | Time integration method |
+| [relaxation](#relaxation) | real | no | no | Relaxation factor |
 
 ## Field details
 
@@ -24,7 +24,8 @@ Human-readable label for this concrete run.
 
 Summary:
 - Type: `character(len=label_len)`
-- Required: no
+- Declared required: no
+- Input required: no
 - Default: `"reference-example"`
 
 ### steps
@@ -33,7 +34,8 @@ Simulation steps `steps`
 
 Summary:
 - Type: `integer(i4)`
-- Required: yes
+- Declared required: yes
+- Input required: yes
 - Minimum: `>= 1`
 - Maximum: `<= 10000`
 - Examples: `24`
@@ -46,7 +48,8 @@ Override the library default pattern for this use site.
 
 Summary:
 - Type: `real(dp), dimension(n_stations)`
-- Required: no
+- Declared required: no
+- Input required: no
 - Default: `[0.5, 1.0]` (repeated)
 - Minimum: `>= 0.0`
 
@@ -58,7 +61,8 @@ Integration scheme selected for this run.
 
 Summary:
 - Type: `character(len=label_len)`
-- Required: no
+- Declared required: no
+- Input required: no
 - Default: `"RK2"`
 - Allowed values: `"Euler"`, `"RK2"`, `"RK4"`
 
@@ -70,7 +74,8 @@ A strictly positive fraction narrowed at the use site.
 
 Summary:
 - Type: `real(dp)`
-- Required: no
+- Declared required: no
+- Input required: no
 - Default: `0.25`
 - Minimum: `> 0.0`
 - Maximum: `<= 0.5`

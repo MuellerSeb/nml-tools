@@ -6,12 +6,14 @@ once in `nml_helper`, and declares its single-use `station_t` field inline while
 importing the type from the application-owned `fortran/application_types.f90`
 module.
 
-The generated namelist has a required scalar period, a runtime-sized period array,
-and a required imported station. The scalar `period` refines the referenced
-`period_t%label` default to `main`, while the `periods` array keeps the reusable
-definition default `period`. The imported `station_t%label` storage length
-matches its schema contract; generated code checks that equality during
-initialization.
+The generated namelist has a declared-required scalar period, a runtime-sized
+period array, and a required imported station. The scalar `period` uses an
+object default for `start_year` and refines the referenced `period_t%label`
+default to `main`; callers still supply its uncovered required `end_year`.
+The `periods` array broadcasts an `items.default` covering both required years,
+so it remains declared required in the schema but is optional at the generated
+setter boundary. The imported `station_t%label` storage length matches its
+schema contract; generated code checks that equality during initialization.
 
 ## Regenerate
 
@@ -66,11 +68,7 @@ import nml_derived_types_example as example
 
 cfg = example.get_config()
 cfg.set(
-    period={"start_year": 2001, "end_year": 2010},
-    periods=[
-        {"start_year": 1980, "end_year": 1990},
-        {"start_year": 1991, "end_year": 2000},
-    ],
+    period={"end_year": 2010},
     station={"code": 7, "label": "central"},
 )
 cfg.is_valid()
