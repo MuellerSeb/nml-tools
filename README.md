@@ -698,6 +698,7 @@ Primary subcommands:
 - `gen-fortran`: generate helper + Fortran modules only.
 - `gen-markdown`: generate Markdown docs only.
 - `gen-template`: generate template namelists only.
+- `json2nml`: convert namelist-oriented JSON to a namelist file.
 - `validate`: validate a namelist file against schema definitions.
 
 ### Generation
@@ -731,6 +732,41 @@ nml-tools check --config nml-config.toml --diff
 `check` exits with a non-zero status if any configured generated file is
 missing or differs from the current generator output. This is intended for CI
 jobs that should ensure checked-in generated files are current.
+
+### JSON to namelist
+
+Convert namelist-oriented JSON with the required input and output options:
+
+```bash
+nml-tools json2nml -i input.json -o output.nml
+nml-tools json2nml --input-file input.json --output-file output.nml
+```
+
+The input may be the canonical metadata wrapper with a top-level `values`
+object, or the `values` object directly. Namelist and field names are the keys
+of the first two mapping levels. JSON numbers remain numeric, booleans become
+`.true.` or `.false.`, and strings are quoted for Fortran. Omit fields that are
+unset; JSON `null` is rejected.
+
+Every array element is emitted separately with its full, one-based position.
+For example, `"grid": [[11, 12], [21, 22]]` produces:
+
+```fortran
+grid(1,1) = 11
+grid(1,2) = 12
+grid(2,1) = 21
+grid(2,2) = 22
+```
+
+The schema-free converter is also available as a public Python function:
+
+```python
+from nml_tools import json_to_namelist
+
+text = json_to_namelist(payload)
+```
+
+Use `validate` afterward when the result must be checked against schemas.
 
 ### Validation
 

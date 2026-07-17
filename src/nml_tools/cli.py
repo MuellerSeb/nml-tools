@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from dataclasses import dataclass
@@ -37,6 +38,7 @@ from .codegen_fortran import (
 )
 from .codegen_markdown import generate_docs, render_docs
 from .codegen_template import generate_template, render_template
+from .json2nml import json_to_namelist
 from .schema import SchemaResolver, load_schema
 
 if sys.version_info >= (3, 11):
@@ -1277,6 +1279,42 @@ def _check_generated_outputs(outputs: list[GeneratedOutput], *, show_diff: bool)
 def cli(verbose: int, quiet: int) -> None:
     """nml-tools command line interface."""
     _configure_logging(verbose, quiet)
+
+
+@cli.command("json2nml", context_settings=_CONTEXT_SETTINGS)
+@click.option(
+    "--input-file",
+    "-i",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="JSON input file.",
+)
+@click.option(
+    "--output-file",
+    "-o",
+    type=click.Path(dir_okay=False, path_type=Path),
+    required=True,
+    help="Namelist output file.",
+)
+def json2nml(input_file: Path, output_file: Path) -> None:
+    """Convert namelist-oriented JSON to a Fortran namelist file."""
+    try:
+        payload = json.loads(input_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError) as exc:
+        raise click.ClickException(f"failed to read JSON input: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise click.ClickException(f"failed to parse JSON input: {exc}") from exc
+
+    try:
+        rendered = json_to_namelist(payload)
+    except ValueError as exc:
+        raise click.ClickException(f"failed to convert JSON input: {exc}") from exc
+
+    try:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(rendered, encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise click.ClickException(f"failed to write namelist output: {exc}") from exc
 
 
 @cli.command("generate", context_settings=_CONTEXT_SETTINGS)
