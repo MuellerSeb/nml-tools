@@ -825,12 +825,10 @@ def _validate_derived_object(schema: Mapping[str, Any]) -> None:
         if not isinstance(module_name, str):
             raise ValueError("'x-fortran-module' must be a valid Fortran identifier")
         validate_user_fortran_identifier(module_name.strip(), label="'x-fortran-module'")
-    if "default" in schema:
-        raise ValueError("derived-type object must not define a default")
     properties = schema.get("properties")
     if not isinstance(properties, Mapping) or not properties:
         raise ValueError("derived-type object must define non-empty 'properties'")
-    canonical: set[str] = set()
+    canonical: dict[str, str] = {}
     for name, prop in properties.items():
         if not isinstance(name, str):
             raise ValueError("derived-type component names must be strings")
@@ -838,7 +836,7 @@ def _validate_derived_object(schema: Mapping[str, Any]) -> None:
         key = name.lower()
         if key in canonical:
             raise ValueError(f"derived-type object defines duplicate component '{name}'")
-        canonical.add(key)
+        canonical[key] = name
         if not _is_intrinsic_scalar_schema(prop):
             raise ValueError(
                 f"derived-type component '{name}' must define an intrinsic scalar type"
@@ -849,6 +847,25 @@ def _validate_derived_object(schema: Mapping[str, Any]) -> None:
     for name in required:
         if not isinstance(name, str) or name.lower() not in canonical:
             raise ValueError(f"derived-type required component '{name}' is not a property")
+    if "default" in schema:
+        default = schema["default"]
+        if not isinstance(default, Mapping):
+            raise ValueError("derived-type object default must be an object")
+        seen: dict[str, str] = {}
+        for name in default:
+            if not isinstance(name, str):
+                raise ValueError("derived-type object default keys must be strings")
+            key = name.lower()
+            if key in seen:
+                raise ValueError(
+                    "derived-type object default defines duplicate component "
+                    f"'{name}' matching '{seen[key]}' case-insensitively"
+                )
+            if key not in canonical:
+                raise ValueError(
+                    f"derived-type object default has unknown component '{name}'"
+                )
+            seen[key] = name
 
 
 def _is_intrinsic_scalar_schema(

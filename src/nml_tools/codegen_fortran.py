@@ -18,7 +18,11 @@ from ._utils import (
     validate_user_fortran_identifier,
 )
 from .schema import DERIVED_REF_ORIGIN_KEY
-from .validate import validate_schema_defaults
+from .validate import (
+    analyze_property_requirement,
+    derived_component_defaults,
+    validate_schema_defaults,
+)
 
 _TEMPLATE_ENV = Environment(
     loader=FileSystemLoader(Path(__file__).resolve().parent / "templates"),
@@ -75,7 +79,8 @@ class FieldSpec:
     description: str | None
     declaration: str
     local_declaration: str
-    required: bool
+    declared_required: bool
+    requires_input: bool
     sentinel_assignment: str | None
     sentinel_check: str | None
     default_assignment: str | None
@@ -598,7 +603,13 @@ def _build_context(
 
             dynamic_array = type_info.category == "array" and is_runtime_sized
 
-            is_required = name in required_set
+            declared_required = name in required_set
+            requirement = analyze_property_requirement(
+                display_name,
+                prop,
+                declared_required=declared_required,
+            )
+            requires_input = requirement.requires_input
             if derived is not None:
                 derived_type_name = _derived_type_name(derived)
                 module = derived.get("x-fortran-module")
@@ -619,8 +630,10 @@ def _build_context(
                 inner_required = {
                     str(component).lower() for component in derived.get("required", [])
                 }
+                effective_component_defaults = derived_component_defaults(display_name, prop)
                 leaf_entries: list[dict[str, Any]] = []
                 init_lines: list[str] = []
+                overlay_lines: list[str] = []
                 for child_display_name, child in components.items():
                     if not isinstance(child_display_name, str) or not isinstance(child, dict):
                         raise ValueError("derived object components must be schema objects")
@@ -651,18 +664,30 @@ def _build_context(
                                 "end if",
                             ]
                         )
-                    has_default = "default" in child
-                    if has_default:
+                    has_leaf_default = "default" in child
+                    has_object_default = child_name in effective_component_defaults and (
+                        not has_leaf_default
+                        or effective_component_defaults[child_name] != child["default"]
+                    )
+                    has_effective_default = child_name in effective_component_defaults
+                    if has_leaf_default:
                         literal = _format_default(child["default"], child_info, child, constants)
                         init_lines.append(f"{arg_target} = {literal}")
-                        missing_condition = None
+                    elif has_effective_default and child_info.category == "boolean":
+                        literal = _format_default(
+                            effective_component_defaults[child_name],
+                            child_info,
+                            child,
+                            constants,
+                        )
+                        init_lines.append(f"{arg_target} = {literal}")
                     else:
                         if child_info.category == "boolean":
                             raise ValueError(
                                 f"derived boolean component '{child_display_name}' "
-                                "must define a default"
+                                "must define an effective default"
                             )
-                        _, missing_condition, child_uses_ieee = _sentinel_expressions(
+                        _, _, child_uses_ieee = _sentinel_expressions(
                             child_info,
                             var_ref=child_target,
                         )
@@ -680,13 +705,28 @@ def _build_context(
                         )
                         if child_uses_ieee:
                             requires_ieee = True
+                    if has_effective_default:
+                        missing_condition = None
+                        if has_object_default:
+                            literal = _format_default(
+                                effective_component_defaults[child_name],
+                                child_info,
+                                child,
+                                constants,
+                            )
+                            overlay_lines.append(f"{arg_target} = {literal}")
+                    else:
+                        _, missing_condition, _ = _sentinel_expressions(
+                            child_info,
+                            var_ref=child_target,
+                        )
                     leaf_entries.append(
                         {
                             "name": child_name,
                             "display_name": child_display_name,
                             "missing_condition": missing_condition,
                             "required": child_name in inner_required,
-                            "has_default": has_default,
+                            "has_default": has_effective_default,
                         }
                     )
                     constraint_name = _generated_name(name, child_name)
@@ -810,11 +850,12 @@ def _build_context(
                             }
                         )
 
+                init_lines.extend(overlay_lines)
                 arg_dimensions = [":" for _ in type_info.dimensions]
                 argument_decl = _render_argument_declaration(
                     name=name,
                     type_info=type_info,
-                    is_required=is_required,
+                    is_required=requires_input,
                     dimensions=arg_dimensions,
                     doc=title,
                 )
@@ -829,7 +870,7 @@ def _build_context(
                         )
                         flex_bound_vars.add(lb_var)
                         flex_bound_vars.add(ub_var)
-                if is_required:
+                if requires_input:
                     if type_info.category == "array":
                         set_required_assignments.append(
                             _render_partial_set_block(
@@ -892,10 +933,13 @@ def _build_context(
                         rank=len(type_info.dimensions),
                     )
                 )
-                if is_required:
+                if requires_input:
                     uses_partly_set = uses_partly_set or (
-                        len(inner_required) > 1
-                        or (type_info.category == "array" and bool(inner_required))
+                        len(requirement.uncovered_required_components) > 1
+                        or (
+                            type_info.category == "array"
+                            and bool(requirement.uncovered_required_components)
+                        )
                     )
                 fields.append(
                     FieldSpec(
@@ -905,7 +949,8 @@ def _build_context(
                         description=description,
                         declaration=f"{declaration} !< {title}",
                         local_declaration=local_decl,
-                        required=is_required,
+                        declared_required=declared_required,
+                        requires_input=requires_input,
                         sentinel_assignment=None,
                         sentinel_check=None,
                         default_assignment=None,
@@ -943,8 +988,8 @@ def _build_context(
                     parsed_dims = _parse_default_dimensions(type_info.dimensions, shape_constants)
                     array_default_spec = _prepare_array_default(default_values, parsed_dims, prop)
 
-            needs_sentinel = (not is_required) and (not has_default)
-            requires_sentinel = is_required or needs_sentinel
+            needs_sentinel = not has_default
+            requires_sentinel = needs_sentinel
 
             arg_dimensions = type_info.dimensions
             if type_info.category == "array":
@@ -952,7 +997,7 @@ def _build_context(
             argument_decl = _render_argument_declaration(
                 name=name,
                 type_info=type_info,
-                is_required=is_required,
+                is_required=requires_input,
                 dimensions=arg_dimensions,
                 doc=title,
             )
@@ -962,18 +1007,10 @@ def _build_context(
             sentinel_condition: str | None = None
             set_sentinel_condition: str | None = None
             if requires_sentinel:
-                if is_required and type_info.category == "boolean":
-                    raise ValueError(
-                        f"required {type_info.category} '{display_name}' is not supported"
-                    )
-                if is_required and type_info.category == "array":
-                    if type_info.element_category == "boolean":
-                        raise ValueError("required boolean arrays are not supported")
-                if needs_sentinel and type_info.category == "boolean":
-                    raise ValueError(f"optional boolean '{display_name}' must define a default")
-                if needs_sentinel and type_info.category == "array":
-                    if type_info.element_category == "boolean":
-                        raise ValueError("optional boolean arrays must define a default")
+                if type_info.category == "boolean":
+                    raise ValueError(f"boolean '{display_name}' must define a default")
+                if type_info.category == "array" and type_info.element_category == "boolean":
+                    raise ValueError("boolean arrays must define a default")
                 value_expr, condition_expr, uses_ieee = _sentinel_expressions(
                     type_info,
                     var_ref=f"this%{name}",
@@ -982,7 +1019,7 @@ def _build_context(
                     type_info,
                     target_ref=f"this%{name}",
                     value_expr=value_expr,
-                    comment=_sentinel_comment(type_info, required=is_required),
+                    comment=_sentinel_comment(type_info, required=requires_input),
                 )
                 sentinel_condition = condition_expr
                 sentinel_assignments.append(sentinel_assignment)
@@ -996,7 +1033,7 @@ def _build_context(
                     if set_uses_ieee:
                         requires_ieee = True
                     set_sentinel_condition = set_condition_expr
-                    if needs_sentinel:
+                    if not requires_input:
                         sent_com = _sentinel_comment(type_info, required=False)
                         set_optional_defaults.append(
                             _render_sentinel_assignment(
@@ -1007,10 +1044,10 @@ def _build_context(
                             )
                         )
 
-            if is_required and type_info.category != "array":
+            if requires_input and type_info.category != "array":
                 required_scalar_names.add(name)
 
-            if is_required and type_info.category == "array" and flex_dim == 0:
+            if requires_input and type_info.category == "array" and flex_dim == 0:
                 element_category = type_info.element_category
                 if element_category is None:
                     raise ValueError("array field missing element category")
@@ -1085,7 +1122,7 @@ def _build_context(
                         "display_name": display_name,
                         "rank": rank,
                         "flex_dims": flex_dims,
-                        "required": is_required,
+                        "required": requires_input,
                         "runtime_array": dynamic_array,
                         "bounds": flex_dim_bounds,
                         "slice_missing_conditions": slice_missing_conditions,
@@ -1098,8 +1135,6 @@ def _build_context(
 
             default_assignment: str | None = None
             set_default_assignment: str | None = None
-            if has_default and is_required:
-                raise ValueError(f"required property '{display_name}' cannot define a default")
             if has_default:
                 default_const_name = _generated_name(name, "default")
                 if type_info.category == "array":
@@ -1237,19 +1272,23 @@ def _build_context(
                 (dim != ":") and (not _is_int_literal(dim)) for dim in type_info.dimensions
             ):
                 required_default_elements: int | None = None
+                extent_mode = "minimum"
                 if has_default and default_values is not None:
                     if default_from_items:
-                        required_default_elements = 1
+                        required_default_elements = None
                     elif array_default_spec is not None:
                         required_default_elements = len(array_default_spec.source_values)
+                        if array_default_spec.pad_values is None:
+                            extent_mode = "exact"
                     else:
                         required_default_elements = len(default_values)
-                if required_default_elements is not None and required_default_elements > 1:
+                if required_default_elements is not None:
                     runtime_default_extent_requirements.append(
                         {
                             "field": display_name,
                             "dimensions": list(type_info.dimensions),
                             "required_elements": required_default_elements,
+                            "mode": extent_mode,
                         }
                     )
 
@@ -1401,7 +1440,7 @@ def _build_context(
                     )
 
             is_array = type_info.category == "array"
-            if is_required:
+            if requires_input:
                 if is_array:
                     # Match namelist-buffer semantics: set assigns the provided
                     # leading subsection and leaves completeness checks to is_valid.
@@ -1415,7 +1454,7 @@ def _build_context(
                 else:
                     set_required_assignments.append(f"this%{name} = {name}")
 
-            if not is_required:
+            if not requires_input:
                 if is_array:
                     # Match namelist-buffer semantics: set assigns the provided
                     # leading subsection and leaves completeness checks to is_valid.
@@ -1485,12 +1524,13 @@ def _build_context(
                     description=description,
                     declaration=declaration_with_doc,
                     local_declaration=local_decl,
-                    required=is_required,
+                    declared_required=declared_required,
+                    requires_input=requires_input,
                     sentinel_assignment=sentinel_assignment,
                     sentinel_check=(
                         f"if ({sentinel_condition}) error stop "
                         f"\"{module_name}%from_file: '{name}' is required\""
-                        if sentinel_condition and is_required
+                        if sentinel_condition and requires_input
                         else None
                     ),
                     default_assignment=default_assignment,
@@ -1513,20 +1553,23 @@ def _build_context(
     if uses_partly_set and "NML_ERR_PARTLY_SET" not in helper_imports:
         helper_imports.append("NML_ERR_PARTLY_SET")
     required_flex_names = {entry["name"] for entry in flex_arrays if entry["required"]}
+    required_input_names = [field.name for field in fields if field.requires_input]
     required_scalar_validations: list[str] = []
-    for name in required_fields:
+    for name in required_input_names:
         if name in required_scalar_names:
             required_scalar_validations.append(property_name_map[name])
         elif name not in required_array_by_name and name not in required_flex_names:
             required_scalar_validations.append(property_name_map[name])
     required_array_validations = [
         required_array_by_name[name]
-        for name in required_fields
+        for name in required_input_names
         if name in required_array_by_name
     ]
     namelist_vars = [field.name for field in fields]
-    required_fields_specs = [field for field in fields if field.required]
-    optional_fields_specs = [field for field in fields if not field.required]
+    declared_required_specs = [field for field in fields if field.declared_required]
+    declared_optional_specs = [field for field in fields if not field.declared_required]
+    input_required_specs = [field for field in fields if field.requires_input]
+    input_optional_specs = [field for field in fields if not field.requires_input]
 
     resolved_kind_module = kind_module or "iso_fortran_env"
     if not isinstance(resolved_kind_module, str) or not resolved_kind_module:
@@ -1554,9 +1597,9 @@ def _build_context(
     }
     set_dims_extent_checks: list[dict[str, str]] = []
     seen_extent_checks: set[tuple[str, str]] = set()
-    for requirement in runtime_default_extent_requirements:
+    for extent_requirement in runtime_default_extent_requirements:
         factors: list[str] = []
-        requirement_dimensions = cast("list[str]", requirement["dimensions"])
+        requirement_dimensions = cast("list[str]", extent_requirement["dimensions"])
         for extent_dim in requirement_dimensions:
             if extent_dim == ":":
                 continue
@@ -1569,13 +1612,23 @@ def _build_context(
         product_expr = " * ".join(factors)
         if len(factors) > 1:
             product_expr = f"({product_expr})"
-        required_elements = cast("int", requirement["required_elements"])
-        condition = f"{product_expr} < {required_elements}"
-        field_name = cast("str", requirement["field"])
-        extent_message = (
-            f"shape constants for '{field_name}' must allow at least "
-            f"{required_elements} default values"
-        )
+        required_elements = cast("int", extent_requirement["required_elements"])
+        mode = cast("str", extent_requirement["mode"])
+        if mode == "exact":
+            condition = f"{product_expr} /= {required_elements}"
+        else:
+            condition = f"{product_expr} < {required_elements}"
+        field_name = cast("str", extent_requirement["field"])
+        if mode == "exact":
+            extent_message = (
+                f"shape constants for '{field_name}' must contain exactly "
+                f"{required_elements} default values"
+            )
+        else:
+            extent_message = (
+                f"shape constants for '{field_name}' must allow at least "
+                f"{required_elements} default values"
+            )
         extent_key = (condition, extent_message)
         if extent_key in seen_extent_checks:
             continue
@@ -1607,12 +1660,14 @@ def _build_context(
         "required_array_validations": required_array_validations,
         "flex_arrays": flex_arrays,
         "assignments": [f"this%{field.name} = {field.name}" for field in fields],
-        "argument_list": [field.name for field in required_fields_specs + optional_fields_specs],
+        "argument_list": [
+            field.name for field in declared_required_specs + declared_optional_specs
+        ],
         "required_argument_declarations": [
-            field.argument_declaration for field in required_fields_specs
+            field.argument_declaration for field in input_required_specs
         ],
         "optional_argument_declarations": [
-            field.argument_declaration for field in optional_fields_specs
+            field.argument_declaration for field in input_optional_specs
         ],
         "set_dims_arguments": set_dims_arguments,
         "set_dims_extent_checks": set_dims_extent_checks,
@@ -1620,7 +1675,7 @@ def _build_context(
         "set_optional_defaults": set_optional_defaults,
         "set_optional_present": [
             field.set_present_assignment
-            for field in optional_fields_specs
+            for field in input_optional_specs
             if field.set_present_assignment
         ],
         "enum_functions": enum_functions,
@@ -1709,8 +1764,8 @@ def _derived_presence_cases(
                     f"this%{name}({idx_args})%{leaf['name']}",
                 )
                 lines.append(f"    if ({indexed}) status = NML_ERR_NOT_SET")
-            lines.append("  else")
             if condition is not None:
+                lines.append("  else")
                 lines.append(f"    if (all({condition})) status = NML_ERR_NOT_SET")
             lines.append("  end if")
         else:
@@ -1733,11 +1788,7 @@ def _derived_presence_cases(
         for leaf in leaves
         if leaf["required"] and leaf["missing_condition"] is not None
     ]
-    aggregate_conditions = required_conditions or [
-        str(leaf["missing_condition"])
-        for leaf in leaves
-        if leaf["missing_condition"] is not None
-    ]
+    aggregate_conditions = required_conditions
     lines = [f'case ("{name}")']
     if is_array:
         array_prefix(lines)
@@ -1772,8 +1823,8 @@ def _derived_presence_cases(
                 )
                 lines.append("      status = NML_ERR_PARTLY_SET")
             lines.append("    end if")
-        lines.append("  else")
         if aggregate_conditions:
+            lines.append("  else")
             append_condition(
                 lines,
                 prefix="    if (all(",

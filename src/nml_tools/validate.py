@@ -28,6 +28,17 @@ class ScalarConstraints:
     max_exclusive: bool
 
 
+@dataclass(frozen=True)
+class PropertyRequirement:
+    """Schema-time requiredness and operational-default coverage for a property."""
+
+    declared_required: bool
+    required_defaults_complete: bool
+    fully_default_initialized: bool
+    requires_input: bool
+    uncovered_required_components: frozenset[str]
+
+
 def validate_schema_defaults(
     schema: Mapping[str, Any],
     *,
@@ -54,12 +65,16 @@ def validate_schema_defaults(
     for name, prop in properties.items():
         if not isinstance(name, str) or not isinstance(prop, Mapping):
             continue
-        _validate_derived_presence_policy(name, prop, name.lower() in required_names)
         _validate_property_defaults(
             name,
             prop,
             constants=constants,
             dimensions=dimensions,
+        )
+        analyze_property_requirement(
+            name,
+            prop,
+            declared_required=name.lower() in required_names,
         )
 
 
@@ -87,8 +102,6 @@ def _validate_property_defaults(
 ) -> None:
     if prop.get("type") == "object":
         _validate_derived_declaration(name, prop)
-        if "default" in prop:
-            raise ValueError(f"derived property '{name}' must not define an object default")
         properties = prop.get("properties")
         if not isinstance(properties, Mapping):
             raise ValueError(f"derived property '{name}' must define object 'properties'")
@@ -108,6 +121,12 @@ def _validate_property_defaults(
                 constants=constants,
                 dimensions=dimensions,
             )
+        _validate_derived_object_default(
+            name,
+            prop,
+            constants=constants,
+            dimensions=dimensions,
+        )
         return
 
     if prop.get("type") != "array":
@@ -315,19 +334,177 @@ def _parse_required(
     return required
 
 
-def _validate_derived_presence_policy(
+def analyze_property_requirement(
     name: str,
     prop: Mapping[str, Any],
-    is_required: bool,
-) -> None:
+    *,
+    declared_required: bool,
+) -> PropertyRequirement:
+    """Return operational-default coverage and effective input requiredness."""
     derived = _derived_object_schema(prop)
-    if derived is None or is_required:
-        return
-    inner_required = derived.get("required", [])
-    if isinstance(inner_required, list) and inner_required:
-        raise ValueError(
-            f"optional derived property '{name}' must not define required inner components"
+    if derived is None:
+        has_default = _intrinsic_property_has_default(prop)
+        return PropertyRequirement(
+            declared_required=declared_required,
+            required_defaults_complete=has_default,
+            fully_default_initialized=has_default,
+            requires_input=declared_required and not has_default,
+            uncovered_required_components=frozenset(),
         )
+
+    components = _normalized_derived_components(name, derived)
+    required = _normalized_derived_required(name, derived, components)
+    object_default = _normalized_derived_default_mapping(name, derived, components)
+    defaulted = {
+        key
+        for key, (_, child) in components.items()
+        if "default" in child or key in object_default
+    }
+    uncovered = frozenset(required - defaulted)
+    required_defaults_complete = not uncovered
+    if not declared_required and uncovered:
+        missing = ", ".join(components[key][0] for key in sorted(uncovered))
+        raise ValueError(
+            f"optional derived property '{name}' has required components without defaults: "
+            f"{missing}; declare the outer property required or provide effective defaults"
+        )
+    return PropertyRequirement(
+        declared_required=declared_required,
+        required_defaults_complete=required_defaults_complete,
+        fully_default_initialized=len(defaulted) == len(components),
+        requires_input=declared_required and not required_defaults_complete,
+        uncovered_required_components=uncovered,
+    )
+
+
+def derived_component_defaults(name: str, prop: Mapping[str, Any]) -> dict[str, Any]:
+    """Return effective derived component defaults keyed by lowercase component name."""
+    derived = _derived_object_schema(prop)
+    if derived is None:
+        return {}
+    components = _normalized_derived_components(name, derived)
+    object_default = _normalized_derived_default_mapping(name, derived, components)
+    defaults: dict[str, Any] = {}
+    for key, (_, child) in components.items():
+        if "default" in child:
+            defaults[key] = child["default"]
+        if key in object_default:
+            defaults[key] = object_default[key]
+    return defaults
+
+
+def derived_object_default(name: str, prop: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the selected object/item default keyed by lowercase component name."""
+    derived = _derived_object_schema(prop)
+    if derived is None:
+        return {}
+    components = _normalized_derived_components(name, derived)
+    return _normalized_derived_default_mapping(name, derived, components)
+
+
+def _intrinsic_property_has_default(prop: Mapping[str, Any]) -> bool:
+    if prop.get("type") != "array":
+        return "default" in prop
+    if "default" in prop:
+        return True
+    items = prop.get("items")
+    return isinstance(items, Mapping) and "default" in items
+
+
+def _normalized_derived_components(
+    name: str,
+    derived: Mapping[str, Any],
+) -> dict[str, tuple[str, Mapping[str, Any]]]:
+    raw = derived.get("properties")
+    if not isinstance(raw, Mapping) or not raw:
+        raise ValueError(f"derived property '{name}' must define object 'properties'")
+    components: dict[str, tuple[str, Mapping[str, Any]]] = {}
+    for child_name, child in raw.items():
+        if not isinstance(child_name, str) or not isinstance(child, Mapping):
+            raise ValueError(f"derived property '{name}' has an invalid component declaration")
+        key = child_name.lower()
+        if key in components:
+            previous = components[key][0]
+            raise ValueError(
+                f"derived property '{name}' defines duplicate component '{child_name}' "
+                f"matching '{previous}' case-insensitively"
+            )
+        components[key] = (child_name, child)
+    return components
+
+
+def _normalized_derived_required(
+    name: str,
+    derived: Mapping[str, Any],
+    components: Mapping[str, tuple[str, Mapping[str, Any]]],
+) -> set[str]:
+    raw = derived.get("required", [])
+    if raw is None:
+        return set()
+    if not isinstance(raw, list):
+        raise ValueError(f"derived property '{name}' required must be a list")
+    required: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str):
+            raise ValueError(f"derived property '{name}' required entries must be strings")
+        key = item.lower()
+        if key not in components:
+            raise ValueError(
+                f"derived property '{name}' required component '{item}' is not declared"
+            )
+        required.add(key)
+    return required
+
+
+def _normalized_derived_default_mapping(
+    name: str,
+    derived: Mapping[str, Any],
+    components: Mapping[str, tuple[str, Mapping[str, Any]]],
+) -> dict[str, Any]:
+    if "default" not in derived:
+        return {}
+    raw = derived["default"]
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"derived property '{name}' object default must be a mapping")
+    normalized: dict[str, Any] = {}
+    spelling: dict[str, str] = {}
+    for child_name, value in raw.items():
+        if not isinstance(child_name, str):
+            raise ValueError(f"derived property '{name}' object default keys must be strings")
+        key = child_name.lower()
+        if key in normalized:
+            raise ValueError(
+                f"derived property '{name}' object default defines duplicate component "
+                f"'{child_name}' matching '{spelling[key]}' case-insensitively"
+            )
+        if key not in components:
+            raise ValueError(
+                f"derived property '{name}' object default has unknown component '{child_name}'"
+            )
+        normalized[key] = value
+        spelling[key] = child_name
+    return normalized
+
+
+def _validate_derived_object_default(
+    name: str,
+    derived: Mapping[str, Any],
+    *,
+    constants: dict[str, int] | None,
+    dimensions: dict[str, int] | None,
+) -> dict[str, Any]:
+    components = _normalized_derived_components(name, derived)
+    normalized = _normalized_derived_default_mapping(name, derived, components)
+    for key, value in normalized.items():
+        child_name, child = components[key]
+        _validate_scalar_default(
+            f"{name}.{child_name}",
+            child,
+            value,
+            constants=constants,
+            dimensions=dimensions,
+        )
+    return normalized
 
 
 def _derived_object_schema(prop: Mapping[str, Any]) -> Mapping[str, Any] | None:

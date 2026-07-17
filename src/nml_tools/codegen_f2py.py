@@ -426,7 +426,7 @@ def build_f2py_namelist_spec(
                 argument_names_in_use,
             )
             outer_has_flag: str | None = None
-            if not field.required:
+            if not field.requires_input:
                 outer_has_flag = _unique_generated_name(
                     f"has__{field.name}", argument_names_in_use
                 )
@@ -439,17 +439,17 @@ def build_f2py_namelist_spec(
             spec = F2pyArgumentSpec(
                 name=field.name,
                 title=_one_line(field.title),
-                required=field.required,
+                required=field.requires_input,
                 rank=rank,
                 numpy_dtype=None,
                 dummy_value="None",
                 doc_type=("sequence of mappings" if rank else "mapping"),
-                requirement="required" if field.required else "optional",
+                requirement="required" if field.requires_input else "optional",
                 has_flag=outer_has_flag,
                 derived_leaves=leaves,
                 derived_type_name=derived_type_name,
             )
-            if field.required:
+            if field.requires_input:
                 required_args.append(spec)
             else:
                 optional_args.append(spec)
@@ -499,7 +499,9 @@ def build_f2py_namelist_spec(
             )
             bridge_names_in_use.add(maybe_name.lower())
             bridge_declarations.extend(
-                _derived_bridge_declarations(maybe_name, derived_type_name, rank, field.required)
+                _derived_bridge_declarations(
+                    maybe_name, derived_type_name, rank, field.requires_input
+                )
             )
             bridge_assignments.extend(
                 _derived_bridge_assignments(
@@ -507,7 +509,7 @@ def build_f2py_namelist_spec(
                     maybe_name,
                     leaves,
                     rank,
-                    field.required,
+                    field.requires_input,
                     outer_has_flag,
                     dim_names,
                     init_allocates_array=field.runtime_sized_array,
@@ -522,22 +524,22 @@ def build_f2py_namelist_spec(
                 generated_dim_name = _unique_generated_name(dim_name, argument_names_in_use)
                 argument_names_in_use.add(generated_dim_name.lower())
                 dim_names.append(generated_dim_name)
-        if not field.required:
+        if not field.requires_input:
             has_base = f"has__{field.name}"
             has_flag = _unique_generated_name(has_base, argument_names_in_use)
             argument_names_in_use.add(has_flag.lower())
         spec = F2pyArgumentSpec(
             name=field.name,
             title=_one_line(field.title),
-            required=field.required,
+            required=field.requires_input,
             rank=rank,
             numpy_dtype=_numpy_dtype(type_info),
             dummy_value=_python_dummy_value(type_info),
             doc_type=_python_doc_type(type_info),
-            requirement="required" if field.required else "optional",
+            requirement="required" if field.requires_input else "optional",
             has_flag=has_flag,
         )
-        if field.required:
+        if field.requires_input:
             required_args.append(spec)
         else:
             optional_args.append(spec)
@@ -805,7 +807,7 @@ def _f2py_field_arguments(
     *,
     dim_names: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
-    requirement = "required" if field.required else "optional"
+    requirement = "required" if field.requires_input else "optional"
     if type_info.category != "array":
         return [field.name], [
             f"{type_info.arg_type_spec}, intent(in) :: {field.name} "

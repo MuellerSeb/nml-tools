@@ -937,8 +937,8 @@ def test_generate_fortran_set_dims_validates_before_assignment(tmp_path: Path) -
     )
 
     generated = output.read_text()
-    assert "if (candidate__max_layers < 4) then" in generated
-    assert "shape constants for 'values' must allow at least 4 default values" in generated
+    assert "if (candidate__max_layers /= 4) then" in generated
+    assert "shape constants for 'values' must contain exactly 4 default values" in generated
     assert "namelist not configured; call set or from_file" in generated
 
     is_set_idx = generated.index("integer function nml_test_nml_is_set")
@@ -979,6 +979,128 @@ def test_generate_fortran_runtime_sized_array_with_default_uses_partial_set(tmp_
     assert "if (size(values, 1) > size(this%values, 1)) then" in generated
     assert "this%values(lb__1:ub__1) = values" in generated
     assert "dimension 1 mismatch for 'values'" not in generated
+
+
+def test_generate_fortran_required_defaults_make_setter_arguments_optional() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "required": ["count", "mode", "flag"],
+        "properties": {
+            "count": {"type": "integer", "default": 4},
+            "mode": {"type": "string", "x-fortran-len": 8},
+            "flag": {"type": "boolean", "default": False},
+        },
+    }
+
+    generated = codegen.render_fortran(schema, file_name="nml_run.f90")
+
+    assert (
+        "integer function nml_run_set(this, &\n    count, &\n    mode, &\n    flag, &"
+        in generated
+    )
+    assert "character(len=*), intent(in) :: mode" in generated
+    assert "integer, intent(in), optional :: count" in generated
+    assert "logical, intent(in), optional :: flag" in generated
+    assert 'istat = this%is_set("mode", errmsg=errmsg)' in generated
+    assert 'istat = this%is_set("count", errmsg=errmsg)' not in generated
+    assert 'istat = this%is_set("flag", errmsg=errmsg)' not in generated
+
+
+def test_generate_fortran_runtime_repeat_and_item_defaults_use_extent_policy() -> None:
+    codegen = _import_codegen_module()
+    repeated = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": "n_values",
+                "default": [1, 2],
+                "x-fortran-default-repeat": True,
+                "items": {"type": "integer"},
+            }
+        },
+    }
+    item_default = {
+        **repeated,
+        "properties": {
+            "values": {
+                "type": "array",
+                "x-fortran-shape": "n_values",
+                "items": {"type": "integer", "default": 1},
+            }
+        },
+    }
+
+    repeated_source = codegen.render_fortran(
+        repeated,
+        file_name="nml_run.f90",
+        dimensions={"n_values": 4},
+    )
+    item_source = codegen.render_fortran(
+        item_default,
+        file_name="nml_run.f90",
+        dimensions={"n_values": 4},
+    )
+
+    assert "if (candidate__n_values < 2) then" in repeated_source
+    assert "must allow at least 2 default values" in repeated_source
+    assert "shape constants for 'values'" not in item_source
+
+
+def test_generate_fortran_applies_derived_object_and_item_defaults() -> None:
+    from nml_tools.schema import resolve_schema
+
+    codegen = _import_codegen_module()
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "setting": {
+                    "type": "object",
+                    "x-fortran-type": "setting_t",
+                    "required": ["value"],
+                    "properties": {
+                        "flag": {"type": "boolean"},
+                        "mode": {"type": "integer", "default": 1},
+                        "value": {"type": "integer"},
+                        "note": {"type": "integer"},
+                    },
+                }
+            },
+            "required": ["setting", "settings"],
+            "properties": {
+                "setting": {
+                    "$ref": "#/$defs/setting",
+                    "default": {"flag": False, "mode": 3, "value": 2},
+                },
+                "settings": {
+                    "type": "array",
+                    "x-fortran-shape": 2,
+                    "items": {
+                        "$ref": "#/$defs/setting",
+                        "default": {"flag": True, "value": 4},
+                    },
+                },
+            },
+        }
+    )
+
+    generated = codegen.render_fortran(schema, file_name="nml_run.f90")
+
+    assert "setting%mode = 1" in generated
+    assert "setting%mode = 3" in generated
+    assert "setting%value = 2" in generated
+    assert "settings%flag = .true." in generated
+    assert "settings%value = 4" in generated
+    assert "type(setting_t), intent(in), optional :: setting" in generated
+    assert "type(setting_t), dimension(:), intent(in), optional :: settings" in generated
+    assert 'istat = this%is_set("setting", errmsg=errmsg)' not in generated
+    assert 'istat = this%is_set("settings", errmsg=errmsg)' not in generated
+    assert 'case ("setting%note")' in generated
 
 
 def test_generate_fortran_fixed_array_setters_use_assumed_shape(
@@ -1301,6 +1423,10 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
 
     assert "use application_types, only: location_t" in generated
     assert "type(location_t) :: location" in generated
+    assert "type(location_t), intent(in), optional :: location" in generated
+    assert "type(location_t), dimension(:), intent(in), optional :: locations" in generated
+    assert 'istat = this%is_set("location", errmsg=errmsg)' not in generated
+    assert 'istat = this%is_set("locations", errmsg=errmsg)' not in generated
     assert "if (len(location%name) /= 8) then" in generated
     assert "if (len(locations%name) /= 8) then" in generated
     assert "imported string storage length mismatch: location%name" in generated
