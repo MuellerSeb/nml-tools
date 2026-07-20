@@ -748,6 +748,11 @@ of the first two mapping levels. JSON numbers remain numeric, booleans become
 `.true.` or `.false.`, and strings are quoted for Fortran. Omit fields that are
 unset; JSON `null` is rejected.
 
+A field object represents a one-level derived value and is written with
+`field%component` assignments. Rectangular arrays may likewise end in objects,
+which are written as `field(i,...)%component`. Derived components must be
+intrinsic scalar values; nested objects, arrays, and `null` are rejected.
+
 Every array element is emitted separately with its full, one-based position.
 For example, `"grid": [[11, 12], [21, 22]]` produces:
 

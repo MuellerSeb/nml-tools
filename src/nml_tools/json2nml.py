@@ -33,8 +33,10 @@ def json_to_namelist(data: Mapping[str, Any]) -> str:
             _validate_name(field_name, seen_fields, f"field in namelist '{namelist_name}'")
             path = f"{namelist_name}.{field_name}"
             if isinstance(value, list):
-                _array_shape(value, path)
+                _array_layout(value, path)
                 lines.extend(_array_assignments(field_name, value, path, ()))
+            elif isinstance(value, Mapping):
+                lines.extend(_derived_assignments(field_name, value, path))
             else:
                 lines.append(f"  {field_name} = {_format_scalar(value, path)}")
         lines.append("/")
@@ -73,18 +75,27 @@ def _validate_name(name: object, seen: dict[str, str], label: str) -> None:
     seen[key] = name
 
 
-def _array_shape(values: list[Any], path: str) -> tuple[int, ...]:
+def _array_layout(values: list[Any], path: str) -> tuple[tuple[int, ...], str]:
     if not values:
         raise ValueError(f"array '{path}' must not be empty; omit unset fields")
 
     child_shape: tuple[int, ...] | None = None
+    leaf_kind: str | None = None
     for index, value in enumerate(values, start=1):
-        shape = _array_shape(value, f"{path}[{index}]") if isinstance(value, list) else ()
+        if isinstance(value, list):
+            shape, kind = _array_layout(value, f"{path}[{index}]")
+        else:
+            shape = ()
+            kind = "object" if isinstance(value, Mapping) else "scalar"
         if child_shape is None:
             child_shape = shape
         elif shape != child_shape:
             raise ValueError(f"array '{path}' must be rectangular with a consistent rank")
-    return (len(values), *(child_shape or ()))
+        if leaf_kind is None:
+            leaf_kind = kind
+        elif kind != leaf_kind:
+            raise ValueError(f"array '{path}' must not mix scalar and object elements")
+    return (len(values), *(child_shape or ())), leaf_kind or "scalar"
 
 
 def _array_assignments(
@@ -100,7 +111,25 @@ def _array_assignments(
             yield from _array_assignments(field_name, value, item_path, item_indices)
             continue
         subscript = ",".join(str(item) for item in item_indices)
-        yield f"  {field_name}({subscript}) = {_format_scalar(value, item_path)}"
+        designator = f"{field_name}({subscript})"
+        if isinstance(value, Mapping):
+            yield from _derived_assignments(designator, value, item_path)
+        else:
+            yield f"  {designator} = {_format_scalar(value, item_path)}"
+
+
+def _derived_assignments(
+    designator: str,
+    components: Mapping[str, Any],
+    path: str,
+) -> Iterable[str]:
+    seen_components: dict[str, str] = {}
+    for component_name, value in components.items():
+        _validate_name(component_name, seen_components, f"component in field '{path}'")
+        component_path = f"{path}.{component_name}"
+        if value is None or isinstance(value, (list, Mapping)):
+            raise ValueError(f"component '{component_path}' must be an intrinsic scalar")
+        yield f"  {designator}%{component_name} = {_format_scalar(value, component_path)}"
 
 
 def _format_scalar(value: Any, path: str) -> str:

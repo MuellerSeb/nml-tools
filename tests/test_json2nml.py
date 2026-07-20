@@ -81,13 +81,57 @@ def test_json_to_namelist_indexes_every_array_element() -> None:
     )
 
 
+def test_json_to_namelist_renders_derived_fields_and_omitted_components() -> None:
+    rendered = json_to_namelist(
+        {
+            "run": {
+                "setting": {
+                    "enabled": True,
+                    "count": 2,
+                    "label": 'a "quoted" value',
+                },
+                "empty": {},
+            }
+        }
+    )
+
+    assert rendered == (
+        "&run\n"
+        "  setting%enabled = .true.\n"
+        "  setting%count = 2\n"
+        '  setting%label = "a ""quoted"" value"\n'
+        "/\n"
+    )
+
+
+def test_json_to_namelist_renders_rectangular_derived_arrays() -> None:
+    rendered = json_to_namelist(
+        {
+            "run": {
+                "settings": [
+                    [{"enabled": True}, {}],
+                    [{"count": 3}, {"enabled": False, "count": 4}],
+                ]
+            }
+        }
+    )
+
+    assert rendered == (
+        "&run\n"
+        "  settings(1,1)%enabled = .true.\n"
+        "  settings(2,1)%count = 3\n"
+        "  settings(2,2)%enabled = .false.\n"
+        "  settings(2,2)%count = 4\n"
+        "/\n"
+    )
+
+
 @pytest.mark.parametrize(
     "data",
     [
         [],
         {"run": 1},
         {"run": {"value": None}},
-        {"run": {"value": {"nested": 1}}},
         {"run": {"value": []}},
         {"run": {"value": [[1], [2, 3]]}},
         {"run": {"value": [1, [2]]}},
@@ -96,6 +140,50 @@ def test_json_to_namelist_indexes_every_array_element() -> None:
 def test_json_to_namelist_rejects_unsupported_structures(data: Any) -> None:
     with pytest.raises(ValueError):
         json_to_namelist(data)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"nested": {"value": 1}},
+        {"items": [1]},
+        {"missing": None},
+    ],
+)
+def test_json_to_namelist_rejects_non_scalar_derived_components(
+    value: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError, match="intrinsic scalar"):
+        json_to_namelist({"run": {"setting": value}})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [{"count": 1}, 2],
+        [1, {"count": 2}],
+        [[{"count": 1}], [2]],
+    ],
+)
+def test_json_to_namelist_rejects_mixed_scalar_and_object_array_leaves(
+    value: list[Any],
+) -> None:
+    with pytest.raises(ValueError, match="must not mix scalar and object elements"):
+        json_to_namelist({"run": {"settings": value}})
+
+
+@pytest.mark.parametrize(
+    "components",
+    [
+        {"bad-name": 1},
+        {"count": 1, "COUNT": 2},
+    ],
+)
+def test_json_to_namelist_rejects_invalid_or_duplicate_component_names(
+    components: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError):
+        json_to_namelist({"run": {"setting": components}})
 
 
 @pytest.mark.parametrize(
