@@ -228,8 +228,8 @@ class Run:
     def set(
         self,
         period: Any,
-        periods: Any,
         station: Any,
+        periods: Any = None,
     ) -> None:
         """Set run values.
 
@@ -237,10 +237,10 @@ class Run:
         ----------
         period : mapping
             Main simulation period.
-        periods : sequence of mappings
-            Comparison periods.
         station : mapping
             Selected station.
+        periods : sequence of mappings, optional
+            Comparison periods.
 
         Raises
         ------
@@ -251,8 +251,6 @@ class Run:
         """
         if period is None:
             raise ValueError("required argument 'period' must not be None")
-        if periods is None:
-            raise ValueError("required argument 'periods' must not be None")
         if station is None:
             raise ValueError("required argument 'station' must not be None")
         kwargs: dict[str, Any] = {}
@@ -277,6 +275,22 @@ class Run:
             kwargs["has__period__end_year"] = False
             kwargs["period__label"] = ""
             kwargs["has__period__label"] = False
+        if station is not None:
+            if not isinstance(station, Mapping):
+                raise ValueError("derived argument 'station' must be a mapping")
+            _validate_derived_members(station, "derived argument 'station'", {
+                "code",
+                "label",
+            })
+            kwargs["station__code"] = station.get("code", 0)
+            kwargs["has__station__code"] = "code" in station
+            kwargs["station__label"] = station.get("label", "")
+            kwargs["has__station__label"] = "label" in station
+        else:
+            kwargs["station__code"] = 0
+            kwargs["has__station__code"] = False
+            kwargs["station__label"] = ""
+            kwargs["has__station__label"] = False
         if periods is not None:
             periods_array = _derived_array(
                 periods,
@@ -355,22 +369,7 @@ class Run:
                 dtype="str",
             )
             kwargs["has__periods__label"] = _dummy_array(1, dtype="bool")
-        if station is not None:
-            if not isinstance(station, Mapping):
-                raise ValueError("derived argument 'station' must be a mapping")
-            _validate_derived_members(station, "derived argument 'station'", {
-                "code",
-                "label",
-            })
-            kwargs["station__code"] = station.get("code", 0)
-            kwargs["has__station__code"] = "code" in station
-            kwargs["station__label"] = station.get("label", "")
-            kwargs["has__station__label"] = "label" in station
-        else:
-            kwargs["station__code"] = 0
-            kwargs["has__station__code"] = False
-            kwargs["station__label"] = ""
-            kwargs["has__station__label"] = False
+        kwargs["has__periods"] = periods is not None
         result = self._f2py.run_set_wrapper(
             self.handle,
             **kwargs,

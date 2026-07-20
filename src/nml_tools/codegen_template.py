@@ -23,7 +23,11 @@ from .codegen_fortran import (
     _reject_runtime_dimension_lengths,
 )
 from .schema import _is_simple_derived_schema
-from .validate import validate_schema_defaults
+from .validate import (
+    analyze_property_requirement,
+    derived_object_default,
+    validate_schema_defaults,
+)
 
 _MISSING = object()
 
@@ -180,6 +184,12 @@ def _render_template(
         properties = schema.get("properties")
         if not isinstance(properties, dict) or not properties:
             raise ValueError("schema must define object 'properties'")
+        required_raw = schema.get("required", [])
+        if not isinstance(required_raw, list):
+            raise ValueError("schema 'required' must be a list")
+        required_names = {
+            value.lower() for value in required_raw if isinstance(value, str)
+        }
         override_values = (
             values_map.get(namelist_name, {}) if value_mode in {"filled", "minimal-filled"} else {}
         )
@@ -202,10 +212,12 @@ def _render_template(
                 _collect_dimension_constants(type_info.dimensions, shape_constants)
                 _validate_kind_allowlist(type_info, kind_map, kind_allowlist)
 
-                if type_info.category == "array":
-                    has_default = _array_default_value(prop) is not None
-                else:
-                    has_default = "default" in prop
+                requirement = analyze_property_requirement(
+                    name,
+                    prop,
+                    declared_required=name.lower() in required_names,
+                )
+                has_default = requirement.fully_default_initialized
                 has_override = name in override_values
                 if value_mode in {"minimal-empty", "minimal-filled"} and has_default:
                     if value_mode == "minimal-filled" and has_override:
@@ -278,6 +290,7 @@ def _value_entries(
     simple_derived_mode: str,
     override: Any,
     constants: dict[str, int] | None,
+    fallback_default: Any = _MISSING,
 ) -> list[tuple[str, str | None]]:
     derived = _derived_schema(prop)
     if derived is not None:
@@ -313,6 +326,9 @@ def _value_entries(
     example_value = _get_first_example(prop, type_info)
     if example_value is not None:
         return _entries_from_value(name, example_value, type_info, prop, constants)
+
+    if fallback_default is not _MISSING:
+        return _entries_from_value(name, fallback_default, type_info, prop, constants)
 
     if type_info.category == "array":
         array_default = _array_default_value(prop)
@@ -368,6 +384,7 @@ def _derived_value_entries(
     if not isinstance(properties, dict) or not properties:
         raise ValueError(f"derived property '{name}' must define properties")
     is_array = type_info.category == "array"
+    object_default = derived_object_default(name, prop)
     entries: list[tuple[str, str | None]] = []
     if is_array and override is not _MISSING:
         if not isinstance(override, list):
@@ -387,6 +404,7 @@ def _derived_value_entries(
                     properties,
                     value_mode=value_mode,
                     overrides=value_map,
+                    object_default=object_default,
                     constants=constants,
                 )
             )
@@ -404,6 +422,7 @@ def _derived_value_entries(
         properties,
         value_mode=value_mode,
         overrides=override_map,
+        object_default=object_default,
         constants=constants,
     )
 
@@ -425,6 +444,7 @@ def _derived_component_entries(
     *,
     value_mode: str,
     overrides: dict[str, Any],
+    object_default: dict[str, Any],
     constants: dict[str, int] | None,
 ) -> list[tuple[str, str | None]]:
     for key in overrides:
@@ -444,6 +464,7 @@ def _derived_component_entries(
                 simple_derived_mode="components",
                 override=overrides.get(child_name, _MISSING),
                 constants=constants,
+                fallback_default=object_default.get(child_name.lower(), _MISSING),
             )
         )
     return entries
@@ -463,6 +484,7 @@ def _derived_buffer_entries(
         raise ValueError(f"derived property '{name}' must define properties")
 
     is_array = type_info.category == "array"
+    object_default = derived_object_default(name, derived)
     coordinates: list[list[int]] = [[]]
     if is_array:
         dimensions = _parse_default_dimensions(type_info.dimensions, constants)
@@ -505,7 +527,14 @@ def _derived_buffer_entries(
         entries.append(
             (
                 prefix,
-                _derived_buffer_value(prefix, properties, overrides, value_mode, constants),
+                _derived_buffer_value(
+                    prefix,
+                    properties,
+                    overrides,
+                    value_mode,
+                    constants,
+                    object_default,
+                ),
             )
         )
     return entries
@@ -523,11 +552,13 @@ def _derived_buffer_value(
     overrides: dict[str, Any],
     value_mode: str,
     constants: dict[str, int] | None,
+    object_default: dict[str, Any] | None = None,
 ) -> str | None:
     for key in overrides:
         if key not in properties:
             raise ValueError(f"derived template value '{prefix}%{key}' is unknown")
     slots: list[str | None] = []
+    selected_default = object_default or {}
     for child_name, child in properties.items():
         if not isinstance(child_name, str) or not isinstance(child, dict):
             raise ValueError(f"derived property '{prefix}' components must be schema objects")
@@ -539,6 +570,7 @@ def _derived_buffer_value(
             simple_derived_mode="components",
             override=overrides.get(child_name, _MISSING),
             constants=constants,
+            fallback_default=selected_default.get(child_name.lower(), _MISSING),
         )
         if len(child_entries) != 1:
             raise ValueError(f"derived property '{prefix}%{child_name}' must be scalar")

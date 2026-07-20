@@ -989,15 +989,6 @@ def test_schema_rejects_invalid_fortran_namelist_names(
         ),
         (
             {
-                "type": "object",
-                "x-fortran-type": "period_t",
-                "default": {},
-                "properties": {"year": {"type": "integer"}},
-            },
-            "derived-type object must not define a default",
-        ),
-        (
-            {
                 "type": "array",
                 "x-fortran-shape": 2,
                 "default": [],
@@ -1020,6 +1011,61 @@ def test_inline_derived_types_reject_unsupported_v1_layouts(
                 "x-fortran-namelist": "run",
                 "type": "object",
                 "properties": {"value": property_schema},
+            }
+        )
+
+
+def test_derived_object_defaults_resolve_and_use_site_replaces_definition_mapping() -> None:
+    resolved = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "period": {
+                    "type": "object",
+                    "x-fortran-type": "period_t",
+                    "default": {"year": 1900, "label": "base"},
+                    "properties": {
+                        "year": {"type": "integer"},
+                        "label": {"type": "string", "x-fortran-len": 8},
+                    },
+                }
+            },
+            "properties": {
+                "period": {
+                    "$ref": "#/$defs/period",
+                    "default": {"year": 2001},
+                },
+                "inherited": {"$ref": "#/$defs/period"},
+            },
+        }
+    )
+
+    assert resolved["properties"]["period"]["default"] == {"year": 2001}
+    assert resolved["properties"]["inherited"]["default"] == {
+        "year": 1900,
+        "label": "base",
+    }
+
+
+@pytest.mark.parametrize(
+    "default",
+    [1, {"missing": 1}, {"year": 1, "YEAR": 2}],
+)
+def test_derived_object_defaults_reject_invalid_mappings(default: object) -> None:
+    with pytest.raises(ValueError, match="derived-type object default"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "object",
+                        "x-fortran-type": "period_t",
+                        "default": default,
+                        "properties": {"year": {"type": "integer"}},
+                    }
+                },
             }
         )
 

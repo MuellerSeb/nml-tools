@@ -410,15 +410,22 @@ def test_null_only_required_value_does_not_establish_presence() -> None:
         _evaluate(schema, "settings = 2*")
 
 
-def test_defaults_are_tracked_but_do_not_satisfy_required_input() -> None:
+def test_defaults_satisfy_required_input_and_remain_sparse() -> None:
     schema = {
         "x-fortran-namelist": "run",
         "type": "object",
         "required": ["count"],
         "properties": {"count": {"type": "integer", "default": 4}},
     }
-    with pytest.raises(ValueError, match="missing required 'count'"):
-        _evaluate(schema, "count = ")
+    empty = _evaluate(schema, "")
+    assert empty.states == {}
+
+    result = _evaluate(schema, "count = 7\ncount = ,")
+    state = result.states[("count", (), None)]
+    assert state.value == 7
+    assert state.initialized_by_default is True
+    assert state.explicitly_assigned is True
+    assert state.null_consumed is True
 
     optional = {**schema, "required": []}
     result = _evaluate(optional, "count = ,")
@@ -437,6 +444,74 @@ def test_defaults_are_tracked_but_do_not_satisfy_required_input() -> None:
     }
     string_state = _evaluate(string_schema, "label = ,").states[("label", (), None)]
     assert string_state.value == "a   "
+
+
+def test_derived_object_defaults_overlay_leaf_defaults_and_satisfy_required() -> None:
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "settings": {
+                "type": "object",
+                "x-fortran-type": "setting_t",
+                "default": {"mode": 3, "value": 2},
+                "properties": {
+                    "flag": {"type": "boolean", "default": False},
+                    "mode": {"type": "integer", "default": 1},
+                    "value": {"type": "integer", "minimum": 1},
+                },
+                "required": ["value"],
+            }
+        },
+    }
+
+    assert _evaluate(schema, "").states == {}
+    result = _evaluate(
+        schema,
+        "settings%mode = ,\nsettings%value = ,\nsettings%mode = 5\nsettings%mode = ,",
+    )
+    assert result.states[("settings", (), "mode")].value == 5
+    assert result.states[("settings", (), "value")].value == 2
+
+
+def test_derived_array_item_default_is_broadcast_and_missing_elements_are_checked() -> None:
+    schema = _setting_schema(shape=2)
+    settings = schema["properties"]["settings"]
+    settings["items"]["default"] = {"value": 4}
+    schema["required"] = []
+
+    result = _evaluate(schema, "settings(2)%value = ,")
+    assert result.states[("settings", (2,), "value")].value == 4
+
+    del settings["items"]["default"]
+    schema["required"] = ["settings"]
+    with pytest.raises(ValueError, match=r"settings\(1\).*settings\(1\)%value"):
+        _evaluate(schema, "settings(2)%value = 2")
+
+
+def test_required_derived_without_required_components_is_vacuously_complete() -> None:
+    schema = _setting_schema()
+    schema["properties"]["settings"]["required"] = []
+
+    validate_schema_defaults(schema)
+    assert _evaluate(schema, "").states == {}
+
+
+def test_required_derived_component_leaf_default_satisfies_required() -> None:
+    schema = _setting_schema()
+    schema["properties"]["settings"]["properties"]["value"]["default"] = 2
+    schema["required"] = []
+
+    validate_schema_defaults(schema)
+    assert _evaluate(schema, "").states == {}
+
+
+def test_derived_object_defaults_are_validated_against_component_constraints() -> None:
+    schema = _setting_schema()
+    schema["properties"]["settings"]["default"] = {"value": 0}
+
+    with pytest.raises(ValueError, match=r"settings\.value.*>= 1"):
+        validate_schema_defaults(schema)
 
 
 def test_character_substrings_and_component_arrays_are_capability_errors() -> None:

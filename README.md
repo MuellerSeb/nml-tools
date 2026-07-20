@@ -28,6 +28,24 @@ Generate Fortran namelist modules, Markdown docs, and template namelists from a 
     - Objects with `real` and `imag` properties.
     - Strings with a project-defined `format` convention.
 
+## Required values and operational defaults
+
+`nml-tools` treats schema defaults as operational initialization values, not
+only as annotations. A property may therefore appear in `required` and also
+define a default. If the default completely initializes the property, the
+namelist and generated setters do not require an argument for it. A declared
+required property without complete default coverage still requires input.
+
+This intentionally differs from standard JSON Schema validation, where
+`default` is annotation-only and does not satisfy `required`. Explicit
+namelist or setter values override defaults. Validation accounts for absent
+defaults without inserting values into the parsed namelist representation.
+
+For intrinsic arrays, a property-level list without repeat or pad must exactly
+match the configured total extent. Repeat and pad defaults may target larger
+runtime extents, and a scalar `items.default` broadcasts to every positive
+extent.
+
 ## Fortran extensions (x-fortran-*)
 
 These keywords extend JSON Schema with Fortran-specific requirements.
@@ -173,11 +191,48 @@ Fortran layout. In the example above, `period%label` defaults to `main`, while
 `periods%label` keeps the reusable definition default `default`.
 
 Only intrinsic scalar members are supported in the first implementation.
-Object defaults, derived array defaults, derived flexible-tail arrays, nested
-derived members, and array members are rejected. Optional derived fields must
-not declare required inner members. For imported fields with string members,
-including arrays of imported values, generated code verifies that application
-storage length exactly matches `x-fortran-len`.
+Nested derived members, array members, derived flexible-tail arrays, and
+array-level lists of derived defaults are rejected. Scalar derived objects may
+define a mapping-valued `default`; derived array `items.default` may define the
+same mapping as a broadcast fallback for every element:
+
+```yaml
+properties:
+  period:
+    $ref: "#/$defs/period"
+    default:
+      start_year: 2000
+  periods:
+    type: array
+    x-fortran-shape: n_periods
+    items:
+      $ref: "#/$defs/period"
+      default:
+        start_year: 1980
+        end_year: 1999
+```
+
+Initialization and override precedence is:
+
+```text
+component defaults and missing sentinels -> object/items default -> explicit input
+```
+
+An inner component listed in the derived object's `required` may have a leaf
+default or be covered by the selected object/item default. Only uncovered
+required components create an input requirement. A derived field with such an
+uncovered component must itself appear in the containing object's `required`;
+otherwise the schema is rejected. A declared-required derived field with no
+uncovered required components is legal and needs no input. Generated logical
+storage must have an effective component or object/item default because it has
+no missing sentinel.
+
+Aggregate `is_set("period")` and `is_valid()` consider only uncovered required
+components. Component queries such as `is_set("period%label")` still report
+that component's own effective presence. For fixed-shape derived arrays, every
+element must cover every uncovered required component. For imported fields
+with string members, including arrays of imported values, generated code
+verifies that application storage length exactly matches `x-fortran-len`.
 
 Generated native APIs accept typed values and add `init_type`, for example:
 
@@ -685,6 +740,12 @@ start_year = 2001
 Overrides remain name-based mappings in both derived modes. For higher-rank
 derived arrays, a flat array of tables supplies leading elements in Fortran
 element order (the first subscript varies fastest).
+
+For filled templates, each derived component is chosen in this order: explicit
+template override, component example, object/item default, component default,
+then enum or type fallback. Minimal modes omit a derived field only when every
+component is default-initialized; covering only its required components is not
+enough to omit optional non-defaulted components.
 
 ## CLI
 

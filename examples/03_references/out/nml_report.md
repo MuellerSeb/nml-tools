@@ -6,11 +6,11 @@ A second namelist sharing the external definition library.
 
 ## Fields
 
-| Name | Type | Required | Info |
-| --- | --- | --- | --- |
-| [label](#label) | string | no | Report label |
-| [level](#level) | integer | no | Reporting detail |
-| [acceptance_fraction](#acceptance_fraction) | real | no | Acceptance fraction |
+| Name | Type | Declared required | Input required | Info |
+| --- | --- | --- | --- | --- |
+| [label](#label) | string | no | no | Report label |
+| [level](#level) | integer | no | no | Reporting detail |
+| [acceptance_fraction](#acceptance_fraction) | real | no | no | Acceptance fraction |
 
 ## Field details
 
@@ -22,7 +22,8 @@ Use-site documentation and default override for a shared string.
 
 Summary:
 - Type: `character(len=label_len)`
-- Required: no
+- Declared required: no
+- Input required: no
 - Default: `"station-summary"`
 
 ### level
@@ -33,7 +34,8 @@ Inherits the default reporting level from the shared definition.
 
 Summary:
 - Type: `integer(i4)`
-- Required: no
+- Declared required: no
+- Input required: no
 - Default: `1`
 - Allowed values: `0`, `1`, `2`
 
@@ -45,7 +47,8 @@ Use-site lower bound and default for the report threshold.
 
 Summary:
 - Type: `real(dp)`
-- Required: no
+- Declared required: no
+- Input required: no
 - Default: `0.75`
 - Minimum: `>= 0.5`
 - Maximum: `<= 1.0`

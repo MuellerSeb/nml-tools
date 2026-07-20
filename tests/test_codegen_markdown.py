@@ -166,8 +166,9 @@ def test_generate_docs_shows_string_formats(tmp_path: Path) -> None:
 
     assert "- Format: `file-path`" in rendered
     assert "- Item format: `path`" in rendered
-    assert "`period%start_time`: `character(len=32)`; Format: `date-time`" in rendered
-    assert "- `start_time`: `character(len=32)`; Format: `date-time`" in rendered
+    assert "`period%start_time`: `character(len=32)`" in rendered
+    assert "input required no; Format: `date-time`" in rendered
+    assert "- `start_time`: `character(len=32)`" in rendered
 
 
 def test_generate_docs_adds_doxygen_id_and_toc(tmp_path: Path) -> None:
@@ -279,3 +280,56 @@ def test_generate_docs_documents_inline_single_use_derived_type(tmp_path: Path) 
     assert "- Buffer-compatible: yes" in rendered
     assert "- Component order: code" in rendered
     assert "**Declaration-order contract:**" in rendered
+
+
+def test_generate_docs_distinguishes_declared_and_input_required_with_default_sources(
+    tmp_path: Path,
+) -> None:
+    schema = resolve_schema(
+        {
+            "title": "Defaults",
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "$defs": {
+                "setting": {
+                    "type": "object",
+                    "x-fortran-type": "setting_t",
+                    "required": ["value"],
+                    "properties": {
+                        "mode": {"type": "integer", "default": 1},
+                        "value": {"type": "integer"},
+                    },
+                }
+            },
+            "required": ["count", "setting", "settings"],
+            "properties": {
+                "count": {"type": "integer", "default": 4},
+                "setting": {
+                    "$ref": "#/$defs/setting",
+                    "default": {"value": 2},
+                },
+                "settings": {
+                    "type": "array",
+                    "x-fortran-shape": 2,
+                    "items": {
+                        "$ref": "#/$defs/setting",
+                        "default": {"value": 4},
+                    },
+                },
+            },
+        }
+    )
+    output = tmp_path / "defaults.md"
+
+    _import_generate_docs()(schema, output)
+    rendered = output.read_text()
+
+    assert "| Name | Type | Declared required | Input required | Info |" in rendered
+    assert "| [count](#count) | integer | yes | no |" in rendered
+    assert "- Default: `{value: 2}`" in rendered
+    assert "- Default: `{value: 4}` (broadcast item default)" in rendered
+    assert "`setting%mode`: `integer`; declared required no; input required no; " in rendered
+    assert "default `1` (component default)" in rendered
+    assert "`setting%value`: `integer`; declared required yes; input required no; " in rendered
+    assert "default `2` (object default)" in rendered
+    assert "default `4` (item default)" in rendered

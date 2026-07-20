@@ -30,7 +30,12 @@ from .codegen_fortran import (
 )
 from .codegen_template import render_template
 from .schema import _is_simple_derived_schema, get_string_format
-from .validate import validate_schema_defaults
+from .validate import (
+    analyze_property_requirement,
+    derived_component_defaults,
+    derived_object_default,
+    validate_schema_defaults,
+)
 
 _DEFAULT_MISSING = object()
 
@@ -115,7 +120,7 @@ def render_docs(
     lines.append("## Fields")
     lines.append("")
 
-    header = ["Name", "Type", "Required", "Info"]
+    header = ["Name", "Type", "Declared required", "Input required", "Info"]
     lines.append(f"| {' | '.join(header)} |")
     lines.append(f"| {' | '.join('---' for _ in header)} |")
 
@@ -130,11 +135,17 @@ def render_docs(
             _collect_dimension_constants(type_info.dimensions, shape_constants)
             type_label = _format_table_type(type_info)
             info_label = _format_info(prop)
-            required_label = "yes" if name in required_set else "no"
+            declared_required = name.lower() in required_set
+            requirement = analyze_property_requirement(
+                name,
+                prop,
+                declared_required=declared_required,
+            )
             row = [
                 f"[{name}](#{_github_section_id(name)})",
                 type_label,
-                required_label,
+                "yes" if declared_required else "no",
+                "yes" if requirement.requires_input else "no",
                 info_label,
             ]
             lines.append(f"| {' | '.join(_escape_table_cell(cell) for cell in row)} |")
@@ -159,7 +170,12 @@ def render_docs(
                 raise ValueError(f"property '{name}' must be an object")
             _reject_runtime_dimension_lengths(prop, dimensions)
             type_info = _field_type_info(prop, constants)
-            required_label = "yes" if name in required_set else "no"
+            declared_required = name.lower() in required_set
+            requirement = analyze_property_requirement(
+                name,
+                prop,
+                declared_required=declared_required,
+            )
             default_label = _get_default_value(prop, type_info, shape_constants)
             enum_label = _get_enum_values(prop, type_info, shape_constants)
             example_values = _get_example_values(prop, type_info)
@@ -189,7 +205,8 @@ def render_docs(
                 lines.append(format_label)
             if type_info.category == "array" and flex_tail_dims > 0:
                 lines.append(f"- Flexible tail dims: {flex_tail_dims}")
-            lines.append(f"- Required: {required_label}")
+            lines.append(f"- Declared required: {'yes' if declared_required else 'no'}")
+            lines.append(f"- Input required: {'yes' if requirement.requires_input else 'no'}")
             if default_label is not None:
                 if isinstance(default_label, tuple):
                     base, note = default_label
@@ -209,7 +226,13 @@ def render_docs(
             lines.append("")
             derived = _derived_schema(prop)
             if derived is not None:
-                _append_derived_field_components(lines, name, derived, shape_constants)
+                _append_derived_field_components(
+                    lines,
+                    name,
+                    prop,
+                    derived,
+                    shape_constants,
+                )
     except ValueError as exc:
         if current_property is None:
             raise
@@ -248,7 +271,7 @@ def _validate_required(values: list[Any]) -> set[str]:
     for value in values:
         if not isinstance(value, str):
             raise ValueError("schema 'required' entries must be strings")
-        required.add(value)
+        required.add(value.lower())
     return required
 
 
@@ -285,24 +308,43 @@ def _format_specific_type(type_info: FieldTypeInfo) -> str:
 def _append_derived_field_components(
     lines: list[str],
     field_name: str,
+    prop: dict[str, Any],
     derived: dict[str, Any],
     constants: dict[str, int] | None,
 ) -> None:
     components = derived.get("properties")
     if not isinstance(components, dict):
         return
+    required = {
+        value.lower()
+        for value in derived.get("required", [])
+        if isinstance(value, str)
+    }
+    effective_defaults = derived_component_defaults(field_name, prop)
+    object_defaults = derived_object_default(field_name, prop)
+    object_source = "item default" if prop.get("type") == "array" else "object default"
     lines.append("Components:")
     for child_name, child in components.items():
         if not isinstance(child_name, str) or not isinstance(child, dict):
             continue
         type_info = _field_type_info(child, constants)
         path = f"{field_name}%{child_name}"
-        details = [f"`{_format_specific_type(type_info)}`"]
-        default = _get_default_value(child, type_info, constants)
-        if isinstance(default, tuple):
-            details.append(f"default `{default[0]}`")
-        elif default is not None:
-            details.append(f"default `{default}`")
+        child_key = child_name.lower()
+        declared_required = child_key in required
+        input_required = declared_required and child_key not in effective_defaults
+        details = [
+            f"`{_format_specific_type(type_info)}`",
+            f"declared required {'yes' if declared_required else 'no'}",
+            f"input required {'yes' if input_required else 'no'}",
+        ]
+        if child_key in effective_defaults:
+            default_text = _format_scalar_default(
+                effective_defaults[child_key],
+                None,
+                type_info.category,
+            )
+            source = object_source if child_key in object_defaults else "component default"
+            details.append(f"default `{default_text}` ({source})")
         format_label = _get_format_label(child, type_info)
         if format_label is not None:
             details.append(format_label[2:] if format_label.startswith("- ") else format_label)
@@ -356,6 +398,13 @@ def _append_derived_type_documentation(
     lines.append(f"- Ownership: {ownership}")
     components = derived.get("properties")
     if isinstance(components, dict):
+        required = {
+            value.lower()
+            for value in derived.get("required", [])
+            if isinstance(value, str)
+        }
+        effective_defaults = derived_component_defaults(type_name, derived)
+        object_defaults = derived_object_default(type_name, derived)
         lines.append(
             "- Buffer-compatible: " + ("yes" if _is_simple_derived_schema(derived) else "no")
         )
@@ -369,7 +418,24 @@ def _append_derived_type_documentation(
             if not isinstance(child_name, str) or not isinstance(child, dict):
                 continue
             info = _field_type_info(child, constants)
-            details = [f"`{_format_specific_type(info)}`"]
+            child_key = child_name.lower()
+            declared_required = child_key in required
+            input_required = declared_required and child_key not in effective_defaults
+            details = [
+                f"`{_format_specific_type(info)}`",
+                f"declared required {'yes' if declared_required else 'no'}",
+                f"input required {'yes' if input_required else 'no'}",
+            ]
+            if child_key in effective_defaults:
+                default_text = _format_scalar_default(
+                    effective_defaults[child_key],
+                    None,
+                    info.category,
+                )
+                source = (
+                    "object default" if child_key in object_defaults else "component default"
+                )
+                details.append(f"default `{default_text}` ({source})")
             format_label = _get_format_label(child, info)
             if format_label is not None:
                 details.append(format_label[2:] if format_label.startswith("- ") else format_label)
@@ -382,6 +448,15 @@ def _get_default_value(
     type_info: FieldTypeInfo,
     constants: dict[str, int] | None,
 ) -> str | tuple[str, str | None] | None:
+    derived = _derived_schema(prop)
+    if derived is not None:
+        object_default = derived_object_default("field", prop)
+        if not object_default:
+            return None
+        base = _format_derived_default_mapping(derived, object_default, constants)
+        if type_info.category == "array":
+            return base, "(broadcast item default)"
+        return base
     if type_info.category == "array":
         array_default = _array_default_value(prop)
         if array_default is None:
@@ -397,6 +472,27 @@ def _get_default_value(
     if "default" not in prop:
         return None
     return _format_default_plain(prop["default"], type_info, prop, constants)
+
+
+def _format_derived_default_mapping(
+    derived: dict[str, Any],
+    default: dict[str, Any],
+    constants: dict[str, int] | None,
+) -> str:
+    components = derived.get("properties")
+    if not isinstance(components, dict):
+        raise ValueError("derived object must define properties")
+    entries: list[str] = []
+    for child_name, child in components.items():
+        if not isinstance(child_name, str) or not isinstance(child, dict):
+            raise ValueError("derived object components must be schema objects")
+        key = child_name.lower()
+        if key not in default:
+            continue
+        info = _field_type_info(child, constants)
+        value = _format_scalar_default(default[key], None, info.category)
+        entries.append(f"{child_name}: {value}")
+    return "{" + ", ".join(entries) + "}"
 
 
 def _format_info(prop: dict[str, Any]) -> str:
