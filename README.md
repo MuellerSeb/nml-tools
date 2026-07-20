@@ -858,6 +858,25 @@ follow each profile's configured `namelists` order. Saving a profile updates
 All schema fields are editable and saved; fields listed in the containing
 schema object's `required` array are marked with `*` in the form.
 
+Other Python applications may provide the project directory and partial
+initial values directly. The mapping is ordered as file profile, namelist, and
+field; supplied values override matching values loaded from `nml.json`:
+
+```python
+from nml_tools.gui import launch_gui
+
+launch_gui(
+    "/path/to/project",
+    initial_values={
+        "main": {
+            "config_input": {
+                "pre_path": ["data/meteo/pre/pre.nc"],
+            }
+        }
+    },
+)
+```
+
 The saved document keeps runtime dimensions and profile values together:
 
 ```json

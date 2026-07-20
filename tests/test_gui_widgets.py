@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from nml_tools.gui.model import GuiProfile, GuiProject, NamelistPage
+from nml_tools.gui.model import GuiProfile, GuiProject, NamelistPage, profile_values
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -163,6 +163,53 @@ def test_configuration_dialog_uses_dynamic_profiles_and_prefers_nml_json(
     assert dialog.status_labels["first"].text() == "Not saved"
     dialog.dimension_boxes["n_items"].setValue(3)
     assert dialog.status_labels["first"].text() == "Saved"
+    dialog.close()
+
+
+def test_configuration_dialog_populates_editable_initial_values(
+    application: Any, tmp_path: Path
+) -> None:
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "count": {"type": "integer"},
+            "label": {"type": "string", "x-fortran-len": 16},
+        },
+    }
+    profile = GuiProfile(
+        "main",
+        "main",
+        "Main",
+        None,
+        "main.nml",
+        (NamelistPage("run", "run", schema),),
+    )
+    project = GuiProject(tmp_path, {}, {}, (profile,))
+    (tmp_path / "nml.json").write_text(
+        json.dumps(
+            {
+                "file_profiles": {
+                    "main": {"values": {"run": {"count": 1, "label": "saved"}}}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    dialog = ConfigurationDialog(
+        project,
+        initial_values={"main": {"run": {"count": 5}}},
+    )
+    values = profile_values(dialog.document, profile)
+    editor = ProfileDialog(project, profile, values, {})
+    count = editor.forms["run"].rows["count"].field
+
+    assert values == {"run": {"count": 5, "label": "saved"}}
+    assert count.isEnabled()
+    count.set_value(8)
+    assert editor.forms["run"].values()["count"] == 8
+    editor.close()
     dialog.close()
 
 

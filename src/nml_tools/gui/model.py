@@ -379,6 +379,63 @@ def profile_values(document: Mapping[str, Any], profile: GuiProfile) -> dict[str
     return copy.deepcopy(dict(values)) if isinstance(values, Mapping) else {}
 
 
+def merge_initial_values(
+    document: Mapping[str, Any],
+    initial_values: Mapping[str, Any],
+    project: GuiProject,
+) -> dict[str, Any]:
+    """Overlay profile/namelist/field values on a canonical GUI document."""
+    if not isinstance(initial_values, Mapping):
+        raise ValueError("initial values must be an object")
+    updated = copy.deepcopy(dict(document))
+    raw_profiles = updated.get("file_profiles", {})
+    if not isinstance(raw_profiles, Mapping):
+        raise ValueError("JSON 'file_profiles' must be an object")
+
+    profiles: dict[str, dict[str, Any]] = {}
+    for profile in project.profiles:
+        entry = raw_profiles.get(profile.key)
+        if isinstance(entry, Mapping):
+            values = entry.get("values", {})
+            if not isinstance(values, Mapping):
+                raise ValueError(f"file profile '{profile.name}' values must be an object")
+            profiles[profile.key] = {
+                "profile": profile.name,
+                "values": copy.deepcopy(dict(values)),
+            }
+
+    known = {profile.key: profile for profile in project.profiles}
+    sizes = {**project.constants, **document_dimensions(updated, project)}
+    seen: set[str] = set()
+    for raw_name, raw_values in initial_values.items():
+        if not isinstance(raw_name, str):
+            raise ValueError("initial value profile names must be strings")
+        key = raw_name.lower()
+        selected = known.get(key)
+        if selected is None:
+            raise ValueError(f"initial values contain unknown file profile '{raw_name}'")
+        if key in seen:
+            raise ValueError(
+                f"initial values repeat file profile '{raw_name}' case-insensitively"
+            )
+        seen.add(key)
+        overlay = _normalize_profile_values(raw_values, selected, sizes)
+        entry = profiles.setdefault(
+            key, {"profile": selected.name, "values": {}}
+        )
+        combined = entry["values"]
+        for namelist, fields in overlay.items():
+            combined.setdefault(namelist, {}).update(fields)
+        entry["values"] = _normalize_profile_values(combined, selected, sizes)
+
+    updated["file_profiles"] = {
+        profile.key: profiles[profile.key]
+        for profile in project.profiles
+        if profile.key in profiles
+    }
+    return updated
+
+
 def render_profile(
     project: GuiProject,
     profile: GuiProfile,

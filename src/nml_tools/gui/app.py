@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ from .model import (
     empty_document,
     load_document,
     load_project,
+    merge_initial_values,
     profile_is_saved,
     profile_values,
     render_profile,
@@ -142,7 +144,12 @@ class ProfileDialog(QDialog):
 class ConfigurationDialog(QDialog):
     """Project configuration chooser and dynamic file-profile launcher."""
 
-    def __init__(self, project: GuiProject, parent: QWidget | None = None):
+    def __init__(
+        self,
+        project: GuiProject,
+        parent: QWidget | None = None,
+        initial_values: Mapping[str, Any] | None = None,
+    ):
         super().__init__(parent)
         self.project = project
         self.document = empty_document(project)
@@ -207,6 +214,10 @@ class ConfigurationDialog(QDialog):
         self._populate_json_files()
         self.json_combo.currentIndexChanged.connect(self._load_selected_json)
         self._load_selected_json(self.json_combo.currentIndex())
+        if initial_values is not None:
+            self.document = merge_initial_values(self.document, initial_values, self.project)
+            self._set_dimensions(document_dimensions(self.document, self.project))
+            self._refresh_status()
 
     def _populate_json_files(self, selected: Path | None = None) -> None:
         self._loading = True
@@ -322,15 +333,18 @@ class ConfigurationDialog(QDialog):
         self._refresh_status()
 
 
-def launch_gui(project_dir: Path | str | None = None) -> int:
-    """Launch the GUI for a directory containing ``nml-config.toml``."""
+def launch_gui(
+    project_dir: Path | str | None = None,
+    initial_values: Mapping[str, Any] | None = None,
+) -> int:
+    """Launch the GUI for a project directory with optional initial values."""
     project = load_project(project_dir)
     application = QApplication.instance()
     owns_application = application is None
     if application is None:
         application = QApplication(sys.argv[:1])
         application.setApplicationName("nml-tools")
-    dialog = ConfigurationDialog(project)
+    dialog = ConfigurationDialog(project, initial_values=initial_values)
     if not owns_application:
         _exec(dialog)
         return 0

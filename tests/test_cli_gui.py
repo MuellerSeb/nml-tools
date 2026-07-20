@@ -11,6 +11,7 @@ import pytest
 from click.testing import CliRunner
 
 from nml_tools.cli import cli
+from nml_tools.gui import launch_gui
 
 
 def _fake_gui(monkeypatch: pytest.MonkeyPatch, launcher: Callable[[Path], int]) -> None:
@@ -38,6 +39,21 @@ def test_gui_lazily_launches_current_project(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result.exit_code == 0
     assert projects == [expected]
+
+
+def test_programmatic_gui_forwards_project_and_initial_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[tuple[Path, object]] = []
+    initial_values = {"main": {"run": {"input_path": "input.nc"}}}
+    module = ModuleType("nml_tools.gui.app")
+    module.launch_gui = (  # type: ignore[attr-defined]
+        lambda project, values=None: calls.append((project, values)) or 7
+    )
+    monkeypatch.setitem(sys.modules, "nml_tools.gui.app", module)
+
+    assert launch_gui(tmp_path, initial_values) == 7
+    assert calls == [(tmp_path, initial_values)]
 
 
 @pytest.mark.parametrize(

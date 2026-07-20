@@ -11,8 +11,10 @@ import pytest
 from nml_tools.gui.model import (
     discover_json_files,
     document_dimensions,
+    empty_document,
     load_document,
     load_project,
+    merge_initial_values,
     profile_is_saved,
     profile_values,
     save_profile,
@@ -114,6 +116,22 @@ def test_load_project_preserves_profile_and_page_order(tmp_path: Path) -> None:
     assert project.profiles[0].title == "Second profile"
     assert [page.name for page in project.profile("MAIN").pages] == ["beta", "alpha"]
     assert project.default_dimensions == {"n_items": 2}
+
+
+def test_load_project_uses_explicit_folder_outside_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    _write_project(project_dir)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    project = load_project(project_dir)
+
+    assert project.root == project_dir.resolve()
+    assert [page.name for page in project.profile("main").pages] == ["beta", "alpha"]
 
 
 def test_load_project_rejects_profiles_with_the_same_output(tmp_path: Path) -> None:
@@ -266,6 +284,52 @@ def test_load_document_validates_version_and_canonicalizes_profile_order(
     path.write_text(json.dumps({"format_version": 2}), encoding="utf-8")
     with pytest.raises(ValueError, match="unsupported JSON format_version"):
         load_document(path, project)
+
+
+def test_merge_initial_values_overlays_loaded_document(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = load_project(tmp_path)
+    document_path = tmp_path / "nml.json"
+    document_path.write_text(
+        json.dumps(
+            {
+                "file_profiles": {
+                    "main": {
+                        "values": {
+                            "alpha": {"count": 2, "label": "saved"},
+                            "beta": {"enabled": False},
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    document = load_document(document_path, project)
+
+    merged = merge_initial_values(
+        document,
+        {"MAIN": {"ALPHA": {"COUNT": 7}}},
+        project,
+    )
+
+    assert profile_values(merged, project.profile("main")) == {
+        "alpha": {"count": 7, "label": "saved"},
+        "beta": {"enabled": False},
+    }
+    assert profile_values(document, project.profile("main"))["alpha"]["count"] == 2
+
+
+def test_merge_initial_values_uses_existing_validation(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = load_project(tmp_path)
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        merge_initial_values(
+            empty_document(project),
+            {"main": {"alpha": {"count": "seven"}}},
+            project,
+        )
 
 
 def test_save_profile_round_trips_derived_values_and_omits_absent_fields(
