@@ -759,6 +759,7 @@ Primary subcommands:
 - `gen-fortran`: generate helper + Fortran modules only.
 - `gen-markdown`: generate Markdown docs only.
 - `gen-template`: generate template namelists only.
+- `gui`: edit configured file profiles with a schema-driven Qt interface.
 - `json2nml`: convert namelist-oriented JSON to a namelist file.
 - `validate`: validate a namelist file against schema definitions.
 
@@ -833,6 +834,65 @@ text = json_to_namelist(payload)
 ```
 
 Use `validate` afterward when the result must be checked against schemas.
+
+### GUI
+
+Install the optional GUI dependencies and one Qt binding, then run the command
+from a directory containing `nml-config.toml`:
+
+```bash
+pip install 'nml-tools[gui]' PySide6
+nml-tools gui
+```
+
+The GUI extra requires Python 3.9 or newer. QtPy keeps the application code
+independent of the selected PyQt5, PyQt6, PySide2, or PySide6 backend; the Qt
+binding is intentionally not installed by nml-tools. Current guidata releases
+officially support PyQt5, PyQt6, and PySide6; PySide2 compatibility depends on
+the guidata version installed alongside nml-tools.
+
+The first window lists JSON files in the project directory, preferring
+`nml.json`, and creates profile buttons in `file_profiles` order. Profile pages
+follow each profile's configured `namelists` order. Saving a profile updates
+`nml.json` and renders its TOML `default_file` with `json_to_namelist()`.
+All schema fields are editable and saved; fields listed in the containing
+schema object's `required` array are marked with `*` in the form.
+
+The saved document keeps runtime dimensions and profile values together:
+
+```json
+{
+  "format_version": 1,
+  "dimensions": {"n_domains": 2},
+  "file_profiles": {
+    "main": {
+      "profile": "main",
+      "values": {"config_main": {"enabled": true}}
+    }
+  }
+}
+```
+
+Array labels and table orientation may be described directly on an array
+property. Axis numbers are one-based and correspond to `x-fortran-shape`:
+
+```yaml
+x-fortran-shape: [5, n_domains]
+x-nml-tools-ui:
+  axes:
+    "1":
+      title: Parameter component
+      labels: [Lower bound, Upper bound, Value, Flag, Scaling]
+    "2":
+      title: Domain
+      label-template: "Domain {index}"
+  table:
+    row-axis: 2
+    column-axis: 1
+```
+
+Use explicit label lists in the same way for months or night hours. The table
+orientation affects only presentation; JSON retains schema/Fortran axis order.
 
 ### Validation
 
@@ -946,6 +1006,9 @@ Sphinx Fortran domain.
 ```bash
 pip install nml-tools
 ```
+
+For the optional GUI (Python 3.9+), install the extra and one Qt backend, for
+example `pip install 'nml-tools[gui]' PySide6`.
 
 ## Minimal example
 

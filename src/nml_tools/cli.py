@@ -1281,6 +1281,29 @@ def cli(verbose: int, quiet: int) -> None:
     _configure_logging(verbose, quiet)
 
 
+@cli.command("gui", context_settings=_CONTEXT_SETTINGS)
+def gui() -> None:
+    """Open the schema-driven namelist editor."""
+    project_dir = Path.cwd()
+    if not (project_dir / _DEFAULT_CONFIG).is_file():
+        raise click.ClickException("GUI requires nml-config.toml in the current directory")
+
+    try:
+        from .gui import launch_gui
+
+        exit_code = launch_gui(project_dir)
+    except ImportError as exc:
+        raise click.ClickException(
+            "GUI dependencies are unavailable; install 'nml-tools[gui]' "
+            f"and a Qt binding: {exc}"
+        ) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise click.ClickException(f"failed to start GUI: {exc}") from exc
+
+    if exit_code:
+        raise Exit(exit_code)
+
+
 @cli.command("json2nml", context_settings=_CONTEXT_SETTINGS)
 @click.option(
     "--input-file",

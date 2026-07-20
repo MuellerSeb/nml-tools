@@ -27,6 +27,7 @@ def test_cli_help_shows_subcommands() -> None:
         "gen-fortran",
         "gen-markdown",
         "gen-template",
+        "gui",
         "json2nml",
         "validate",
     ]:
