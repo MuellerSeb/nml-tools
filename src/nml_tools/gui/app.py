@@ -232,7 +232,11 @@ class ConfigurationDialog(QDialog):
             selected_text = str(selected.resolve())
             index = self.json_combo.findData(selected_text)
             if index < 0:
-                label = selected.name if selected.parent == self.project.root else str(selected)
+                label = (
+                    selected.name
+                    if selected.parent == self.project.output_root
+                    else str(selected)
+                )
                 self.json_combo.addItem(label, selected_text)
                 index = self.json_combo.count() - 1
             self.json_combo.setCurrentIndex(index)
@@ -270,7 +274,7 @@ class ConfigurationDialog(QDialog):
         filename, _ = QFileDialog.getOpenFileName(
             self,
             "Load namelist JSON",
-            str(self.project.root),
+            str(self.project.output_root),
             "JSON files (*.json)",
         )
         if not filename:
@@ -328,17 +332,18 @@ class ConfigurationDialog(QDialog):
         except (OSError, UnicodeError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Save configuration", str(exc))
             return
-        self.source_path = self.project.root / "nml.json"
+        self.source_path = self.project.output_root / "nml.json"
         self._populate_json_files(self.source_path)
         self._refresh_status()
 
 
 def launch_gui(
-    project_dir: Path | str | None = None,
+    schemas_dir: Path | str | None = None,
+    output_dir: Path | str | None = None,
     initial_values: Mapping[str, Any] | None = None,
 ) -> int:
-    """Launch the GUI for a project directory with optional initial values."""
-    project = load_project(project_dir)
+    """Launch the GUI for a schema directory with optional output and values."""
+    project = load_project(schemas_dir, output_dir)
     application = QApplication.instance()
     owns_application = application is None
     if application is None:

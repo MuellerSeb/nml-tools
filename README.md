@@ -838,12 +838,19 @@ Use `validate` afterward when the result must be checked against schemas.
 ### GUI
 
 Install the optional GUI dependencies and one Qt binding, then run the command
-from a directory containing `nml-config.toml`:
+from a directory containing `nml-config.toml`, or select the schema directory
+explicitly:
 
 ```bash
 pip install 'nml-tools[gui]' PySide6
 nml-tools gui
+nml-tools gui -i /path/to/schemas -o /path/to/output -f /path/to/values.json
 ```
+
+`-i`/`--input-path` selects the directory containing `nml-config.toml` and its
+schemas. `-o`/`--output-path` selects where `nml.json` and generated namelists
+are saved, and defaults to the input path. `-f`/`--fetch-values` loads initial
+values from a JSON object.
 
 The GUI extra requires Python 3.9 or newer. QtPy keeps the application code
 independent of the selected PyQt5, PyQt6, PySide2, or PySide6 backend; the Qt
@@ -851,22 +858,25 @@ binding is intentionally not installed by nml-tools. Current guidata releases
 officially support PyQt5, PyQt6, and PySide6; PySide2 compatibility depends on
 the guidata version installed alongside nml-tools.
 
-The first window lists JSON files in the project directory, preferring
+The first window lists JSON files in the output directory, preferring
 `nml.json`, and creates profile buttons in `file_profiles` order. Profile pages
 follow each profile's configured `namelists` order. Saving a profile updates
 `nml.json` and renders its TOML `default_file` with `json_to_namelist()`.
 All schema fields are editable and saved; fields listed in the containing
 schema object's `required` array are marked with `*` in the form.
 
-Other Python applications may provide the project directory and partial
-initial values directly. The mapping is ordered as file profile, namelist, and
-field; supplied values override matching values loaded from `nml.json`:
+Other Python applications may provide the schema directory, an optional output
+directory, and partial initial values directly. When `output_dir` is `None`,
+files are saved in `schemas_dir`. The mapping is ordered as file profile,
+namelist, and field; supplied values override matching values loaded from
+`nml.json`:
 
 ```python
 from nml_tools.gui import launch_gui
 
 launch_gui(
-    "/path/to/project",
+    schemas_dir="/path/to/schemas",
+    output_dir="/path/to/output",
     initial_values={
         "main": {
             "config_input": {

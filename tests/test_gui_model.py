@@ -112,6 +112,8 @@ def test_load_project_preserves_profile_and_page_order(tmp_path: Path) -> None:
 
     project = load_project(tmp_path)
 
+    assert project.root == tmp_path.resolve()
+    assert project.output_root == tmp_path.resolve()
     assert [profile.name for profile in project.profiles] == ["secondary", "main"]
     assert project.profiles[0].title == "Second profile"
     assert [page.name for page in project.profile("MAIN").pages] == ["beta", "alpha"]
@@ -121,16 +123,19 @@ def test_load_project_preserves_profile_and_page_order(tmp_path: Path) -> None:
 def test_load_project_uses_explicit_folder_outside_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    _write_project(project_dir)
+    schemas_dir = tmp_path / "schemas"
+    output_dir = tmp_path / "output"
+    schemas_dir.mkdir()
+    output_dir.mkdir()
+    _write_project(schemas_dir)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
 
-    project = load_project(project_dir)
+    project = load_project(schemas_dir, output_dir)
 
-    assert project.root == project_dir.resolve()
+    assert project.root == schemas_dir.resolve()
+    assert project.output_root == output_dir.resolve()
     assert [page.name for page in project.profile("main").pages] == ["beta", "alpha"]
 
 
@@ -141,13 +146,36 @@ def test_load_project_rejects_profiles_with_the_same_output(tmp_path: Path) -> N
         load_project(tmp_path)
 
 
+def test_load_project_rejects_output_outside_output_directory(tmp_path: Path) -> None:
+    schemas_dir = tmp_path / "schemas"
+    output_dir = tmp_path / "output"
+    schemas_dir.mkdir()
+    _write_project(schemas_dir)
+    config = schemas_dir / "nml-config.toml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace(
+            'default_file = "main.nml"',
+            'default_file = "../schemas/escaped.nml"',
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="outside the output directory"):
+        load_project(schemas_dir, output_dir)
+
+
 def test_discover_json_files_prefers_nml_json_then_sorts(tmp_path: Path) -> None:
-    _write_project(tmp_path)
-    project = load_project(tmp_path)
+    schemas_dir = tmp_path / "schemas"
+    output_dir = tmp_path / "output"
+    schemas_dir.mkdir()
+    output_dir.mkdir()
+    _write_project(schemas_dir)
+    project = load_project(schemas_dir, output_dir)
     for name in ("z.json", "nml.json", "Alpha.json"):
-        (tmp_path / name).write_text("{}", encoding="utf-8")
-    (tmp_path / "nested").mkdir()
-    (tmp_path / "nested" / "ignored.json").write_text("{}", encoding="utf-8")
+        (output_dir / name).write_text("{}", encoding="utf-8")
+    (schemas_dir / "schema-only.json").write_text("{}", encoding="utf-8")
+    (output_dir / "nested").mkdir()
+    (output_dir / "nested" / "ignored.json").write_text("{}", encoding="utf-8")
 
     assert [path.name for path in discover_json_files(project)] == [
         "nml.json",
@@ -335,8 +363,11 @@ def test_merge_initial_values_uses_existing_validation(tmp_path: Path) -> None:
 def test_save_profile_round_trips_derived_values_and_omits_absent_fields(
     tmp_path: Path,
 ) -> None:
-    _write_project(tmp_path)
-    project = load_project(tmp_path)
+    schemas_dir = tmp_path / "schemas"
+    output_dir = tmp_path / "output"
+    schemas_dir.mkdir()
+    _write_project(schemas_dir)
+    project = load_project(schemas_dir, output_dir)
     profile = project.profile("main")
     values = {
         "beta": {"enabled": True},
@@ -355,13 +386,15 @@ def test_save_profile_round_trips_derived_values_and_omits_absent_fields(
         {"n_items": 2},
     )
 
-    rendered = (tmp_path / "main.nml").read_text(encoding="utf-8")
+    rendered = (output_dir / "main.nml").read_text(encoding="utf-8")
     assert "options%enabled = .false." in rendered
     assert "settings(1)%enabled = .true." in rendered
     assert 'settings(2)%name = "second"' in rendered
     assert "label" not in rendered
-    saved_json = json.loads((tmp_path / "nml.json").read_text(encoding="utf-8"))
+    saved_json = json.loads((output_dir / "nml.json").read_text(encoding="utf-8"))
     assert saved_json == document
+    assert not (schemas_dir / "nml.json").exists()
+    assert not (schemas_dir / "main.nml").exists()
     assert "label" not in saved_json["file_profiles"]["main"]["values"]["alpha"]
     assert profile_is_saved(project, document, profile) is True
 
@@ -375,10 +408,12 @@ def test_save_profile_round_trips_derived_values_and_omits_absent_fields(
     )
     assert set(document["file_profiles"]) == {"main", "secondary"}
     assert list(document["file_profiles"]) == ["secondary", "main"]
-    assert (tmp_path / "main.nml").read_text(encoding="utf-8") == main_namelist
-    assert "enabled = .false." in (tmp_path / "secondary.nml").read_text(
+    assert (output_dir / "main.nml").read_text(encoding="utf-8") == main_namelist
+    assert "enabled = .false." in (output_dir / "secondary.nml").read_text(
         encoding="utf-8"
     )
 
-    (tmp_path / "main.nml").write_text(rendered + "! changed\n", encoding="utf-8")
+    (output_dir / "main.nml").write_text(
+        rendered + "! changed\n", encoding="utf-8"
+    )
     assert profile_is_saved(project, document, profile) is False

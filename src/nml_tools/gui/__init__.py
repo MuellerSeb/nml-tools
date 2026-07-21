@@ -14,10 +14,11 @@ __all__ = ["launch_gui"]
 
 
 def launch_gui(
-    project_dir: Path | str | None = None,
+    schemas_dir: Path | str | None = None,
+    output_dir: Path | str | None = None,
     initial_values: Mapping[str, Any] | None = None,
 ) -> int:
-    """Open the editor for *project_dir* with optional profile values."""
+    """Open the editor with separate schema and output directories."""
     from .app import launch_gui as _launch_gui
 
-    return _launch_gui(project_dir, initial_values)
+    return _launch_gui(schemas_dir, output_dir, initial_values)

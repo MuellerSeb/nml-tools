@@ -60,6 +60,12 @@ class GuiProject:
     constants: dict[str, int]
     default_dimensions: dict[str, int]
     profiles: tuple[GuiProfile, ...]
+    output_dir: Path | None = None
+
+    @property
+    def output_root(self) -> Path:
+        """Return the directory used for JSON and namelist output."""
+        return self.output_dir or self.root
 
     def profile(self, key: str) -> GuiProfile:
         for profile in self.profiles:
@@ -68,10 +74,14 @@ class GuiProject:
         raise KeyError(key)
 
 
-def load_project(project_dir: Path | str | None = None) -> GuiProject:
-    """Load ``nml-config.toml`` and its ordered schemas and file profiles."""
-    root = Path.cwd() if project_dir is None else Path(project_dir)
+def load_project(
+    schemas_dir: Path | str | None = None,
+    output_dir: Path | str | None = None,
+) -> GuiProject:
+    """Load schemas and profiles, using a separate output directory if given."""
+    root = Path.cwd() if schemas_dir is None else Path(schemas_dir)
     root = root.resolve()
+    output_root = root if output_dir is None else Path(output_dir).resolve()
     config_path = root / "nml-config.toml"
     if not config_path.is_file():
         raise RuntimeError(f"nml-config.toml was not found in {root}")
@@ -94,14 +104,14 @@ def load_project(project_dir: Path | str | None = None) -> GuiProject:
     profiles: list[GuiProfile] = []
     output_paths: dict[Path, str] = {}
     for configured in configured_profiles.values():
-        target = (root / configured.default_file).resolve()
+        target = (output_root / configured.default_file).resolve()
         try:
-            target.relative_to(root)
+            target.relative_to(output_root)
         except ValueError as exc:
             raise RuntimeError(
-                f"file profile '{configured.name}' writes outside the project directory"
+                f"file profile '{configured.name}' writes outside the output directory"
             ) from exc
-        if target == root / "nml.json":
+        if target == output_root / "nml.json":
             raise RuntimeError(
                 f"file profile '{configured.name}' must not use the reserved output nml.json"
             )
@@ -126,7 +136,7 @@ def load_project(project_dir: Path | str | None = None) -> GuiProject:
             )
         )
 
-    return GuiProject(root, constants, dimensions, tuple(profiles))
+    return GuiProject(root, constants, dimensions, tuple(profiles), output_root)
 
 
 def empty_document(project: GuiProject) -> dict[str, Any]:
@@ -139,9 +149,9 @@ def empty_document(project: GuiProject) -> dict[str, Any]:
 
 
 def discover_json_files(project: GuiProject) -> list[Path]:
-    """Return project-root JSON files, preferring the canonical ``nml.json``."""
-    paths = sorted(project.root.glob("*.json"), key=lambda path: path.name.casefold())
-    canonical = project.root / "nml.json"
+    """Return output-directory JSON files, preferring the canonical ``nml.json``."""
+    paths = sorted(project.output_root.glob("*.json"), key=lambda path: path.name.casefold())
+    canonical = project.output_root / "nml.json"
     if canonical in paths:
         paths.remove(canonical)
         paths.insert(0, canonical)
@@ -497,8 +507,8 @@ def save_profile(
     }
 
     json_text = json.dumps(updated, indent=2, ensure_ascii=False) + "\n"
-    _atomic_write(project.root / profile.default_file, rendered)
-    _atomic_write(project.root / "nml.json", json_text)
+    _atomic_write(project.output_root / profile.default_file, rendered)
+    _atomic_write(project.output_root / "nml.json", json_text)
     return updated
 
 
@@ -525,7 +535,7 @@ def profile_is_saved(
     raw_profiles = document.get("file_profiles", {})
     if not isinstance(raw_profiles, Mapping) or profile.key not in raw_profiles:
         return False
-    target = project.root / profile.default_file
+    target = project.output_root / profile.default_file
     if not target.is_file():
         return False
     try:

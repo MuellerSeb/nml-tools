@@ -1282,16 +1282,45 @@ def cli(verbose: int, quiet: int) -> None:
 
 
 @cli.command("gui", context_settings=_CONTEXT_SETTINGS)
-def gui() -> None:
+@click.option(
+    "--input-path",
+    "-i",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Directory containing nml-config.toml and schemas (default: current directory).",
+)
+@click.option(
+    "--output-path",
+    "-o",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Directory for nml.json and generated namelists (default: input path).",
+)
+@click.option(
+    "--fetch-values",
+    "-f",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="JSON object containing initial profile values.",
+)
+def gui(input_path: Path | None, output_path: Path | None, fetch_values: Path | None) -> None:
     """Open the schema-driven namelist editor."""
-    project_dir = Path.cwd()
-    if not (project_dir / _DEFAULT_CONFIG).is_file():
-        raise click.ClickException("GUI requires nml-config.toml in the current directory")
+    schemas_dir = Path.cwd() if input_path is None else input_path
+    output_dir = schemas_dir if output_path is None else output_path
+    if not (schemas_dir / _DEFAULT_CONFIG).is_file():
+        location = "the current directory" if input_path is None else f"'{schemas_dir}'"
+        raise click.ClickException(f"GUI requires nml-config.toml in {location}")
+
+    initial_values: dict[str, Any] | None = None
+    if fetch_values is not None:
+        try:
+            initial_values = json.loads(fetch_values.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise click.ClickException(f"failed to read initial values JSON: {exc}") from exc
+        if not isinstance(initial_values, dict):
+            raise click.ClickException("initial values must be a JSON object")
 
     try:
         from .gui import launch_gui
 
-        exit_code = launch_gui(project_dir)
+        exit_code = launch_gui(schemas_dir, output_dir, initial_values)
     except ImportError as exc:
         raise click.ClickException(
             "GUI dependencies are unavailable; install 'nml-tools[gui]' "
