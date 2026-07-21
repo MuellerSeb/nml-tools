@@ -213,6 +213,44 @@ def test_configuration_dialog_populates_editable_initial_values(
     dialog.close()
 
 
+def test_configuration_dialog_applies_dimensions_before_initial_values(
+    application: Any, tmp_path: Path
+) -> None:
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "paths": {
+                "type": "array",
+                "x-fortran-shape": "n_items",
+                "items": {"type": "string", "x-fortran-len": 32},
+            }
+        },
+    }
+    profile = GuiProfile(
+        "main",
+        "main",
+        "Main",
+        None,
+        "main.nml",
+        (NamelistPage("run", "run", schema),),
+    )
+    project = GuiProject(tmp_path, {}, {"n_items": 2}, (profile,))
+
+    dialog = ConfigurationDialog(
+        project,
+        initial_values={"main": {"run": {"paths": ["input.nc"]}}},
+        initial_dimensions={"n_items": 1},
+    )
+
+    assert dialog.dimension_boxes["n_items"].value() == 1
+    assert profile_values(dialog.document, profile) == {
+        "run": {"paths": ["input.nc"]}
+    }
+    assert not (tmp_path / "nml.json").exists()
+    dialog.close()
+
+
 def test_guidata_array_editor_accepts_custom_axis_labels(application: Any) -> None:
     module = pytest.importorskip("guidata.widgets.arrayeditor")
     editor = module.ArrayEditor()

@@ -17,8 +17,9 @@ def launch_gui(
     schemas_dir: Path | str | None = None,
     output_dir: Path | str | None = None,
     initial_values: Mapping[str, Any] | None = None,
+    initial_dimensions: Mapping[str, int] | None = None,
 ) -> int:
-    """Open the editor with separate schema and output directories."""
+    """Open the editor with separate directories, values, and dimensions."""
     from .app import launch_gui as _launch_gui
 
-    return _launch_gui(schemas_dir, output_dir, initial_values)
+    return _launch_gui(schemas_dir, output_dir, initial_values, initial_dimensions)

@@ -140,16 +140,17 @@ def test_gui_rejects_invalid_fetched_values(
     assert calls == []
 
 
-def test_programmatic_gui_forwards_paths_and_initial_values(
+def test_programmatic_gui_forwards_paths_values_and_dimensions(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    calls: list[tuple[Path, Path, object]] = []
+    calls: list[tuple[Path, Path, object, object]] = []
     output_dir = tmp_path / "output"
     initial_values = {"main": {"run": {"input_path": "input.nc"}}}
+    initial_dimensions = {"n_domains": 1}
     module = ModuleType("nml_tools.gui.app")
     module.launch_gui = (  # type: ignore[attr-defined]
-        lambda schemas, output=None, values=None: calls.append(
-            (schemas, output, values)
+        lambda schemas, output=None, values=None, dimensions=None: calls.append(
+            (schemas, output, values, dimensions)
         )
         or 7
     )
@@ -160,10 +161,11 @@ def test_programmatic_gui_forwards_paths_and_initial_values(
             schemas_dir=tmp_path,
             output_dir=output_dir,
             initial_values=initial_values,
+            initial_dimensions=initial_dimensions,
         )
         == 7
     )
-    assert calls == [(tmp_path, output_dir, initial_values)]
+    assert calls == [(tmp_path, output_dir, initial_values, initial_dimensions)]
 
 
 @pytest.mark.parametrize(

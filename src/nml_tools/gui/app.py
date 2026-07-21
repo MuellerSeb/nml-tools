@@ -34,6 +34,7 @@ from .model import (
     empty_document,
     load_document,
     load_project,
+    merge_initial_dimensions,
     merge_initial_values,
     profile_is_saved,
     profile_values,
@@ -149,6 +150,7 @@ class ConfigurationDialog(QDialog):
         project: GuiProject,
         parent: QWidget | None = None,
         initial_values: Mapping[str, Any] | None = None,
+        initial_dimensions: Mapping[str, int] | None = None,
     ):
         super().__init__(parent)
         self.project = project
@@ -214,8 +216,13 @@ class ConfigurationDialog(QDialog):
         self._populate_json_files()
         self.json_combo.currentIndexChanged.connect(self._load_selected_json)
         self._load_selected_json(self.json_combo.currentIndex())
+        if initial_dimensions is not None:
+            self.document = merge_initial_dimensions(
+                self.document, initial_dimensions, self.project
+            )
         if initial_values is not None:
             self.document = merge_initial_values(self.document, initial_values, self.project)
+        if initial_dimensions is not None or initial_values is not None:
             self._set_dimensions(document_dimensions(self.document, self.project))
             self._refresh_status()
 
@@ -341,15 +348,20 @@ def launch_gui(
     schemas_dir: Path | str | None = None,
     output_dir: Path | str | None = None,
     initial_values: Mapping[str, Any] | None = None,
+    initial_dimensions: Mapping[str, int] | None = None,
 ) -> int:
-    """Launch the GUI for a schema directory with optional output and values."""
+    """Launch the GUI with optional output, values, and runtime dimensions."""
     project = load_project(schemas_dir, output_dir)
     application = QApplication.instance()
     owns_application = application is None
     if application is None:
         application = QApplication(sys.argv[:1])
         application.setApplicationName("nml-tools")
-    dialog = ConfigurationDialog(project, initial_values=initial_values)
+    dialog = ConfigurationDialog(
+        project,
+        initial_values=initial_values,
+        initial_dimensions=initial_dimensions,
+    )
     if not owns_application:
         _exec(dialog)
         return 0

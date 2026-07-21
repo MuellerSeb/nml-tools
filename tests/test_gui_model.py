@@ -14,6 +14,7 @@ from nml_tools.gui.model import (
     empty_document,
     load_document,
     load_project,
+    merge_initial_dimensions,
     merge_initial_values,
     profile_is_saved,
     profile_values,
@@ -346,6 +347,38 @@ def test_merge_initial_values_overlays_loaded_document(tmp_path: Path) -> None:
         "beta": {"enabled": False},
     }
     assert profile_values(document, project.profile("main"))["alpha"]["count"] == 2
+
+
+def test_merge_initial_dimensions_overlays_without_mutating_document(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    project = load_project(tmp_path)
+    document = empty_document(project)
+
+    merged = merge_initial_dimensions(document, {"N_ITEMS": 1}, project)
+
+    assert document_dimensions(merged, project) == {"n_items": 1}
+    assert document_dimensions(document, project) == {"n_items": 2}
+
+
+@pytest.mark.parametrize(
+    ("dimensions", "message"),
+    [
+        ({"unknown": 1}, "unknown dimension"),
+        ({"n_items": 0}, "positive integer"),
+        ({"n_items": True}, "positive integer"),
+        ({"n_items": 1, "N_ITEMS": 2}, "case-insensitively"),
+    ],
+)
+def test_merge_initial_dimensions_rejects_invalid_values(
+    tmp_path: Path, dimensions: dict[str, object], message: str
+) -> None:
+    _write_project(tmp_path)
+    project = load_project(tmp_path)
+
+    with pytest.raises(ValueError, match=message):
+        merge_initial_dimensions(
+            empty_document(project), dimensions, project  # type: ignore[arg-type]
+        )
 
 
 def test_merge_initial_values_uses_existing_validation(tmp_path: Path) -> None:

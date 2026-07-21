@@ -877,6 +877,7 @@ from nml_tools.gui import launch_gui
 launch_gui(
     schemas_dir="/path/to/schemas",
     output_dir="/path/to/output",
+    initial_dimensions={"n_domains": 2},
     initial_values={
         "main": {
             "config_input": {
@@ -886,6 +887,9 @@ launch_gui(
     },
 )
 ```
+
+Initial dimensions are applied in memory before initial values are validated,
+and neither input is written until a profile is saved.
 
 The saved document keeps runtime dimensions and profile values together:
 

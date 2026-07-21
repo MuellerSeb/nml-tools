@@ -389,6 +389,35 @@ def profile_values(document: Mapping[str, Any], profile: GuiProfile) -> dict[str
     return copy.deepcopy(dict(values)) if isinstance(values, Mapping) else {}
 
 
+def merge_initial_dimensions(
+    document: Mapping[str, Any],
+    initial_dimensions: Mapping[str, int],
+    project: GuiProject,
+) -> dict[str, Any]:
+    """Overlay runtime dimensions on a canonical GUI document."""
+    if not isinstance(initial_dimensions, Mapping):
+        raise ValueError("initial dimensions must be an object")
+    updated = copy.deepcopy(dict(document))
+    dimensions = document_dimensions(updated, project)
+    seen: set[str] = set()
+    for raw_name, value in initial_dimensions.items():
+        if not isinstance(raw_name, str):
+            raise ValueError("initial dimension names must be strings")
+        key = raw_name.lower()
+        if key not in project.default_dimensions:
+            raise ValueError(f"initial dimensions contain unknown dimension '{raw_name}'")
+        if key in seen:
+            raise ValueError(
+                f"initial dimensions repeat dimension '{raw_name}' case-insensitively"
+            )
+        seen.add(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"dimension '{raw_name}' must be a positive integer")
+        dimensions[key] = value
+    updated["dimensions"] = dimensions
+    return updated
+
+
 def merge_initial_values(
     document: Mapping[str, Any],
     initial_values: Mapping[str, Any],
