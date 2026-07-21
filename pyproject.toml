@@ -20,6 +20,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gui = [
+    "guidata; python_version >= '3.9'",
+    "numpy; python_version >= '3.9'",
+    "qtpy; python_version >= '3.9'",
+]
 dev = [
     "numpy>=1.24,<3",
     "pytest-cov",

@@ -759,6 +759,8 @@ Primary subcommands:
 - `gen-fortran`: generate helper + Fortran modules only.
 - `gen-markdown`: generate Markdown docs only.
 - `gen-template`: generate template namelists only.
+- `gui`: edit configured file profiles with a schema-driven Qt interface.
+- `json2nml`: convert namelist-oriented JSON to a namelist file.
 - `validate`: validate a namelist file against schema definitions.
 
 ### Generation
@@ -792,6 +794,138 @@ nml-tools check --config nml-config.toml --diff
 `check` exits with a non-zero status if any configured generated file is
 missing or differs from the current generator output. This is intended for CI
 jobs that should ensure checked-in generated files are current.
+
+### JSON to namelist
+
+Convert namelist-oriented JSON with the required input and output options:
+
+```bash
+nml-tools json2nml -i input.json -o output.nml
+nml-tools json2nml --input-file input.json --output-file output.nml
+```
+
+The input may be the canonical metadata wrapper with a top-level `values`
+object, or the `values` object directly. Namelist and field names are the keys
+of the first two mapping levels. JSON numbers remain numeric, booleans become
+`.true.` or `.false.`, and strings are quoted for Fortran. Omit fields that are
+unset; JSON `null` is rejected.
+
+A field object represents a one-level derived value and is written with
+`field%component` assignments. Rectangular arrays may likewise end in objects,
+which are written as `field(i,...)%component`. Derived components must be
+intrinsic scalar values; nested objects, arrays, and `null` are rejected.
+
+Every array element is emitted separately with its full, one-based position.
+For example, `"grid": [[11, 12], [21, 22]]` produces:
+
+```fortran
+grid(1,1) = 11
+grid(1,2) = 12
+grid(2,1) = 21
+grid(2,2) = 22
+```
+
+The schema-free converter is also available as a public Python function:
+
+```python
+from nml_tools import json_to_namelist
+
+text = json_to_namelist(payload)
+```
+
+Use `validate` afterward when the result must be checked against schemas.
+
+### GUI
+
+Install the optional GUI dependencies and one Qt binding, then run the command
+from a directory containing `nml-config.toml`, or select the schema directory
+explicitly:
+
+```bash
+pip install 'nml-tools[gui]' PySide6
+nml-tools gui
+nml-tools gui -i /path/to/schemas -o /path/to/output -f /path/to/values.json
+```
+
+`-i`/`--input-path` selects the directory containing `nml-config.toml` and its
+schemas. `-o`/`--output-path` selects where `nml.json` and generated namelists
+are saved, and defaults to the input path. `-f`/`--fetch-values` loads initial
+values from a JSON object.
+
+The GUI extra requires Python 3.9 or newer. QtPy keeps the application code
+independent of the selected PyQt5, PyQt6, PySide2, or PySide6 backend; the Qt
+binding is intentionally not installed by nml-tools. Current guidata releases
+officially support PyQt5, PyQt6, and PySide6; PySide2 compatibility depends on
+the guidata version installed alongside nml-tools.
+
+The first window lists JSON files in the output directory, preferring
+`nml.json`, and creates profile buttons in `file_profiles` order. Profile pages
+follow each profile's configured `namelists` order. Saving a profile updates
+`nml.json` and renders its TOML `default_file` with `json_to_namelist()`.
+All schema fields are editable and saved; fields listed in the containing
+schema object's `required` array are marked with `*` in the form.
+
+Other Python applications may provide the schema directory, an optional output
+directory, and partial initial values directly. When `output_dir` is `None`,
+files are saved in `schemas_dir`. The mapping is ordered as file profile,
+namelist, and field; supplied values override matching values loaded from
+`nml.json`:
+
+```python
+from nml_tools.gui import launch_gui
+
+launch_gui(
+    schemas_dir="/path/to/schemas",
+    output_dir="/path/to/output",
+    initial_dimensions={"n_domains": 2},
+    initial_values={
+        "main": {
+            "config_input": {
+                "pre_path": ["data/meteo/pre/pre.nc"],
+            }
+        }
+    },
+)
+```
+
+Initial dimensions are applied in memory before initial values are validated,
+and neither input is written until a profile is saved.
+
+The saved document keeps runtime dimensions and profile values together:
+
+```json
+{
+  "format_version": 1,
+  "dimensions": {"n_domains": 2},
+  "file_profiles": {
+    "main": {
+      "profile": "main",
+      "values": {"config_main": {"enabled": true}}
+    }
+  }
+}
+```
+
+Array labels and table orientation may be described directly on an array
+property. Axis numbers are one-based and correspond to `x-fortran-shape`:
+
+```yaml
+x-fortran-shape: [5, n_domains]
+x-nml-tools-ui:
+  axes:
+    "1":
+      title: Parameter component
+      labels: [Lower bound, Upper bound, Value, Flag, Scaling]
+    "2":
+      title: Domain
+      label-template: "Domain {index}"
+  table:
+    row-axis: 2
+    column-axis: 1
+```
+
+Use explicit label lists in the same way for months or night hours. The table
+orientation affects only presentation; JSON retains schema/Fortran axis order.
 
 ### Validation
 
@@ -905,6 +1039,9 @@ Sphinx Fortran domain.
 ```bash
 pip install nml-tools
 ```
+
+For the optional GUI (Python 3.9+), install the extra and one Qt backend, for
+example `pip install 'nml-tools[gui]' PySide6`.
 
 ## Minimal example
 
