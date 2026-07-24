@@ -124,6 +124,20 @@ def test_derived_array_structured_round_trip(application: Any) -> None:
     assert field._objects_from_structured(structured, 1, np) == values
 
 
+def test_derived_array_editor_applies_structured_changes(application: Any) -> None:
+    module = pytest.importorskip("guidata.widgets.arrayeditor")
+    data = np.zeros((1, 1), dtype=[("yStart", np.int64)])
+    editor = fields._derived_array_editor(module.ArrayEditor, None)
+    try:
+        assert editor.setup_and_check(data, "Evaluation period")
+        model = editor.arraywidgets[0].model
+        assert model.setData(model.index(0, 0), "1991")
+        editor.accept()
+        assert data["yStart"][0, 0] == 1991
+    finally:
+        editor.close()
+
+
 def test_configuration_dialog_uses_dynamic_profiles_and_prefers_nml_json(
     application: Any, tmp_path: Path
 ) -> None:

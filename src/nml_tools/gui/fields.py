@@ -46,6 +46,18 @@ def _accepted(dialog: Any) -> int:
     return int(getattr(value, "value", value))
 
 
+def _derived_array_editor(editor_type: type[Any], parent: QWidget) -> Any:
+    # guidata's fixed-size record handler cannot commit (field, *indices) keys.
+    class DerivedArrayEditor(editor_type):  # type: ignore[misc]
+        def accept(self) -> None:
+            for (name, *indices), value in self._data.current_changes.items():
+                self._data.get_array()[name][tuple(indices)] = value
+            self._data.current_changes.clear()
+            super().accept()
+
+    return DerivedArrayEditor(parent)
+
+
 def suggestion(schema: Mapping[str, Any], sizes: Mapping[str, int]) -> Any:
     """Return a deterministic editable suggestion for a resolved field schema."""
     examples = schema.get("examples")
@@ -252,7 +264,9 @@ class ArrayField(QWidget):
             canonical = self._structured_array(np) if derived else self._intrinsic_array(np)
             displayed = display_array(canonical, self.schema)
             xlabels, ylabels = self._display_labels(displayed.shape, rank)
-            editor = ArrayEditor(self)
+            editor = (
+                _derived_array_editor(ArrayEditor, self) if derived else ArrayEditor(self)
+            )
             raw_shape = self.schema.get("x-fortran-shape")
             deferred = raw_shape == ":" or (
                 isinstance(raw_shape, list) and ":" in raw_shape
