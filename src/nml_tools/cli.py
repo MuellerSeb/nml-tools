@@ -38,7 +38,7 @@ from .codegen_fortran import (
 )
 from .codegen_markdown import generate_docs, render_docs
 from .codegen_template import generate_template, render_template
-from .json2nml import json_to_namelist
+from .json2nml import _profile_namelists
 from .schema import SchemaResolver, load_schema
 
 if sys.version_info >= (3, 11):
@@ -1342,14 +1342,14 @@ def gui(input_path: Path | None, output_path: Path | None, fetch_values: Path | 
     help="JSON input file.",
 )
 @click.option(
-    "--output-file",
+    "--output-path",
     "-o",
-    type=click.Path(dir_okay=False, path_type=Path),
+    type=click.Path(file_okay=False, path_type=Path),
     required=True,
-    help="Namelist output file.",
+    help="Directory for generated namelist files.",
 )
-def json2nml(input_file: Path, output_file: Path) -> None:
-    """Convert namelist-oriented JSON to a Fortran namelist file."""
+def json2nml(input_file: Path, output_path: Path) -> None:
+    """Convert namelist-oriented JSON to Fortran namelist files."""
     try:
         payload = json.loads(input_file.read_text(encoding="utf-8"))
     except (OSError, UnicodeError) as exc:
@@ -1358,13 +1358,14 @@ def json2nml(input_file: Path, output_file: Path) -> None:
         raise click.ClickException(f"failed to parse JSON input: {exc}") from exc
 
     try:
-        rendered = json_to_namelist(payload)
+        rendered = _profile_namelists(payload, input_file.stem)
     except ValueError as exc:
         raise click.ClickException(f"failed to convert JSON input: {exc}") from exc
 
     try:
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.write_text(rendered, encoding="utf-8")
+        output_path.mkdir(parents=True, exist_ok=True)
+        for profile, text in rendered.items():
+            (output_path / f"{profile}.nml").write_text(text, encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise click.ClickException(f"failed to write namelist output: {exc}") from exc
 

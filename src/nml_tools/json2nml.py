@@ -47,6 +47,57 @@ def json_to_namelist(data: Mapping[str, Any]) -> str:
     return "\n\n".join(blocks) + "\n"
 
 
+def _profile_namelists(data: Mapping[str, Any], default_profile: str) -> dict[str, str]:
+    """Render an aggregate document, or one legacy payload, by profile name."""
+    if not isinstance(data, Mapping):
+        raise ValueError("JSON root must be an object")
+
+    profiles = data.get("file_profiles")
+    if profiles is None:
+        name = data.get("profile", default_profile) if "values" in data else default_profile
+        if not isinstance(name, str):
+            raise ValueError("JSON wrapper 'profile' must be a string")
+        _validate_profile_filename(name, {})
+        return {name: json_to_namelist(data)}
+    if not isinstance(profiles, Mapping) or not profiles:
+        raise ValueError("JSON 'file_profiles' must be a non-empty object")
+
+    rendered: dict[str, str] = {}
+    seen: dict[str, str] = {}
+    for profile_name, entry in profiles.items():
+        if not isinstance(profile_name, str) or not isinstance(entry, Mapping):
+            raise ValueError("file profile entries must be named objects")
+        declared = entry.get("profile", profile_name)
+        if not isinstance(declared, str) or declared.casefold() != profile_name.casefold():
+            raise ValueError(
+                f"file profile '{profile_name}' has mismatched 'profile' metadata"
+            )
+        _validate_profile_filename(declared, seen)
+        try:
+            rendered[declared] = json_to_namelist(entry)
+        except ValueError as exc:
+            raise ValueError(f"file profile '{profile_name}': {exc}") from exc
+    return rendered
+
+
+def _validate_profile_filename(name: str, seen: dict[str, str]) -> None:
+    if (
+        not name
+        or name != name.strip()
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or any(ord(character) < 32 for character in name)
+    ):
+        raise ValueError(f"file profile name '{name}' is not a safe filename")
+    key = name.casefold()
+    if key in seen:
+        raise ValueError(
+            f"file profile name '{name}' collides with '{seen[key]}' case-insensitively"
+        )
+    seen[key] = name
+
+
 def _unwrap_values(data: Mapping[str, Any]) -> Mapping[str, Any]:
     if "values" not in data:
         return data

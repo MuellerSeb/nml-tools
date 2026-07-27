@@ -760,7 +760,7 @@ Primary subcommands:
 - `gen-markdown`: generate Markdown docs only.
 - `gen-template`: generate template namelists only.
 - `gui`: edit configured file profiles with a schema-driven Qt interface.
-- `json2nml`: convert namelist-oriented JSON to a namelist file.
+- `json2nml`: convert namelist-oriented JSON to namelist files.
 - `validate`: validate a namelist file against schema definitions.
 
 ### Generation
@@ -797,18 +797,22 @@ jobs that should ensure checked-in generated files are current.
 
 ### JSON to namelist
 
-Convert namelist-oriented JSON with the required input and output options:
+Convert an aggregate namelist JSON document into an output directory:
 
 ```bash
-nml-tools json2nml -i input.json -o output.nml
-nml-tools json2nml --input-file input.json --output-file output.nml
+nml-tools json2nml -i nml.json -o generated
+nml-tools json2nml --input-file nml.json --output-path generated
 ```
 
-The input may be the canonical metadata wrapper with a top-level `values`
-object, or the `values` object directly. Namelist and field names are the keys
-of the first two mapping levels. JSON numbers remain numeric, booleans become
-`.true.` or `.false.`, and strings are quoted for Fortran. Omit fields that are
-unset; JSON `null` is rejected.
+For a canonical document containing `file_profiles`, each profile is converted
+independently and written as `<profile>.nml`. For example, profiles named
+`main`, `output`, and `parameter` produce `main.nml`, `output.nml`, and
+`parameter.nml`. A single metadata wrapper with a top-level `values` object, or
+the `values` object directly, remains supported and produces one file named
+from its `profile` metadata or the input filename stem. Namelist and field names
+are the keys of the first two mapping levels. JSON numbers remain numeric,
+booleans become `.true.` or `.false.`, and strings are quoted for Fortran. Omit
+fields that are unset; JSON `null` is rejected.
 
 A field object represents a one-level derived value and is written with
 `field%component` assignments. Rectangular arrays may likewise end in objects,

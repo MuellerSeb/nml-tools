@@ -206,18 +206,28 @@ def test_json_to_namelist_rejects_nonfinite_numbers(value: float) -> None:
 
 @pytest.mark.parametrize(
     ("input_flag", "output_flag"),
-    [("-i", "-o"), ("--input-file", "--output-file")],
+    [("-i", "-o"), ("--input-file", "--output-path")],
 )
-def test_json2nml_cli_converts_files(
+def test_json2nml_cli_converts_multiple_profiles(
     tmp_path: Path,
     input_flag: str,
     output_flag: str,
 ) -> None:
     input_path = tmp_path / "input.json"
-    output_path = tmp_path / "nested" / "output.nml"
+    output_path = tmp_path / "nested"
     payload = {
+        "format_version": 1,
         "dimensions": {"max_domains": 2},
-        "values": {"run": {"enabled": [True, False]}},
+        "file_profiles": {
+            "main": {
+                "profile": "main",
+                "values": {"run": {"enabled": [True, False]}},
+            },
+            "output": {
+                "profile": "output",
+                "values": {"results": {"path": "results.nc"}},
+            },
+        },
     }
     input_path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -233,12 +243,60 @@ def test_json2nml_cli_converts_files(
     )
 
     assert result.exit_code == 0, result.output
-    assert output_path.read_text(encoding="utf-8") == json_to_namelist(payload)
+    assert {path.name for path in output_path.iterdir()} == {"main.nml", "output.nml"}
+    assert (output_path / "main.nml").read_text(encoding="utf-8") == json_to_namelist(
+        payload["file_profiles"]["main"]
+    )
+    assert (output_path / "output.nml").read_text(encoding="utf-8") == json_to_namelist(
+        payload["file_profiles"]["output"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "filename"),
+    [
+        (
+            {
+                "dimensions": {"max_domains": 2},
+                "values": {"run": {"enabled": [True, False]}},
+            },
+            "input.nml",
+        ),
+        (
+            {"profile": "main", "values": {"run": {"enabled": True}}},
+            "main.nml",
+        ),
+    ],
+)
+def test_json2nml_cli_keeps_single_profile_input_support(
+    tmp_path: Path, payload: dict[str, Any], filename: str
+) -> None:
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "namelists"
+    input_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        ["json2nml", "-i", str(input_path), "-o", str(output_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (output_path / filename).read_text(
+        encoding="utf-8"
+    ) == json_to_namelist(payload)
+
+
+def test_json2nml_cli_help_uses_output_path() -> None:
+    result = CliRunner().invoke(cli, ["json2nml", "--help"])
+
+    assert result.exit_code == 0
+    assert "--output-path" in result.output
+    assert "--output-file" not in result.output
 
 
 def test_json2nml_cli_reports_malformed_json(tmp_path: Path) -> None:
     input_path = tmp_path / "broken.json"
-    output_path = tmp_path / "output.nml"
+    output_path = tmp_path / "output"
     input_path.write_text('{"values":', encoding="utf-8")
 
     result = CliRunner().invoke(
@@ -248,4 +306,39 @@ def test_json2nml_cli_reports_malformed_json(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert "json" in result.output.lower()
+    assert not output_path.exists()
+
+
+@pytest.mark.parametrize(
+    "file_profiles",
+    [
+        {},
+        {"main": {"profile": "other", "values": {}}},
+        {"../main": {"profile": "../main", "values": {}}},
+        {
+            "main": {"profile": "main", "values": {}},
+            "MAIN": {"profile": "MAIN", "values": {}},
+        },
+        {
+            "main": {"profile": "main", "values": {"run": {"count": 1}}},
+            "output": {"profile": "output", "values": {"run": {"count": None}}},
+        },
+    ],
+)
+def test_json2nml_cli_rejects_invalid_profiles_before_writing(
+    tmp_path: Path, file_profiles: dict[str, Any]
+) -> None:
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output"
+    input_path.write_text(
+        json.dumps({"file_profiles": file_profiles}),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        ["json2nml", "-i", str(input_path), "-o", str(output_path)],
+    )
+
+    assert result.exit_code != 0
     assert not output_path.exists()
