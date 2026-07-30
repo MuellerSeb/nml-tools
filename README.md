@@ -805,14 +805,15 @@ nml-tools json2nml --input-file nml.json --output-path generated
 ```
 
 For a canonical document containing `file_profiles`, each profile is converted
-independently and written as `<profile>.nml`. For example, profiles named
-`main`, `output`, and `parameter` produce `main.nml`, `output.nml`, and
-`parameter.nml`. A single metadata wrapper with a top-level `values` object, or
-the `values` object directly, remains supported and produces one file named
-from its `profile` metadata or the input filename stem. Namelist and field names
-are the keys of the first two mapping levels. JSON numbers remain numeric,
-booleans become `.true.` or `.false.`, and strings are quoted for Fortran. Omit
-fields that are unset; JSON `null` is rejected.
+independently. Set `default_filename` on a profile to select its output filename
+or a relative path below the output directory; when omitted, the converter uses
+`<profile>.nml`. A single metadata wrapper with a top-level `values` object, or
+the `values` object directly, remains supported. Its `default_filename` is used
+when present, otherwise the converter uses its `profile` metadata or the input
+filename stem. Namelist and field names are the keys of the first two mapping
+levels. JSON numbers remain numeric, booleans become `.true.` or `.false.`, and
+strings are quoted for Fortran. Omit fields that are unset; JSON `null` is
+rejected.
 
 A field object represents a one-level derived value and is written with
 `field%component` assignments. Rectangular arrays may likewise end in objects,
@@ -862,10 +863,17 @@ binding is intentionally not installed by nml-tools. Current guidata releases
 officially support PyQt5, PyQt6, and PySide6; PySide2 compatibility depends on
 the guidata version installed alongside nml-tools.
 
-The first window lists JSON files in the output directory, preferring
-`nml.json`, and creates profile buttons in `file_profiles` order. Profile pages
-follow each profile's configured `namelists` order. Saving a profile updates
-`nml.json` and renders its TOML `default_file` with `json_to_namelist()`.
+The GUI uses one tabbed dialog. Its initial **Config** tab lists JSON files in
+the output directory, preferring `nml.json`, and exposes runtime dimensions.
+Click **Run** to create one tab per configured file profile, in
+`file_profiles` order. Each profile tab lists its namelists on the left and
+opens the corresponding schema form on the right. Profile-level and global
+restore/save controls update `nml.json` and render each profile's configured
+`default_file` with `json_to_namelist()`.
+
+If the TOML file has no file profiles, the Config tab lets the user select and
+order schemas, then supply a profile name and default file name before running.
+This creates one virtual file profile without changing `nml-config.toml`.
 All schema fields are editable and saved; fields listed in the containing
 schema object's `required` array are marked with `*` in the form.
 
@@ -904,6 +912,7 @@ The saved document keeps runtime dimensions and profile values together:
   "file_profiles": {
     "main": {
       "profile": "main",
+      "default_filename": "mhm.nml",
       "values": {"config_main": {"enabled": true}}
     }
   }

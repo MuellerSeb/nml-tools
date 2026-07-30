@@ -9,6 +9,7 @@ from textwrap import dedent
 import pytest
 
 from nml_tools.gui.model import (
+    create_virtual_project,
     discover_json_files,
     document_dimensions,
     empty_document,
@@ -19,6 +20,7 @@ from nml_tools.gui.model import (
     profile_is_saved,
     profile_values,
     save_profile,
+    save_profiles,
 )
 
 
@@ -108,6 +110,12 @@ def _write_project(root: Path, *, duplicate_output: bool = False) -> None:
     )
 
 
+def _remove_file_profiles(root: Path) -> None:
+    config = root / "nml-config.toml"
+    text = config.read_text(encoding="utf-8")
+    config.write_text(text.split("[[file_profiles]]", 1)[0], encoding="utf-8")
+
+
 def test_load_project_preserves_profile_and_page_order(tmp_path: Path) -> None:
     _write_project(tmp_path)
 
@@ -118,7 +126,56 @@ def test_load_project_preserves_profile_and_page_order(tmp_path: Path) -> None:
     assert [profile.name for profile in project.profiles] == ["secondary", "main"]
     assert project.profiles[0].title == "Second profile"
     assert [page.name for page in project.profile("MAIN").pages] == ["beta", "alpha"]
+    assert [page.name for page in project.namelists] == ["alpha", "beta"]
     assert project.default_dimensions == {"n_items": 2}
+
+
+def test_load_project_without_profiles_supports_one_virtual_profile(
+    tmp_path: Path,
+) -> None:
+    _write_project(tmp_path)
+    _remove_file_profiles(tmp_path)
+
+    project = load_project(tmp_path)
+    virtual = create_virtual_project(
+        project,
+        "custom",
+        "nested/custom.nml",
+        ["beta", "alpha"],
+    )
+
+    assert project.profiles == ()
+    assert [page.name for page in project.namelists] == ["alpha", "beta"]
+    assert len(virtual.profiles) == 1
+    assert virtual.profile("CUSTOM").default_file == "nested/custom.nml"
+    assert [page.name for page in virtual.profile("custom").pages] == ["beta", "alpha"]
+
+
+@pytest.mark.parametrize(
+    ("name", "default_file", "namelists", "message"),
+    [
+        ("", "custom.nml", ["alpha"], "name must not be empty"),
+        ("custom", "", ["alpha"], "file name must not be empty"),
+        ("custom", "../custom.nml", ["alpha"], "inside the output directory"),
+        ("custom", "nml.json", ["alpha"], "reserved nml.json"),
+        ("custom", "custom.nml", [], "at least one"),
+        ("custom", "custom.nml", ["missing"], "unknown"),
+        ("custom", "custom.nml", ["alpha", "ALPHA"], "duplicated"),
+    ],
+)
+def test_create_virtual_project_rejects_invalid_metadata(
+    tmp_path: Path,
+    name: str,
+    default_file: str,
+    namelists: list[str],
+    message: str,
+) -> None:
+    _write_project(tmp_path)
+    _remove_file_profiles(tmp_path)
+    project = load_project(tmp_path)
+
+    with pytest.raises(ValueError, match=message):
+        create_virtual_project(project, name, default_file, namelists)
 
 
 def test_load_project_uses_explicit_folder_outside_cwd(
@@ -223,6 +280,105 @@ def test_load_document_normalizes_canonical_and_single_profile_json(
     assert profile_values(loaded_single, project.profile("secondary")) == {
         "beta": {"enabled": True}
     }
+
+
+def test_load_document_derives_one_virtual_profile_from_values(
+    tmp_path: Path,
+) -> None:
+    _write_project(tmp_path)
+    _remove_file_profiles(tmp_path)
+    project = load_project(tmp_path)
+    path = tmp_path / "virtual.json"
+    path.write_text(
+        json.dumps(
+            {
+                "file_profiles": {
+                    "custom": {
+                        "profile": "custom",
+                        "default_filename": "custom-input.nml",
+                        "values": {
+                            "beta": {"enabled": True},
+                            "alpha": {"count": 3},
+                        },
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    document = load_document(path, project)
+
+    assert document["file_profiles"]["custom"] == {
+        "profile": "custom",
+        "default_filename": "custom-input.nml",
+        "values": {
+            "beta": {"enabled": True},
+            "alpha": {"count": 3},
+        },
+    }
+
+    path.write_text(
+        json.dumps(
+            {
+                "file_profiles": {
+                    "custom": {
+                        "values": {
+                            "alpha": {"count": 3},
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    legacy = load_document(path, project)
+    assert (
+        legacy["file_profiles"]["custom"]["default_filename"]
+        == "custom.nml"
+    )
+
+
+def test_load_document_rejects_multiple_virtual_profiles_and_filename_mismatch(
+    tmp_path: Path,
+) -> None:
+    _write_project(tmp_path)
+    _remove_file_profiles(tmp_path)
+    project = load_project(tmp_path)
+    path = tmp_path / "virtual.json"
+    path.write_text(
+        json.dumps(
+            {
+                "file_profiles": {
+                    "first": {"values": {"alpha": {}}},
+                    "second": {"values": {"beta": {}}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="at most one virtual"):
+        load_document(path, project)
+
+    configured_root = tmp_path / "configured"
+    configured_root.mkdir()
+    _write_project(configured_root)
+    configured = load_project(configured_root)
+    path.write_text(
+        json.dumps(
+            {
+                "file_profiles": {
+                    "main": {
+                        "default_filename": "different.nml",
+                        "values": {},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="mismatched 'default_filename'"):
+        load_document(path, configured)
 
 
 def test_load_document_rejects_unknown_profile_namelist_and_field(
@@ -346,6 +502,10 @@ def test_merge_initial_values_overlays_loaded_document(tmp_path: Path) -> None:
         "alpha": {"count": 7, "label": "saved"},
         "beta": {"enabled": False},
     }
+    assert (
+        merged["file_profiles"]["main"]["default_filename"]
+        == "main.nml"
+    )
     assert profile_values(document, project.profile("main"))["alpha"]["count"] == 2
 
 
@@ -428,6 +588,10 @@ def test_save_profile_round_trips_derived_values_and_omits_absent_fields(
     assert saved_json == document
     assert not (schemas_dir / "nml.json").exists()
     assert not (schemas_dir / "main.nml").exists()
+    assert (
+        saved_json["file_profiles"]["main"]["default_filename"]
+        == "main.nml"
+    )
     assert "label" not in saved_json["file_profiles"]["main"]["values"]["alpha"]
     assert profile_is_saved(project, document, profile) is True
 
@@ -450,3 +614,43 @@ def test_save_profile_round_trips_derived_values_and_omits_absent_fields(
         rendered + "! changed\n", encoding="utf-8"
     )
     assert profile_is_saved(project, document, profile) is False
+
+
+def test_save_profiles_validates_every_profile_before_writing(
+    tmp_path: Path,
+) -> None:
+    _write_project(tmp_path)
+    project = load_project(tmp_path)
+
+    with pytest.raises(ValueError, match="must be an integer"):
+        save_profiles(
+            project,
+            empty_document(project),
+            {
+                "secondary": {"beta": {"enabled": True}},
+                "main": {"alpha": {"count": "invalid"}},
+            },
+            {"n_items": 2},
+        )
+
+    assert not (tmp_path / "secondary.nml").exists()
+    assert not (tmp_path / "main.nml").exists()
+    assert not (tmp_path / "nml.json").exists()
+
+    document = save_profiles(
+        project,
+        empty_document(project),
+        {
+            "secondary": {"beta": {"enabled": True}},
+            "main": {
+                "beta": {"enabled": False},
+                "alpha": {"count": 2},
+            },
+        },
+        {"n_items": 2},
+    )
+
+    assert (tmp_path / "secondary.nml").is_file()
+    assert (tmp_path / "main.nml").is_file()
+    assert document["file_profiles"]["secondary"]["default_filename"] == "secondary.nml"
+    assert document["file_profiles"]["main"]["default_filename"] == "main.nml"

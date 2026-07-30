@@ -1364,8 +1364,10 @@ def json2nml(input_file: Path, output_path: Path) -> None:
 
     try:
         output_path.mkdir(parents=True, exist_ok=True)
-        for profile, text in rendered.items():
-            (output_path / f"{profile}.nml").write_text(text, encoding="utf-8")
+        for filename, text in rendered.items():
+            target = output_path / filename
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise click.ClickException(f"failed to write namelist output: {exc}") from exc
 

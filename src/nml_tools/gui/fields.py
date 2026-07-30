@@ -164,6 +164,8 @@ class ObjectField(QGroupBox):
         value: Any,
         sizes: Mapping[str, int],
         parent: QWidget | None = None,
+        *,
+        fit_arrays: bool = False,
     ):
         super().__init__(str(schema.get("x-fortran-type", "Derived value")), parent)
         self.schema = schema
@@ -190,7 +192,9 @@ class ObjectField(QGroupBox):
                 continue
             child_value = source.get(name, MISSING) if isinstance(source, Mapping) else MISSING
             is_required = name.lower() in required
-            row = FieldRow(name, child, child_value, sizes, self)
+            row = FieldRow(
+                name, child, child_value, sizes, self, fit_arrays=fit_arrays
+            )
             layout.addRow(_field_label(name, child, is_required), row)
             self.rows[name] = row
 
@@ -215,6 +219,8 @@ class ArrayField(QWidget):
         value: Any,
         sizes: Mapping[str, int],
         parent: QWidget | None = None,
+        *,
+        fit_existing: bool = False,
     ):
         super().__init__(parent)
         self.name = name
@@ -231,7 +237,7 @@ class ArrayField(QWidget):
             sizes,
             candidate,
             suggestion(items, sizes),
-            strict=saved,
+            strict=saved and not fit_existing,
         )
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -370,6 +376,8 @@ class FieldRow(QWidget):
         value: Any,
         sizes: Mapping[str, int],
         parent: QWidget | None = None,
+        *,
+        fit_arrays: bool = False,
     ):
         super().__init__(parent)
         self.name = name
@@ -380,7 +388,9 @@ class FieldRow(QWidget):
         initial = value
         if value is MISSING and schema.get("type") not in {"array", "object"}:
             initial = suggestion(schema, sizes)
-        self.field = _field_widget(name, schema, initial, sizes, self)
+        self.field = _field_widget(
+            name, schema, initial, sizes, self, fit_arrays=fit_arrays
+        )
         description = schema.get("description")
         if isinstance(description, str):
             self.field.setToolTip(description.strip())
@@ -403,6 +413,8 @@ class NamelistForm(QWidget):
         values: Mapping[str, Any] | None,
         sizes: Mapping[str, int],
         parent: QWidget | None = None,
+        *,
+        fit_arrays: bool = False,
     ):
         super().__init__(parent)
         self.schema = schema
@@ -420,7 +432,14 @@ class NamelistForm(QWidget):
             if not isinstance(name, str) or not isinstance(child, Mapping):
                 continue
             is_required = name.lower() in required
-            row = FieldRow(name, child, source.get(name, MISSING), sizes, self)
+            row = FieldRow(
+                name,
+                child,
+                source.get(name, MISSING),
+                sizes,
+                self,
+                fit_arrays=fit_arrays,
+            )
             layout.addRow(_field_label(name, child, is_required), row)
             self.rows[name] = row
 
@@ -443,12 +462,18 @@ def _field_widget(
     value: Any,
     sizes: Mapping[str, int],
     parent: QWidget,
+    *,
+    fit_arrays: bool = False,
 ) -> Any:
     kind = schema.get("type")
     if kind == "array":
-        return ArrayField(name, schema, value, sizes, parent)
+        return ArrayField(
+            name, schema, value, sizes, parent, fit_existing=fit_arrays
+        )
     if kind == "object":
-        return ObjectField(schema, value, sizes, parent)
+        return ObjectField(
+            schema, value, sizes, parent, fit_arrays=fit_arrays
+        )
     return ScalarField(schema, value, parent)
 
 

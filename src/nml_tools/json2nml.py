@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import math
+import unicodedata
 from collections.abc import Iterable, Mapping
+from pathlib import PureWindowsPath
 from typing import Any
 
 from ._utils import validate_user_fortran_identifier
 
 __all__ = ["json_to_namelist"]
 
-_WRAPPER_KEYS = {"format_version", "profile", "dimensions"}
+_WRAPPER_KEYS = {"format_version", "profile", "default_filename", "dimensions"}
 
 
 def json_to_namelist(data: Mapping[str, Any]) -> str:
@@ -48,7 +50,7 @@ def json_to_namelist(data: Mapping[str, Any]) -> str:
 
 
 def _profile_namelists(data: Mapping[str, Any], default_profile: str) -> dict[str, str]:
-    """Render an aggregate document, or one legacy payload, by profile name."""
+    """Render an aggregate document, or one legacy payload, by output filename."""
     if not isinstance(data, Mapping):
         raise ValueError("JSON root must be an object")
 
@@ -57,13 +59,16 @@ def _profile_namelists(data: Mapping[str, Any], default_profile: str) -> dict[st
         name = data.get("profile", default_profile) if "values" in data else default_profile
         if not isinstance(name, str):
             raise ValueError("JSON wrapper 'profile' must be a string")
-        _validate_profile_filename(name, {})
-        return {name: json_to_namelist(data)}
+        _validate_profile_name(name, {})
+        filename = data.get("default_filename", f"{name}.nml")
+        _validate_output_filename(filename, {})
+        return {filename: json_to_namelist(data)}
     if not isinstance(profiles, Mapping) or not profiles:
         raise ValueError("JSON 'file_profiles' must be a non-empty object")
 
     rendered: dict[str, str] = {}
-    seen: dict[str, str] = {}
+    seen_profiles: dict[str, str] = {}
+    seen_filenames: dict[str, str] = {}
     for profile_name, entry in profiles.items():
         if not isinstance(profile_name, str) or not isinstance(entry, Mapping):
             raise ValueError("file profile entries must be named objects")
@@ -72,28 +77,51 @@ def _profile_namelists(data: Mapping[str, Any], default_profile: str) -> dict[st
             raise ValueError(
                 f"file profile '{profile_name}' has mismatched 'profile' metadata"
             )
-        _validate_profile_filename(declared, seen)
         try:
-            rendered[declared] = json_to_namelist(entry)
+            _validate_profile_name(declared, seen_profiles)
+            filename = entry.get("default_filename", f"{declared}.nml")
+            _validate_output_filename(filename, seen_filenames)
+            rendered[filename] = json_to_namelist(entry)
         except ValueError as exc:
             raise ValueError(f"file profile '{profile_name}': {exc}") from exc
     return rendered
 
 
-def _validate_profile_filename(name: str, seen: dict[str, str]) -> None:
+def _validate_profile_name(name: str, seen: dict[str, str]) -> None:
     if (
         not name
         or name != name.strip()
         or name in {".", ".."}
         or "/" in name
         or "\\" in name
-        or any(ord(character) < 32 for character in name)
+        or any(unicodedata.category(character) == "Cc" for character in name)
     ):
-        raise ValueError(f"file profile name '{name}' is not a safe filename")
+        raise ValueError(f"file profile name '{name}' is invalid")
     key = name.casefold()
     if key in seen:
         raise ValueError(
             f"file profile name '{name}' collides with '{seen[key]}' case-insensitively"
+        )
+    seen[key] = name
+
+
+def _validate_output_filename(name: object, seen: dict[str, str]) -> None:
+    if (
+        not isinstance(name, str)
+        or not name
+        or name != name.strip()
+        or "\\" in name
+        or PureWindowsPath(name).drive
+        or any(unicodedata.category(character) == "Cc" for character in name)
+    ):
+        raise ValueError(f"default filename '{name}' is not a safe relative path")
+    parts = name.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError(f"default filename '{name}' is not a safe relative path")
+    key = name.casefold()
+    if key in seen:
+        raise ValueError(
+            f"default filename '{name}' collides with '{seen[key]}' case-insensitively"
         )
     seen[key] = name
 

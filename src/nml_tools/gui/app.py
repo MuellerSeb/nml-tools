@@ -7,7 +7,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from qtpy.QtCore import Qt
 from qtpy.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QComboBox,
     QDialog,
@@ -16,19 +18,24 @@ from qtpy.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QSpinBox,
     QStackedWidget,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from .fields import NamelistForm, _accepted, _exec
+from .fields import NamelistForm, _exec
 from .model import (
     GuiProfile,
     GuiProject,
+    create_virtual_project,
     discover_json_files,
     document_dimensions,
     empty_document,
@@ -36,31 +43,27 @@ from .model import (
     load_project,
     merge_initial_dimensions,
     merge_initial_values,
-    profile_is_saved,
     profile_values,
-    render_profile,
     save_profile,
+    save_profiles,
 )
 
 
-class ProfileDialog(QDialog):
-    """Modal ordered page editor for one configured file profile."""
+class ProfileTab(QWidget):
+    """Ordered namelist pages for one file profile."""
 
     def __init__(
         self,
         project: GuiProject,
         profile: GuiProfile,
-        values: dict[str, Any],
-        dimensions: dict[str, int],
+        values: Mapping[str, Any],
+        dimensions: Mapping[str, int],
         parent: QWidget | None = None,
+        *,
+        fit_arrays: bool = False,
     ):
         super().__init__(parent)
-        self.setWindowTitle(profile.title)
-        self.resize(850, 650)
         self.profile = profile
-        self.project = project
-        self.dimensions = dimensions
-        self._values: dict[str, Any] | None = None
         sizes = {**project.constants, **dimensions}
 
         root = QVBoxLayout(self)
@@ -69,81 +72,87 @@ class ProfileDialog(QDialog):
             description.setWordWrap(True)
             root.addWidget(description)
 
-        self.selector = QComboBox(self)
+        pages = QHBoxLayout()
+        self.selector = QListWidget(self)
+        self.selector.setMaximumWidth(240)
         self.stack = QStackedWidget(self)
         self.forms: dict[str, NamelistForm] = {}
         for page in profile.pages:
+            item = QListWidgetItem(page.name)
+            item.setData(Qt.ItemDataRole.UserRole, page.key)
             title = page.schema.get("title")
-            self.selector.addItem(str(title or page.name), page.key)
-            form = NamelistForm(page.schema, values.get(page.name), sizes)
+            if isinstance(title, str):
+                item.setToolTip(title)
+            self.selector.addItem(item)
+            form = NamelistForm(
+                page.schema,
+                values.get(page.name),
+                sizes,
+                fit_arrays=fit_arrays,
+            )
             scroll = QScrollArea(self)
             scroll.setWidgetResizable(True)
             scroll.setWidget(form)
             self.stack.addWidget(scroll)
             self.forms[page.name] = form
-        self.selector.currentIndexChanged.connect(self.stack.setCurrentIndex)
-        root.addWidget(self.selector)
-        root.addWidget(self.stack, 1)
+        self.selector.currentRowChanged.connect(self.stack.setCurrentIndex)
+        pages.addWidget(self.selector)
+        pages.addWidget(self.stack, 1)
+        root.addLayout(pages, 1)
 
         buttons = QHBoxLayout()
         self.back = QPushButton("Back", self)
         self.next = QPushButton("Next", self)
-        restore = QPushButton("Restore defaults", self)
-        cancel = QPushButton("Cancel", self)
-        save = QPushButton("Save", self)
+        self.restore = QPushButton("Restore defaults", self)
+        self.cancel = QPushButton("Cancel", self)
+        self.save = QPushButton("Save", self)
         self.back.clicked.connect(
-            lambda: self.selector.setCurrentIndex(self.selector.currentIndex() - 1)
+            lambda: self.selector.setCurrentRow(self.selector.currentRow() - 1)
         )
         self.next.clicked.connect(
-            lambda: self.selector.setCurrentIndex(self.selector.currentIndex() + 1)
+            lambda: self.selector.setCurrentRow(self.selector.currentRow() + 1)
         )
-        restore.clicked.connect(self._restore_page)
-        cancel.clicked.connect(self.reject)
-        save.clicked.connect(self._accept_values)
+        self.restore.clicked.connect(self.restore_page)
         buttons.addWidget(self.back)
         buttons.addWidget(self.next)
         buttons.addStretch(1)
-        buttons.addWidget(restore)
-        buttons.addWidget(cancel)
-        buttons.addWidget(save)
+        buttons.addWidget(self.restore)
+        buttons.addWidget(self.cancel)
+        buttons.addWidget(self.save)
         root.addLayout(buttons)
-        self.selector.currentIndexChanged.connect(self._update_navigation)
-        self._update_navigation(0)
 
-    @property
+        self.selector.currentRowChanged.connect(self._update_navigation)
+        if profile.pages:
+            self.selector.setCurrentRow(0)
+        else:
+            self._update_navigation(-1)
+
     def values(self) -> dict[str, Any]:
-        if self._values is None:
-            raise RuntimeError("profile dialog has not been accepted")
-        return self._values
+        """Return the values of every namelist page."""
+        return {
+            page.name: self.forms[page.name].values() for page in self.profile.pages
+        }
 
-    def _restore_page(self) -> None:
-        page = self.profile.pages[self.selector.currentIndex()]
-        self.forms[page.name].reset()
+    def restore_page(self) -> None:
+        """Restore defaults on the currently selected page."""
+        index = self.selector.currentRow()
+        if index >= 0:
+            page = self.profile.pages[index]
+            self.forms[page.name].reset()
 
-    def _accept_values(self) -> None:
-        try:
-            values = {
-                page.name: self.forms[page.name].values() for page in self.profile.pages
-            }
-            render_profile(
-                self.project,
-                self.profile,
-                values,
-                self.dimensions,
-            )
-        except (ValueError, KeyError) as exc:
-            QMessageBox.critical(self, "Invalid value", str(exc))
-            return
-        self._values = values
-        self.accept()
+    def restore_all(self) -> None:
+        """Restore defaults on every page."""
+        for form in self.forms.values():
+            form.reset()
 
     def _update_navigation(self, index: int) -> None:
         self.back.setEnabled(index > 0)
-        self.next.setEnabled(index < len(self.profile.pages) - 1)
+        self.next.setEnabled(0 <= index < len(self.profile.pages) - 1)
+        self.restore.setEnabled(index >= 0)
 
 
 class ConfigurationDialog(QDialog):
-    """Project configuration chooser and dynamic file-profile launcher."""
+    """Single-dialog project and file-profile editor."""
 
     def __init__(
         self,
@@ -153,64 +162,36 @@ class ConfigurationDialog(QDialog):
         initial_dimensions: Mapping[str, int] | None = None,
     ):
         super().__init__(parent)
+        self.base_project = project
         self.project = project
         self.document = empty_document(project)
         self.source_path: Path | None = None
         self._loading = False
         self.dimension_boxes: dict[str, QSpinBox] = {}
-        self.status_labels: dict[str, QLabel] = {}
+        self.profile_tabs: dict[str, ProfileTab] = {}
 
         self.setWindowTitle("Namelist configuration")
-        self.resize(680, 400)
+        self.resize(1000, 700)
         root = QVBoxLayout(self)
+        self.tabs = QTabWidget(self)
+        self.config_tab = QWidget(self)
+        self.tabs.addTab(self.config_tab, "Config")
+        root.addWidget(self.tabs, 1)
+        self._build_config_tab()
 
-        configuration = QGroupBox("Namelist configuration", self)
-        configuration_layout = QVBoxLayout(configuration)
-        source_layout = QHBoxLayout()
-        source_layout.addWidget(QLabel("Load configuration", self))
-        self.json_combo = QComboBox(self)
-        self.browse = QPushButton("Browse…", self)
-        source_layout.addWidget(self.json_combo, 1)
-        source_layout.addWidget(self.browse)
-        configuration_layout.addLayout(source_layout)
-
-        self.dimensions_group = QGroupBox("Runtime dimensions", self)
-        self.dimensions_layout = QFormLayout(self.dimensions_group)
-        for name, default in project.default_dimensions.items():
-            box = QSpinBox(self)
-            box.setRange(1, 2_147_483_647)
-            box.setValue(default)
-            box.valueChanged.connect(self._mark_dirty)
-            self.dimensions_layout.addRow(name, box)
-            self.dimension_boxes[name] = box
-        if self.dimension_boxes:
-            configuration_layout.addWidget(self.dimensions_group)
-        else:
-            self.dimensions_group.hide()
-
-        profiles = QGroupBox("File profiles", self)
-        profiles_layout = QFormLayout(profiles)
-        for profile in project.profiles:
-            button = QPushButton(profile.title, self)
-            button.setToolTip(profile.description or profile.default_file)
-            button.clicked.connect(lambda _checked=False, item=profile: self._edit_profile(item))
-            status = QLabel(self)
-            self.status_labels[profile.key] = status
-            row = QWidget(self)
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.addWidget(button, 1)
-            row_layout.addWidget(status)
-            profiles_layout.addRow(profile.name, row)
-        configuration_layout.addWidget(profiles)
-        root.addWidget(configuration, 1)
-
+        actions = QHBoxLayout()
+        self.restore_all = QPushButton("Restore all", self)
+        self.save_all = QPushButton("Save all", self)
         close = QPushButton("Close", self)
+        self.restore_all.clicked.connect(self._restore_all)
+        self.save_all.clicked.connect(self._save_all)
         close.clicked.connect(self.accept)
-        close_row = QHBoxLayout()
-        close_row.addStretch(1)
-        close_row.addWidget(close)
-        root.addLayout(close_row)
+        actions.addStretch(1)
+        actions.addWidget(self.restore_all)
+        actions.addWidget(self.save_all)
+        actions.addWidget(close)
+        root.addLayout(actions)
+        self._set_profile_actions_enabled(False)
 
         self.browse.clicked.connect(self._browse_json)
         self._populate_json_files()
@@ -218,18 +199,128 @@ class ConfigurationDialog(QDialog):
         self._load_selected_json(self.json_combo.currentIndex())
         if initial_dimensions is not None:
             self.document = merge_initial_dimensions(
-                self.document, initial_dimensions, self.project
+                self.document, initial_dimensions, self.base_project
             )
         if initial_values is not None:
-            self.document = merge_initial_values(self.document, initial_values, self.project)
+            self._prepare_virtual_initial_values(initial_values)
+            self.document = merge_initial_values(
+                self.document, initial_values, self.project
+            )
         if initial_dimensions is not None or initial_values is not None:
             self._set_dimensions(document_dimensions(self.document, self.project))
-            self._refresh_status()
+            self._sync_virtual_controls()
+
+    def _build_config_tab(self) -> None:
+        layout = QVBoxLayout(self.config_tab)
+        source_layout = QHBoxLayout()
+        source_layout.addWidget(QLabel("Load configuration", self.config_tab))
+        self.json_combo = QComboBox(self.config_tab)
+        self.browse = QPushButton("Browse…", self.config_tab)
+        source_layout.addWidget(self.json_combo, 1)
+        source_layout.addWidget(self.browse)
+        layout.addLayout(source_layout)
+
+        self.dimensions_group = QGroupBox("Runtime dimensions", self.config_tab)
+        self.dimensions_layout = QFormLayout(self.dimensions_group)
+        for name, default in self.base_project.default_dimensions.items():
+            box = QSpinBox(self.dimensions_group)
+            box.setRange(1, 2_147_483_647)
+            box.setValue(default)
+            self.dimensions_layout.addRow(name, box)
+            self.dimension_boxes[name] = box
+        if self.dimension_boxes:
+            layout.addWidget(self.dimensions_group)
+        else:
+            self.dimensions_group.hide()
+
+        if not self.base_project.profiles:
+            self._build_virtual_profile_controls(layout)
+
+        layout.addStretch(1)
+        run_row = QHBoxLayout()
+        run_row.addStretch(1)
+        self.run = QPushButton("Run", self.config_tab)
+        self.run.clicked.connect(self._run_configuration)
+        run_row.addWidget(self.run)
+        layout.addLayout(run_row)
+
+    def _build_virtual_profile_controls(self, layout: QVBoxLayout) -> None:
+        group = QGroupBox("File profile", self.config_tab)
+        group_layout = QVBoxLayout(group)
+        lists = QHBoxLayout()
+        self.available_schemas = QListWidget(group)
+        self.selected_schemas = QListWidget(group)
+        selection_mode = QAbstractItemView.ExtendedSelection
+        self.available_schemas.setSelectionMode(selection_mode)
+        self.selected_schemas.setSelectionMode(selection_mode)
+        for page in self.base_project.namelists:
+            self.available_schemas.addItem(self._schema_item(page.name, page.key))
+
+        transfers = QVBoxLayout()
+        transfers.addStretch(1)
+        for label, handler in (
+            (
+                ">",
+                lambda: self._move_selected(
+                    self.available_schemas, self.selected_schemas
+                ),
+            ),
+            (
+                ">>",
+                lambda: self._move_all(
+                    self.available_schemas, self.selected_schemas
+                ),
+            ),
+            (
+                "<",
+                lambda: self._move_selected(
+                    self.selected_schemas, self.available_schemas
+                ),
+            ),
+            (
+                "<<",
+                lambda: self._move_all(
+                    self.selected_schemas, self.available_schemas
+                ),
+            ),
+        ):
+            button = QPushButton(label, group)
+            button.clicked.connect(handler)
+            transfers.addWidget(button)
+        transfers.addStretch(1)
+        lists.addWidget(self.available_schemas, 1)
+        lists.addLayout(transfers)
+        lists.addWidget(self.selected_schemas, 1)
+        group_layout.addLayout(lists)
+
+        metadata = QFormLayout()
+        self.profile_name = QLineEdit(group)
+        self.default_filename = QLineEdit(group)
+        metadata.addRow("Profile name", self.profile_name)
+        metadata.addRow("Default file name", self.default_filename)
+        group_layout.addLayout(metadata)
+        layout.addWidget(group, 1)
+
+    @staticmethod
+    def _schema_item(name: str, key: str) -> QListWidgetItem:
+        item = QListWidgetItem(name)
+        item.setData(Qt.ItemDataRole.UserRole, key)
+        return item
+
+    @staticmethod
+    def _move_selected(source: QListWidget, target: QListWidget) -> None:
+        for item in sorted(source.selectedItems(), key=source.row):
+            target.addItem(source.takeItem(source.row(item)))
+
+    @staticmethod
+    def _move_all(source: QListWidget, target: QListWidget) -> None:
+        while source.count():
+            target.addItem(source.takeItem(0))
 
     def _populate_json_files(self, selected: Path | None = None) -> None:
         self._loading = True
         self.json_combo.clear()
-        paths = discover_json_files(self.project)
+        paths = discover_json_files(self.base_project)
         if not paths:
             self.json_combo.addItem("nml.json (new)", None)
         else:
@@ -241,7 +332,7 @@ class ConfigurationDialog(QDialog):
             if index < 0:
                 label = (
                     selected.name
-                    if selected.parent == self.project.output_root
+                    if selected.parent == self.base_project.output_root
                     else str(selected)
                 )
                 self.json_combo.addItem(label, selected_text)
@@ -255,11 +346,13 @@ class ConfigurationDialog(QDialog):
         raw_path = self.json_combo.currentData()
         if raw_path is None:
             self.source_path = None
-            self.document = empty_document(self.project)
+            self.project = self.base_project
+            self.document = empty_document(self.base_project)
         else:
             path = Path(raw_path)
             try:
-                document = load_document(path, self.project)
+                document = load_document(path, self.base_project)
+                project = self._virtual_project_from_document(document)
             except ValueError as exc:
                 QMessageBox.critical(self, "Load configuration", str(exc))
                 self.json_combo.blockSignals(True)
@@ -270,18 +363,87 @@ class ConfigurationDialog(QDialog):
                 )
                 self.json_combo.setCurrentIndex(previous)
                 self.json_combo.blockSignals(False)
-                self._refresh_status()
                 return
             self.source_path = path
+            self.project = project
             self.document = document
         self._set_dimensions(document_dimensions(self.document, self.project))
-        self._refresh_status()
+        self._sync_virtual_controls()
+        self._clear_profile_tabs()
+        self._set_profile_actions_enabled(False)
+        self.tabs.setCurrentWidget(self.config_tab)
+
+    def _virtual_project_from_document(
+        self, document: Mapping[str, Any]
+    ) -> GuiProject:
+        if self.base_project.profiles:
+            return self.base_project
+        raw_profiles = document.get("file_profiles", {})
+        if not isinstance(raw_profiles, Mapping) or not raw_profiles:
+            return self.base_project
+        entry = next(iter(raw_profiles.values()))
+        if not isinstance(entry, Mapping):
+            return self.base_project
+        name = str(entry.get("profile", ""))
+        default_file = str(entry.get("default_filename", f"{name}.nml"))
+        values = entry.get("values", {})
+        keys = list(values) if isinstance(values, Mapping) else []
+        return create_virtual_project(self.base_project, name, default_file, keys)
+
+    def _prepare_virtual_initial_values(
+        self, initial_values: Mapping[str, Any]
+    ) -> None:
+        if (
+            self.base_project.profiles
+            or self.project.profiles
+            or len(initial_values) != 1
+        ):
+            return
+        name, values = next(iter(initial_values.items()))
+        if not isinstance(name, str) or not isinstance(values, Mapping):
+            return
+        self.project = create_virtual_project(
+            self.base_project, name, f"{name}.nml", values
+        )
+        self._set_virtual_controls(
+            name, f"{name}.nml", [page.key for page in self.project.profiles[0].pages]
+        )
+
+    def _sync_virtual_controls(self) -> None:
+        if self.base_project.profiles:
+            return
+        if not self.project.profiles:
+            self._set_virtual_controls("", "", [])
+            return
+        profile = self.project.profiles[0]
+        self._set_virtual_controls(
+            profile.name,
+            profile.default_file,
+            [page.key for page in profile.pages],
+        )
+
+    def _set_virtual_controls(
+        self, name: str, default_file: str, selected_keys: list[str]
+    ) -> None:
+        self.profile_name.setText(name)
+        self.default_filename.setText(default_file)
+        selected = {key.lower() for key in selected_keys}
+        self.available_schemas.clear()
+        self.selected_schemas.clear()
+        by_key = {page.key: page for page in self.base_project.namelists}
+        for key in selected_keys:
+            page = by_key.get(key.lower())
+            if page is not None:
+                self.selected_schemas.addItem(self._schema_item(page.name, page.key))
+        for page in self.base_project.namelists:
+            if page.key not in selected:
+                self.available_schemas.addItem(self._schema_item(page.name, page.key))
 
     def _browse_json(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
             "Load namelist JSON",
-            str(self.project.output_root),
+            str(self.base_project.output_root),
             "JSON files (*.json)",
         )
         if not filename:
@@ -290,7 +452,7 @@ class ConfigurationDialog(QDialog):
         self._populate_json_files(path)
         self._load_selected_json(self.json_combo.currentIndex())
 
-    def _set_dimensions(self, dimensions: dict[str, int]) -> None:
+    def _set_dimensions(self, dimensions: Mapping[str, int]) -> None:
         for name, box in self.dimension_boxes.items():
             box.blockSignals(True)
             box.setValue(dimensions[name])
@@ -299,49 +461,139 @@ class ConfigurationDialog(QDialog):
     def _current_dimensions(self) -> dict[str, int]:
         return {name: box.value() for name, box in self.dimension_boxes.items()}
 
-    def _mark_dirty(self, _value: int) -> None:
-        self._refresh_status()
+    def _run_configuration(self) -> None:
+        try:
+            current = {
+                key: tab.values() for key, tab in self.profile_tabs.items()
+            }
+            if self.base_project.profiles:
+                project = self.base_project
+            else:
+                keys = []
+                for index in range(self.selected_schemas.count()):
+                    item = self.selected_schemas.item(index)
+                    if item is not None:
+                        keys.append(str(item.data(Qt.ItemDataRole.UserRole)))
+                project = create_virtual_project(
+                    self.base_project,
+                    self.profile_name.text(),
+                    self.default_filename.text(),
+                    keys,
+                )
+        except (ValueError, KeyError) as exc:
+            QMessageBox.critical(self, "Invalid configuration", str(exc))
+            return
 
-    def _refresh_status(self) -> None:
-        dimensions_match = self._current_dimensions() == document_dimensions(
-            self.document, self.project
-        )
-        for profile in self.project.profiles:
-            self._set_status(
-                self.status_labels[profile.key],
-                dimensions_match and profile_is_saved(self.project, self.document, profile),
-            )
-
-    @staticmethod
-    def _set_status(label: QLabel, saved: bool) -> None:
-        label.setText("Saved" if saved else "Not saved")
-        label.setStyleSheet(f"color: {'#22863a' if saved else '#b31d28'}; font-weight: bold;")
-
-    def _edit_profile(self, profile: GuiProfile) -> None:
+        old_pages = {
+            name: values
+            for profile_values_ in current.values()
+            for name, values in profile_values_.items()
+        }
+        self.project = project
+        self._clear_profile_tabs()
         dimensions = self._current_dimensions()
-        editor = ProfileDialog(
+        for profile in project.profiles:
+            values = current.get(profile.key, profile_values(self.document, profile))
+            if not values and old_pages:
+                values = {
+                    page.name: old_pages[page.name]
+                    for page in profile.pages
+                    if page.name in old_pages
+                }
+            self._add_profile_tab(profile, values, dimensions, fit_arrays=True)
+        self._set_profile_actions_enabled(bool(self.profile_tabs))
+        if self.profile_tabs:
+            self.tabs.setCurrentIndex(1)
+
+    def _add_profile_tab(
+        self,
+        profile: GuiProfile,
+        values: Mapping[str, Any],
+        dimensions: Mapping[str, int],
+        *,
+        fit_arrays: bool,
+        index: int | None = None,
+    ) -> ProfileTab:
+        editor = ProfileTab(
             self.project,
             profile,
-            profile_values(self.document, profile),
+            values,
             dimensions,
             self,
+            fit_arrays=fit_arrays,
         )
-        if _exec(editor) != _accepted(editor):
-            return
+        editor.cancel.clicked.connect(lambda: self._cancel_profile(profile))
+        editor.save.clicked.connect(lambda: self._save_profile(profile))
+        if index is None:
+            self.tabs.addTab(editor, profile.title)
+        else:
+            self.tabs.insertTab(index, editor, profile.title)
+        self.profile_tabs[profile.key] = editor
+        return editor
+
+    def _clear_profile_tabs(self) -> None:
+        while self.tabs.count() > 1:
+            widget = self.tabs.widget(1)
+            self.tabs.removeTab(1)
+            if widget is not None:
+                widget.deleteLater()
+        self.profile_tabs.clear()
+
+    def _cancel_profile(self, profile: GuiProfile) -> None:
+        old = self.profile_tabs[profile.key]
+        index = self.tabs.indexOf(old)
+        self.tabs.removeTab(index)
+        old.deleteLater()
+        self._add_profile_tab(
+            profile,
+            profile_values(self.document, profile),
+            self._current_dimensions(),
+            fit_arrays=True,
+            index=index,
+        )
+        self.tabs.setCurrentIndex(index)
+
+    def _save_profile(self, profile: GuiProfile) -> None:
         try:
             self.document = save_profile(
                 self.project,
                 self.document,
                 profile,
-                editor.values,
-                dimensions,
+                self.profile_tabs[profile.key].values(),
+                self._current_dimensions(),
             )
         except (OSError, UnicodeError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Save configuration", str(exc))
             return
-        self.source_path = self.project.output_root / "nml.json"
+        self._saved()
+
+    def _restore_all(self) -> None:
+        for tab in self.profile_tabs.values():
+            tab.restore_all()
+
+    def _save_all(self) -> None:
+        try:
+            values = {
+                key: tab.values() for key, tab in self.profile_tabs.items()
+            }
+            self.document = save_profiles(
+                self.project,
+                self.document,
+                values,
+                self._current_dimensions(),
+            )
+        except (OSError, UnicodeError, ValueError, KeyError) as exc:
+            QMessageBox.critical(self, "Save configuration", str(exc))
+            return
+        self._saved()
+
+    def _saved(self) -> None:
+        self.source_path = self.base_project.output_root / "nml.json"
         self._populate_json_files(self.source_path)
-        self._refresh_status()
+
+    def _set_profile_actions_enabled(self, enabled: bool) -> None:
+        self.restore_all.setEnabled(enabled)
+        self.save_all.setEnabled(enabled)
 
 
 def launch_gui(

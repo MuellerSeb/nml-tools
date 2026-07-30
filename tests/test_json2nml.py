@@ -46,6 +46,7 @@ def test_json_to_namelist_accepts_canonical_wrapper() -> None:
     wrapped = {
         "format_version": 1,
         "profile": "main",
+        "default_filename": "run.nml",
         "dimensions": {"max_domains": 2},
         "values": values,
     }
@@ -221,6 +222,7 @@ def test_json2nml_cli_converts_multiple_profiles(
         "file_profiles": {
             "main": {
                 "profile": "main",
+                "default_filename": "runtime/mhm.nml",
                 "values": {"run": {"enabled": [True, False]}},
             },
             "output": {
@@ -243,10 +245,9 @@ def test_json2nml_cli_converts_multiple_profiles(
     )
 
     assert result.exit_code == 0, result.output
-    assert {path.name for path in output_path.iterdir()} == {"main.nml", "output.nml"}
-    assert (output_path / "main.nml").read_text(encoding="utf-8") == json_to_namelist(
-        payload["file_profiles"]["main"]
-    )
+    assert (output_path / "runtime" / "mhm.nml").read_text(
+        encoding="utf-8"
+    ) == json_to_namelist(payload["file_profiles"]["main"])
     assert (output_path / "output.nml").read_text(encoding="utf-8") == json_to_namelist(
         payload["file_profiles"]["output"]
     )
@@ -265,6 +266,14 @@ def test_json2nml_cli_converts_multiple_profiles(
         (
             {"profile": "main", "values": {"run": {"enabled": True}}},
             "main.nml",
+        ),
+        (
+            {
+                "profile": "main",
+                "default_filename": "custom/run.nml",
+                "values": {"run": {"enabled": True}},
+            },
+            "custom/run.nml",
         ),
     ],
 )
@@ -315,9 +324,20 @@ def test_json2nml_cli_reports_malformed_json(tmp_path: Path) -> None:
         {},
         {"main": {"profile": "other", "values": {}}},
         {"../main": {"profile": "../main", "values": {}}},
+        {"main": {"default_filename": 1, "values": {}}},
+        {"main": {"default_filename": "/main.nml", "values": {}}},
+        {"main": {"default_filename": "C:/main.nml", "values": {}}},
+        {"main": {"default_filename": "../main.nml", "values": {}}},
+        {"main": {"default_filename": "nested\\main.nml", "values": {}}},
+        {"main": {"default_filename": "nested//main.nml", "values": {}}},
+        {"main": {"default_filename": "main\u007f.nml", "values": {}}},
         {
             "main": {"profile": "main", "values": {}},
             "MAIN": {"profile": "MAIN", "values": {}},
+        },
+        {
+            "main": {"default_filename": "RUN.nml", "values": {}},
+            "output": {"default_filename": "run.NML", "values": {}},
         },
         {
             "main": {"profile": "main", "values": {"run": {"count": 1}}},
