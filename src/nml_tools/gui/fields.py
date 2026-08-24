@@ -30,7 +30,7 @@ from .arrays import (
     resolve_shape,
     table_axes,
 )
-from .model import MISSING
+from .model import MISSING, suggestion
 
 
 def _exec(dialog: Any) -> int:
@@ -56,51 +56,6 @@ def _derived_array_editor(editor_type: type[Any], parent: QWidget) -> Any:
             super().accept()
 
     return DerivedArrayEditor(parent)
-
-
-def suggestion(schema: Mapping[str, Any], sizes: Mapping[str, int]) -> Any:
-    """Return a deterministic editable suggestion for a resolved field schema."""
-    examples = schema.get("examples")
-    if isinstance(examples, list) and examples:
-        candidate = copy.deepcopy(examples[0])
-    elif "default" in schema:
-        candidate = copy.deepcopy(schema["default"])
-    else:
-        candidate = MISSING
-
-    kind = schema.get("type")
-    if kind == "array":
-        items = schema.get("items")
-        if not isinstance(items, Mapping):
-            raise ValueError("array field must define object 'items'")
-        leaf = suggestion(items, sizes)
-        return initial_array(schema, sizes, None if candidate is MISSING else candidate, leaf)
-    if kind == "object":
-        raw = candidate if isinstance(candidate, Mapping) else {}
-        properties = schema.get("properties")
-        if not isinstance(properties, Mapping):
-            raise ValueError("derived field must define object 'properties'")
-        return {
-            name: copy.deepcopy(raw[name]) if name in raw else suggestion(child, sizes)
-            for name, child in properties.items()
-            if isinstance(name, str) and isinstance(child, Mapping)
-        }
-    if candidate is not MISSING:
-        return candidate
-    enum = schema.get("enum")
-    if isinstance(enum, list) and enum:
-        return copy.deepcopy(enum[0])
-    if kind == "boolean":
-        return False
-    if kind == "integer":
-        minimum = schema.get("minimum")
-        return int(minimum) if isinstance(minimum, int) and not isinstance(minimum, bool) else 0
-    if kind == "number":
-        minimum = schema.get("minimum")
-        return float(minimum) if isinstance(minimum, (int, float)) else 0.0
-    if kind == "string":
-        return ""
-    raise ValueError(f"unsupported schema type '{kind}'")
 
 
 class ScalarField(QWidget):

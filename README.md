@@ -863,17 +863,25 @@ binding is intentionally not installed by nml-tools. Current guidata releases
 officially support PyQt5, PyQt6, and PySide6; PySide2 compatibility depends on
 the guidata version installed alongside nml-tools.
 
-The GUI uses one tabbed dialog. Its initial **Config** tab lists JSON files in
-the output directory, preferring `nml.json`, and exposes runtime dimensions.
-Click **Run** to create one tab per configured file profile, in
-`file_profiles` order. Each profile tab lists its namelists on the left and
-opens the corresponding schema form on the right. Profile-level and global
-restore/save controls update `nml.json` and render each profile's configured
-`default_file` with `json_to_namelist()`.
+The GUI uses one tabbed dialog. Every **Config** tab can load a JSON or `.nml`
+file and has its own runtime dimensions. An existing `nml.json` is selected by
+default in the first available Config tab; while that document is open, later
+Config tabs start empty. Click **Run** to replace that Config tab with the
+loaded or configured file-profile tabs. Each profile tab lists its namelists
+on the left and opens the corresponding schema form on the right.
 
-If the TOML file has no file profiles, the Config tab lets the user select and
-order schemas, then supply a profile name and default file name before running.
-This creates one virtual file profile without changing `nml-config.toml`.
+Documents remain independent: a loaded JSON file is updated in place, while a
+loaded `.nml` file uses a same-named `.json` document. A new initial
+configuration uses `nml.json`; additional source-less profiles use the
+namelist filename with a `.json` extension. Profile-level and global save
+controls also render each profile's `default_file` with `json_to_namelist()`.
+
+The final `+` tab opens another Config tab. It lets the user select and order
+schemas, supply a profile name and default file name, and create as many
+additional profiles as needed without changing `nml-config.toml`. Config and
+profile tabs are closable; closing one does not delete saved files. Imported
+namelist groups are matched and validated against the configured schemas before
+their scalar, indexed-array, and derived-type values are opened for editing.
 All schema fields are editable and saved; fields listed in the containing
 schema object's `required` array are marked with `*` in the form.
 

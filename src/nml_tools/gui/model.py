@@ -14,7 +14,7 @@ from typing import Any, Mapping
 
 import click
 
-from .._namelist_eval import evaluate_group
+from .._namelist_eval import EvaluatedGroup, LeafState, evaluate_group
 from .._namelist_parser import parse_namelist
 from ..cli import (
     _iter_file_profiles,
@@ -26,10 +26,55 @@ from ..cli import (
 )
 from ..json2nml import json_to_namelist
 from ..schema import SchemaResolver
-from .arrays import validate_array_shape
+from .arrays import flex_tail_dims, initial_array, resolve_shape, validate_array_shape
 
 FORMAT_VERSION = 1
 MISSING = object()
+
+
+def suggestion(schema: Mapping[str, Any], sizes: Mapping[str, int]) -> Any:
+    """Return the deterministic editable value used for an unset schema field."""
+    examples = schema.get("examples")
+    if isinstance(examples, list) and examples:
+        candidate = copy.deepcopy(examples[0])
+    elif "default" in schema:
+        candidate = copy.deepcopy(schema["default"])
+    else:
+        candidate = MISSING
+
+    kind = schema.get("type")
+    if kind == "array":
+        items = schema.get("items")
+        if not isinstance(items, Mapping):
+            raise ValueError("array field must define object 'items'")
+        leaf = suggestion(items, sizes)
+        return initial_array(schema, sizes, None if candidate is MISSING else candidate, leaf)
+    if kind == "object":
+        raw = candidate if isinstance(candidate, Mapping) else {}
+        properties = schema.get("properties")
+        if not isinstance(properties, Mapping):
+            raise ValueError("derived field must define object 'properties'")
+        return {
+            name: copy.deepcopy(raw[name]) if name in raw else suggestion(child, sizes)
+            for name, child in properties.items()
+            if isinstance(name, str) and isinstance(child, Mapping)
+        }
+    if candidate is not MISSING:
+        return candidate
+    enum = schema.get("enum")
+    if isinstance(enum, list) and enum:
+        return copy.deepcopy(enum[0])
+    if kind == "boolean":
+        return False
+    if kind == "integer":
+        minimum = schema.get("minimum")
+        return int(minimum) if isinstance(minimum, int) and not isinstance(minimum, bool) else 0
+    if kind == "number":
+        minimum = schema.get("minimum")
+        return float(minimum) if isinstance(minimum, (int, float)) else 0.0
+    if kind == "string":
+        return ""
+    raise ValueError(f"unsupported schema type '{kind}'")
 
 
 @dataclass(frozen=True)
@@ -151,6 +196,36 @@ def create_virtual_project(
     namelist_keys: Iterable[str],
 ) -> GuiProject:
     """Return *project* with one virtual profile using selected namelists."""
+    profile = _virtual_profile(project, name, default_file, namelist_keys, ())
+    return replace(project, profiles=(profile,))
+
+
+def append_virtual_profile(
+    project: GuiProject,
+    name: str,
+    default_file: str,
+    namelist_keys: Iterable[str],
+    *,
+    reserved_profiles: Iterable[GuiProfile] = (),
+) -> GuiProject:
+    """Append one user-defined profile to *project*."""
+    profile = _virtual_profile(
+        project,
+        name,
+        default_file,
+        namelist_keys,
+        (*project.profiles, *reserved_profiles),
+    )
+    return replace(project, profiles=(*project.profiles, profile))
+
+
+def _virtual_profile(
+    project: GuiProject,
+    name: str,
+    default_file: str,
+    namelist_keys: Iterable[str],
+    existing: Iterable[GuiProfile],
+) -> GuiProfile:
     if not isinstance(name, str):
         raise ValueError("file profile name must be a string")
     clean_name = name.strip()
@@ -170,6 +245,19 @@ def create_virtual_project(
     if target == project.output_root or target == (project.output_root / "nml.json").resolve():
         raise ValueError("default file must not be the reserved nml.json")
 
+    existing_profiles = tuple(existing)
+    for profile in existing_profiles:
+        if profile.key == clean_name.lower():
+            raise ValueError(f"file profile '{clean_name}' already exists")
+        previous_target = (project.output_root / profile.default_file).resolve()
+        if (
+            previous_target == target
+            or profile.default_file.casefold() == clean_default.casefold()
+        ):
+            raise ValueError(
+                f"default file '{clean_default}' is already used by profile '{profile.name}'"
+            )
+
     available = {page.key: page for page in project.namelists}
     selected: list[NamelistPage] = []
     seen: set[str] = set()
@@ -187,7 +275,7 @@ def create_virtual_project(
     if not selected:
         raise ValueError("at least one namelist schema must be selected")
 
-    profile = GuiProfile(
+    return GuiProfile(
         name=clean_name,
         key=clean_name.lower(),
         title=clean_name,
@@ -195,7 +283,6 @@ def create_virtual_project(
         default_file=str(relative),
         pages=tuple(selected),
     )
-    return replace(project, profiles=(profile,))
 
 
 def empty_document(project: GuiProject) -> dict[str, Any]:
@@ -215,6 +302,68 @@ def discover_json_files(project: GuiProject) -> list[Path]:
         paths.remove(canonical)
         paths.insert(0, canonical)
     return paths
+
+
+def discover_configuration_files(project: GuiProject) -> list[Path]:
+    """Return JSON and namelist inputs, preferring the canonical ``nml.json``."""
+    paths = [
+        *project.output_root.glob("*.json"),
+        *project.output_root.glob("*.nml"),
+    ]
+    paths.sort(key=lambda path: path.name.casefold())
+    canonical = project.output_root / "nml.json"
+    if canonical in paths:
+        paths.remove(canonical)
+        paths.insert(0, canonical)
+    return paths
+
+
+def project_for_document(project: GuiProject, document: Mapping[str, Any]) -> GuiProject:
+    """Resolve configured and user-defined profiles referenced by *document*."""
+    profiles_raw = document.get("file_profiles", {})
+    if not isinstance(profiles_raw, Mapping):
+        raise ValueError("JSON 'file_profiles' must be an object")
+    if not profiles_raw:
+        return project
+
+    entries: dict[str, tuple[str, Mapping[str, Any]]] = {}
+    for raw_key, entry in profiles_raw.items():
+        if not isinstance(raw_key, str) or not isinstance(entry, Mapping):
+            raise ValueError("file profile entries must be named objects")
+        key = raw_key.lower()
+        if key in entries:
+            raise ValueError(
+                f"JSON repeats file profile '{raw_key}' case-insensitively"
+            )
+        entries[key] = (raw_key, entry)
+
+    configured = {profile.key: profile for profile in project.profiles}
+    selected = [profile for profile in project.profiles if profile.key in entries]
+    active = replace(project, profiles=tuple(selected))
+    for key, (raw_key, entry) in entries.items():
+        if key in configured:
+            continue
+        declared = entry.get("profile", raw_key)
+        if not isinstance(declared, str) or declared.lower() != key:
+            raise ValueError(
+                f"file profile '{raw_key}' has mismatched 'profile' metadata"
+            )
+        default_file = entry.get("default_filename", f"{declared}.nml")
+        if not isinstance(default_file, str):
+            raise ValueError(
+                f"file profile '{raw_key}' default_filename must be a string"
+            )
+        values = entry.get("values", {})
+        if not isinstance(values, Mapping):
+            raise ValueError(f"file profile '{raw_key}' values must be an object")
+        active = append_virtual_profile(
+            active,
+            declared,
+            default_file,
+            values.keys(),
+            reserved_profiles=project.profiles,
+        )
+    return active
 
 
 def load_document(path: Path, project: GuiProject) -> dict[str, Any]:
@@ -260,33 +409,12 @@ def load_document(path: Path, project: GuiProject) -> dict[str, Any]:
     if not isinstance(profiles_raw, Mapping):
         raise ValueError("JSON 'file_profiles' must be an object")
 
-    active_project = project
-    virtual_profile = not project.profiles and bool(profiles_raw)
-    if virtual_profile:
-        if len(profiles_raw) != 1:
-            raise ValueError("JSON may define at most one virtual file profile")
-        raw_key, entry = next(iter(profiles_raw.items()))
-        if not isinstance(raw_key, str) or not isinstance(entry, Mapping):
-            raise ValueError("file profile entries must be named objects")
-        declared = entry.get("profile", raw_key)
-        if not isinstance(declared, str) or declared.lower() != raw_key.lower():
-            raise ValueError(f"file profile '{raw_key}' has mismatched 'profile' metadata")
-        values = entry.get("values", {})
-        if not isinstance(values, Mapping):
-            raise ValueError(f"file profile '{raw_key}' values must be an object")
-        default_file = entry.get("default_filename", f"{declared}.nml")
-        if not isinstance(default_file, str):
-            raise ValueError(
-                f"file profile '{raw_key}' default_filename must be a string"
-            )
-        active_project = create_virtual_project(
-            project,
-            declared,
-            default_file,
-            values.keys(),
-        )
+    active_project = project_for_document(
+        project, {"file_profiles": profiles_raw}
+    )
 
     known_profiles = {profile.key: profile for profile in active_project.profiles}
+    configured_profiles = {profile.key: profile for profile in project.profiles}
     sizes = {**project.constants, **document["dimensions"]}
     normalized_profiles: dict[str, dict[str, Any]] = {}
     seen_profiles: set[str] = set()
@@ -308,7 +436,7 @@ def load_document(path: Path, project: GuiProject) -> dict[str, Any]:
             raise ValueError(
                 f"file profile '{raw_key}' default_filename must be a string"
             )
-        if not virtual_profile and default_file != profile.default_file:
+        if key in configured_profiles and default_file != profile.default_file:
             raise ValueError(
                 f"file profile '{raw_key}' has mismatched 'default_filename' metadata"
             )
@@ -324,6 +452,166 @@ def load_document(path: Path, project: GuiProject) -> dict[str, Any]:
         if profile.key in normalized_profiles
     }
     return document
+
+
+def load_namelist_document(
+    path: Path,
+    project: GuiProject,
+    dimensions: Mapping[str, int],
+) -> tuple[GuiProject, dict[str, Any]]:
+    """Load one namelist file as a single editable profile."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"failed to read {path.name}: {exc}") from exc
+    parsed = parse_namelist(text, source=str(path))
+    if not parsed.groups:
+        raise ValueError(f"namelist file '{path.name}' does not contain any groups")
+
+    pages = {page.key: page for page in project.namelists}
+    selected: list[NamelistPage] = []
+    seen: set[str] = set()
+    for group in parsed.groups:
+        key = group.name.lower()
+        if key in seen:
+            raise ValueError(f"namelist '{group.name}' appears multiple times")
+        seen.add(key)
+        page = pages.get(key)
+        if page is None:
+            raise ValueError(
+                f"Namelist '{group.name}' is not part of this nml-config.toml project"
+            )
+        selected.append(page)
+
+    clean_dimensions = _normalize_dimensions(dimensions, project)
+    selected_keys = tuple(page.key for page in selected)
+    selected_key_set = set(selected_keys)
+    matches = [
+        profile
+        for profile in project.profiles
+        if Path(profile.default_file).name.casefold() == path.name.casefold()
+        and selected_key_set <= {page.key for page in profile.pages}
+    ]
+    if len(matches) == 1:
+        profile = matches[0]
+        active_project = replace(project, profiles=(profile,))
+    else:
+        profile_name = path.stem or path.name
+        active_project = create_virtual_project(
+            project,
+            profile_name,
+            path.name,
+            selected_keys,
+        )
+        profile = active_project.profiles[0]
+    sizes = {**project.constants, **clean_dimensions}
+    values: dict[str, dict[str, Any]] = {}
+    for group, page in zip(parsed.groups, selected):
+        evaluated = evaluate_group(
+            group,
+            page.schema,
+            source=str(path),
+            constants=project.constants,
+            dimensions=clean_dimensions,
+        )
+        values[page.name] = _evaluated_group_values(evaluated, page.schema, sizes)
+
+    normalized = _normalize_profile_values(values, profile, sizes)
+    document = {
+        "format_version": FORMAT_VERSION,
+        "dimensions": clean_dimensions,
+        "file_profiles": {
+            profile.key: {
+                "profile": profile.name,
+                "default_filename": profile.default_file,
+                "values": normalized,
+            }
+        },
+    }
+    return active_project, document
+
+
+def _evaluated_group_values(
+    evaluated: EvaluatedGroup,
+    schema: Mapping[str, Any],
+    sizes: Mapping[str, int],
+) -> dict[str, Any]:
+    properties = schema.get("properties", {})
+    if not isinstance(properties, Mapping):
+        raise ValueError(f"schema for namelist '{evaluated.name}' has invalid properties")
+    result: dict[str, Any] = {}
+    for name, prop in properties.items():
+        if not isinstance(name, str) or not isinstance(prop, Mapping):
+            continue
+        states = [
+            (coordinates, component, state)
+            for (root, coordinates, component), state in evaluated.states.items()
+            if root == name.lower() and state.explicitly_assigned
+        ]
+        if not states:
+            continue
+        if prop.get("type") == "array":
+            result[name] = _evaluated_array(prop, states, sizes)
+        elif prop.get("type") == "object":
+            components = _component_names(prop)
+            result[name] = {
+                components[component]: _imported_scalar(state.value)
+                for _, component, state in states
+                if component in components
+            }
+        else:
+            result[name] = _imported_scalar(states[-1][2].value)
+    return result
+
+
+def _evaluated_array(
+    schema: Mapping[str, Any],
+    states: list[tuple[tuple[int, ...], str | None, LeafState]],
+    sizes: Mapping[str, int],
+) -> list[Any]:
+    items = schema.get("items")
+    if not isinstance(items, Mapping):
+        raise ValueError("array field must define object 'items'")
+    shape = list(resolve_shape(schema, sizes))
+    flexible = flex_tail_dims(schema, len(shape))
+    for axis in range(len(shape) - flexible, len(shape)):
+        used = [coordinates[axis] for coordinates, _, _ in states if coordinates]
+        if used:
+            shape[axis] = max(used)
+    result = _filled(tuple(shape), suggestion(items, sizes))
+    components = _component_names(items) if items.get("type") == "object" else {}
+    for coordinates, component, state in states:
+        target = result
+        for coordinate in coordinates[:-1]:
+            target = target[coordinate - 1]
+        index = coordinates[-1] - 1
+        value = _imported_scalar(state.value)
+        if component is None:
+            target[index] = value
+        elif component in components:
+            target[index][components[component]] = value
+    return result
+
+
+def _component_names(schema: Mapping[str, Any]) -> dict[str, str]:
+    properties = schema.get("properties", {})
+    if not isinstance(properties, Mapping):
+        return {}
+    return {
+        name.lower(): name
+        for name in properties
+        if isinstance(name, str)
+    }
+
+
+def _filled(shape: tuple[int, ...], value: Any) -> Any:
+    if not shape:
+        return copy.deepcopy(value)
+    return [_filled(shape[1:], value) for _ in range(shape[0])]
+
+
+def _imported_scalar(value: Any) -> Any:
+    return value.rstrip() if isinstance(value, str) else copy.deepcopy(value)
 
 
 def _normalize_profile_values(
@@ -618,13 +906,15 @@ def save_profile(
     profile: GuiProfile,
     values: Mapping[str, Any],
     dimensions: Mapping[str, int],
+    json_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Update one profile namelist and ``nml.json``."""
+    """Update one profile namelist and its JSON document."""
     return save_profiles(
         project,
         document,
         {profile.key: values},
         dimensions,
+        json_path,
     )
 
 
@@ -633,8 +923,9 @@ def save_profiles(
     document: Mapping[str, Any],
     values_by_profile: Mapping[str, Mapping[str, Any]],
     dimensions: Mapping[str, int],
+    json_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Render all requested profiles before writing their files and ``nml.json``."""
+    """Render requested profiles before writing their namelists and JSON document."""
     clean_dimensions = _normalize_dimensions(dimensions, project)
     sizes = {**project.constants, **clean_dimensions}
     known = {profile.key: profile for profile in project.profiles}
@@ -689,7 +980,7 @@ def save_profiles(
         update = updates.get(profile.key)
         if update is not None:
             _atomic_write(project.output_root / profile.default_file, update[1])
-    _atomic_write(project.output_root / "nml.json", json_text)
+    _atomic_write(json_path or project.output_root / "nml.json", json_text)
     return updated
 
 
