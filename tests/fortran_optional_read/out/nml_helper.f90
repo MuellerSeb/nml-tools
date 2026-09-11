@@ -1,13 +1,18 @@
 !> \file nml_helper.f90
 !> \copydoc nml_helper
 
-!> \brief Helper module for namelist file operations
-module nml_helper
+!> \brief Intrinsic procedures re-exported for collision-safe generated aliases
+module nml_helper_intrinsics
+  implicit none
 
   intrinsic :: achar, all, allocated, any, huge, len, len_trim, minval, present, reshape, &
     shape, size, trim
   public :: achar, all, allocated, any, huge, len, len_trim, minval, present, reshape, &
     shape, size, trim
+end module nml_helper_intrinsics
+
+!> \brief Helper module for namelist file operations
+module nml_helper
 
   !> \brief Buffer length for reading lines
   integer, public :: nml_line_buffer = 1024

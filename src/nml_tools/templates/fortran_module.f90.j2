@@ -9,6 +9,11 @@
 module {{ module_name }}
   use {{ helper_module }}, only: &
     {{ helper_imports | join(', &\n    ') }}
+{# Import from a declaration-only module. gfortran 10+ omits an intrinsic from
+   a module interface when that intrinsic is also referenced inside the module. #}
+{% for intrinsic_import in helper_intrinsic_imports %}
+  use {{ helper_intrinsic_module }}, only: {{ intrinsic_import }}
+{% endfor %}
 {% if use_ieee %}
   use ieee_arithmetic, only: nml__ieee_value => ieee_value, &
     nml__ieee_quiet_nan => ieee_quiet_nan, nml__ieee_is_nan => ieee_is_nan
