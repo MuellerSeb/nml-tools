@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
-from ._utils import validate_user_fortran_identifier
+from ._utils import validate_namelist_identifier, validate_user_fortran_identifier
 
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 _DOCUMENT_SUFFIXES = {".json", ".yml", ".yaml"}
@@ -282,7 +282,7 @@ class SchemaResolver:
         if not isinstance(name, str):
             raise ValueError(f"{_location(document, pointer)}: property names must be strings")
         try:
-            validate_user_fortran_identifier(name, label=f"property '{name}'")
+            validate_namelist_identifier(name, label=f"property '{name}'")
         except ValueError as exc:
             raise ValueError(f"{_location(document, pointer)}: {exc}") from exc
         if not isinstance(value, Mapping):

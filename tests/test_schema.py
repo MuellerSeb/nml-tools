@@ -1123,6 +1123,24 @@ def test_schema_rejects_reserved_double_underscore_identifiers(
         )
 
 
+@pytest.mark.parametrize("name", ["errmsg", "ErrMsg"])
+def test_schema_rejects_reserved_errmsg_properties(name: str) -> None:
+    with pytest.raises(ValueError, match="reserved for the generated Fortran API"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "object",
+                        "x-fortran-type": "period_t",
+                        "properties": {name: {"type": "integer"}},
+                    }
+                },
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("property_schema", "match"),
     [

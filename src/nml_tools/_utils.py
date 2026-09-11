@@ -7,6 +7,7 @@ from collections.abc import Mapping
 
 FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 RESERVED_IDENTIFIER_SEPARATOR = "__"
+RESERVED_NAMELIST_IDENTIFIERS = frozenset({"errmsg"})
 
 
 def is_fortran_identifier(name: str) -> bool:
@@ -23,6 +24,13 @@ def validate_user_fortran_identifier(name: str, *, label: str) -> None:
         raise ValueError(f"{label} must be a valid Fortran identifier")
     if RESERVED_IDENTIFIER_SEPARATOR in name:
         raise ValueError(f"{label} must not contain '{RESERVED_IDENTIFIER_SEPARATOR}'")
+
+
+def validate_namelist_identifier(name: str, *, label: str) -> None:
+    """Validate an identifier used for a namelist property or runtime dimension."""
+    validate_user_fortran_identifier(name, label=label)
+    if name.lower() in RESERVED_NAMELIST_IDENTIFIERS:
+        raise ValueError(f"{label} is reserved for the generated Fortran API")
 
 
 def strip_trailing_whitespace(text: str) -> str:
@@ -63,7 +71,7 @@ def normalize_runtime_dimensions(
     for name, value in dimensions.items():
         if not isinstance(name, str) or not name.strip():
             raise ValueError("runtime dimension names must be non-empty strings")
-        validate_user_fortran_identifier(name, label=f"runtime dimension '{name}'")
+        validate_namelist_identifier(name, label=f"runtime dimension '{name}'")
         canonical_name = name.lower()
         if canonical_name in normalized:
             raise ValueError(f"runtime dimension '{name}' duplicates another dimension name")
