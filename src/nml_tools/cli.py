@@ -16,7 +16,11 @@ from packaging.version import InvalidVersion, Version
 
 from ._namelist_eval import evaluate_group
 from ._namelist_parser import NamelistSyntaxError, ParsedGroup, parse_namelist
-from ._utils import constant_dimension_overlap, validate_user_fortran_identifier
+from ._utils import (
+    constant_dimension_overlap,
+    validate_namelist_identifier,
+    validate_user_fortran_identifier,
+)
 from ._version import __version__
 from .codegen_f2py import (
     F2pyCTypeMap,
@@ -462,7 +466,7 @@ def _load_dimensions(
         if not name:
             raise click.ClickException("config dimensions must have non-empty names")
         try:
-            validate_user_fortran_identifier(name, label=f"config dimension '{name}'")
+            validate_namelist_identifier(name, label=f"config dimension '{name}'")
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
         canonical_name = name.lower()
@@ -474,7 +478,7 @@ def _load_dimensions(
             raise click.ClickException(
                 f"config dimension '{name}' duplicates another dimension name"
             )
-        default_name = f"{canonical_name}__default"
+        default_name = f"{canonical_name}__dim_default"
         if default_name in constant_names:
             raise click.ClickException(
                 f"config dimension '{name}' default name duplicates a constant name"

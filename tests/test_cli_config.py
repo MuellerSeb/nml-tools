@@ -193,7 +193,7 @@ def test_load_dimensions_validates_values_and_duplicate_names() -> None:
     )
 
     assert dimensions == {"n_cells": 3}
-    assert specs[0].name == "n_cells__default"
+    assert specs[0].name == "n_cells__dim_default"
     assert specs[0].value == "3"
     assert specs[0].doc == "Number of cells."
 
@@ -203,7 +203,7 @@ def test_load_dimensions_validates_values_and_duplicate_names() -> None:
     with pytest.raises(click.ClickException, match="default name duplicates a constant"):
         cli_module._load_dimensions(
             {"dimensions": {"n_cells": {"default": 3}}},
-            {"n_cells__default": 3},
+            {"n_cells__dim_default": 3},
         )
 
     with pytest.raises(click.ClickException, match="duplicates another dimension"):

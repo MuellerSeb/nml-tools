@@ -80,8 +80,14 @@ def test_generate_fortran_emits_enum_helpers(tmp_path: Path) -> None:
     assert "try_methods__enum_values(2)" in generated
     assert "sizes__enum_values(3)" in generated
     assert "elemental logical function method__in_enum" in generated
-    assert "all(try_methods__in_enum(this%try_methods, allow_missing=.true.))" in generated
-    assert "all(sizes__in_enum(this%sizes, allow_missing=.true.))" in generated
+    assert (
+        "nml__all(try_methods__in_enum("
+        "nml__obj%data%try_methods, allow_missing=.true.))" in generated
+    )
+    assert (
+        "nml__all(sizes__in_enum(nml__obj%data%sizes, allow_missing=.true.))"
+        in generated
+    )
 
 
 def test_generate_fortran_rejects_array_enum_at_top_level(tmp_path: Path) -> None:
