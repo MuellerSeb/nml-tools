@@ -739,3 +739,37 @@ def test_generate_python_wrapper_rejects_unknown_docstring_style(tmp_path: Path)
             tmp_path / "config_wrappers.py",
             py_style="google",
         )
+
+
+def test_f2py_mangles_internal_status_names_but_preserves_python_names() -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "status": {"type": "integer"},
+            "len": {"type": "string", "x-fortran-len": 8},
+            "values": {
+                "type": "array",
+                "x-fortran-shape": "status",
+                "items": {"type": "integer"},
+            },
+        },
+    }
+
+    spec = codegen.build_f2py_namelist_spec(schema, dimensions={"status": 2})
+    fortran = codegen.render_f2py_wrappers(
+        [schema],
+        file_name="f2py_run.f90",
+        dimensions={"status": 2},
+    )
+    python = codegen.render_python_wrappers([(spec, "f2py_run")])
+
+    assert "status__value" in spec.argument_list
+    assert "status__value" in spec.set_dims_argument_list
+    assert "status=maybe__status" in spec.set_call_arguments
+    assert "integer, intent(in) :: status__value" in fortran
+    assert "character(len=*), intent(in) :: len__value" in fortran
+    assert "status: Any = None" in python
+    assert 'kwargs["status__value"] = status' in python
+    assert 'kwargs["len__value"] = len' in python
