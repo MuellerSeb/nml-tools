@@ -898,8 +898,29 @@ def test_generate_fortran_aliases_present_for_schema_names() -> None:
         file_name="nml_run.f90",
         dimensions={"present": 2},
     )
+    helper = codegen.render_helper(file_name="nml_helper.f90")
 
-    assert "nml__present => present" in generated
+    intrinsic_aliases = (
+        "nml__achar => achar",
+        "nml__all => all",
+        "nml__allocated => allocated",
+        "nml__any => any",
+        "nml__huge => huge",
+        "nml__len => len",
+        "nml__len_trim => len_trim",
+        "nml__minval => minval",
+        "nml__present => present",
+        "nml__reshape => reshape",
+        "nml__shape => shape",
+        "nml__size => size",
+        "nml__trim => trim",
+    )
+    generated_lines = generated.splitlines()
+    for intrinsic_alias in intrinsic_aliases:
+        assert f"  use nml_helper_intrinsics, only: {intrinsic_alias}" in generated_lines
+    assert "module nml_helper_intrinsics" in helper
+    assert "end module nml_helper_intrinsics" in helper
+    assert helper.index("end module nml_helper_intrinsics") < helper.index("module nml_helper\n")
     assert "if (nml__present(present))" in generated
     assert "nml__obj%dims%present" in generated
 

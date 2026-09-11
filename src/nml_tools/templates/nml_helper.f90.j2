@@ -5,6 +5,16 @@
 !> \file {{ file_name }}
 !> \copydoc {{ module_name }}
 
+!> \brief Intrinsic procedures re-exported for collision-safe generated aliases
+module {{ module_name }}_intrinsics
+  implicit none
+
+  intrinsic :: achar, all, allocated, any, huge, len, len_trim, minval, present, reshape, &
+    shape, size, trim
+  public :: achar, all, allocated, any, huge, len, len_trim, minval, present, reshape, &
+    shape, size, trim
+end module {{ module_name }}_intrinsics
+
 !> \brief Helper module for namelist file operations
 {% if module_doc %}
 {{ module_doc }}
@@ -15,11 +25,6 @@ module {{ module_name }}
   use {{ kind_module }}, only: &
     {{ kind_imports | join(', &\n    ') }}
 {% endif %}
-
-  intrinsic :: achar, all, allocated, any, huge, len, len_trim, minval, present, reshape, &
-    shape, size, trim
-  public :: achar, all, allocated, any, huge, len, len_trim, minval, present, reshape, &
-    shape, size, trim
 
   !> \brief Buffer length for reading lines
   integer, public :: nml_line_buffer = {{ len_buf }}

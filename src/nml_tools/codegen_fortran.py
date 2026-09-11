@@ -432,6 +432,9 @@ def _build_context(
         "NML_ERR_INVALID_NAME",
         "NML_ERR_INVALID_INDEX",
         "idx_check",
+        "to_lower",
+    ]
+    helper_intrinsic_imports = [
         "nml__achar => achar",
         "nml__all => all",
         "nml__allocated => allocated",
@@ -445,7 +448,6 @@ def _build_context(
         "nml__shape => shape",
         "nml__size => size",
         "nml__trim => trim",
-        "to_lower",
     ]
     if f2py_handle_helpers:
         helper_imports.append("NML_ERR_INVALID_HANDLE")
@@ -1680,7 +1682,9 @@ def _build_context(
         "kind_imports": resolved_kind_imports,
         "use_ieee": requires_ieee,
         "helper_module": helper_module,
+        "helper_intrinsic_module": f"{helper_module}_intrinsics",
         "helper_imports": helper_imports,
+        "helper_intrinsic_imports": helper_intrinsic_imports,
         "presence_cases": presence_cases,
         "data_type_name": data_type_name,
         "dims_type_name": dims_type_name,

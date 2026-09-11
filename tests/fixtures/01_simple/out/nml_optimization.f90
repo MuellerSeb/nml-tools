@@ -23,22 +23,22 @@ module nml_optimization
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
     idx_check, &
-    nml__achar => achar, &
-    nml__all => all, &
-    nml__allocated => allocated, &
-    nml__any => any, &
-    nml__huge => huge, &
-    nml__len => len, &
-    nml__len_trim => len_trim, &
-    nml__minval => minval, &
-    nml__present => present, &
-    nml__reshape => reshape, &
-    nml__shape => shape, &
-    nml__size => size, &
-    nml__trim => trim, &
     to_lower, &
     buf, &
     max_iter__dim_default
+  use nml_helper_intrinsics, only: nml__achar => achar
+  use nml_helper_intrinsics, only: nml__all => all
+  use nml_helper_intrinsics, only: nml__allocated => allocated
+  use nml_helper_intrinsics, only: nml__any => any
+  use nml_helper_intrinsics, only: nml__huge => huge
+  use nml_helper_intrinsics, only: nml__len => len
+  use nml_helper_intrinsics, only: nml__len_trim => len_trim
+  use nml_helper_intrinsics, only: nml__minval => minval
+  use nml_helper_intrinsics, only: nml__present => present
+  use nml_helper_intrinsics, only: nml__reshape => reshape
+  use nml_helper_intrinsics, only: nml__shape => shape
+  use nml_helper_intrinsics, only: nml__size => size
+  use nml_helper_intrinsics, only: nml__trim => trim
   use ieee_arithmetic, only: nml__ieee_value => ieee_value, &
     nml__ieee_quiet_nan => ieee_quiet_nan, nml__ieee_is_nan => ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
