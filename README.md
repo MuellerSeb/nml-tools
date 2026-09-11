@@ -57,9 +57,11 @@ identifiers and must not contain `__`. Double underscores are reserved for
 generated support names such as `seed__default`, `method__enum_values`, and
 `period__start_year__min`.
 
-Schema property names and runtime dimension names must also avoid generated
-namelist type member names: `is_configured`, `init`, `init_type`, `set_dims`,
-`from_file`, `set`, `is_set`, `is_valid`, and `filled_shape`.
+Schema property/component and runtime dimension names must not be `errmsg`
+(case-insensitively), because `errmsg=` is reserved as the stable error-output
+keyword on generated procedures. Properties and dimensions may otherwise
+match generated member names such as `set`, `is_valid`, or `is_configured`;
+they occupy separate generated containers.
 
 ### x-fortran-namelist
 
@@ -500,10 +502,8 @@ Named runtime array dimension defaults.
 - Names must be unique across `[constants]` and `[dimensions]`.
 - Names must not contain `__`; nml-tools reserves double underscores for
   generated helper identifiers.
-- Names must not collide with namelist property names, because generated
-  Fortran stores the current runtime extent as a field with the dimension name.
-- Names must not collide with generated namelist type members such as `init`,
-  `set_dims`, or `is_valid`.
+- Names may match namelist properties and generated operation names because
+  dimensions are stored below a separate `dims` component.
 - Entries may be used in `x-fortran-shape`, but not in `x-fortran-len`.
 - Arrays whose shape contains a `[dimensions]` name are generated as
   allocatable runtime-sized arrays.
@@ -587,7 +587,7 @@ cfg.set(periods=[{"start_year": 1980}, {"start_year": 2001}])
 Only the internal f2py ABI is flattened: `%` paths are encoded with `__`, for
 example `period__start_year` and `has__period__start_year`. Generated Fortran
 support identifiers also use `__` as an internal separator, for example
-`seed__default`, `method__enum_values`, and `n_periods__default`. Do not use
+`seed__default`, `method__enum_values`, and `n_periods__dim_default`. Do not use
 `__` in schema property, component, derived type/module, constant, or runtime
 dimension names; it is reserved for generated identifiers. Python
 `is_set("period.start_year")`
@@ -860,6 +860,32 @@ complete derived-array element without spilling into adjacent elements.
 Character substring assignment, complex schema values, nested derived values,
 component arrays, nondefault lower bounds, and user-defined formatted I/O are
 currently explicit capability boundaries.
+
+## Generated Fortran layout
+
+Generated schema values and runtime dimensions use separate public containers:
+
+```fortran
+type(nml_run_t) :: config
+
+value = config%data%iterations
+extent = config%dims%n_items
+```
+
+The generated module declares public `nml_run_data_t`, optional
+`nml_run_dims_t`, and outer `nml_run_t` types. Schema values live below
+`config%data`; configured runtime dimensions live below `config%dims`; lifecycle
+state and type-bound procedures remain on `config`. Namelist files stay flat:
+they continue to use `iterations` rather than `data%iterations`.
+
+This replaced the earlier flat native layout. Existing Fortran callers must
+change `%field` to `%data%field` and `%dimension` to `%dims%dimension`. Python
+wrappers retain their existing field and dimension names.
+
+Generated arrays have lower bound one in every dimension. Public indices use
+`1:size(array, dim)`, and callers must not manually reallocate public generated
+storage with non-one lower bounds. Setter inputs may have other lower bounds;
+their values are copied by shape into one-based generated storage.
 
 ## Error handling
 
