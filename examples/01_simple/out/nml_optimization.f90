@@ -22,11 +22,25 @@ module nml_optimization
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
     idx_check, &
+    nml__achar => achar, &
+    nml__all => all, &
+    nml__allocated => allocated, &
+    nml__any => any, &
+    nml__huge => huge, &
+    nml__len => len, &
+    nml__len_trim => len_trim, &
+    nml__minval => minval, &
+    nml__present => present, &
+    nml__reshape => reshape, &
+    nml__shape => shape, &
+    nml__size => size, &
+    nml__trim => trim, &
     to_lower, &
     buf, &
-    max_iter__default, &
+    max_iter__dim_default, &
     NML_ERR_PARTLY_SET
-  use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
+  use ieee_arithmetic, only: nml__ieee_value => ieee_value, &
+    nml__ieee_quiet_nan => ieee_quiet_nan, nml__ieee_is_nan => ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
     i4=>int32, &
@@ -53,12 +67,15 @@ module nml_optimization
   real(dp), parameter, public :: dds_r__min_excl = 0.0_dp
   real(dp), parameter, public :: mcmc_error_params__min = 0.0_dp
 
-  !> \class nml_optimization_t
-  !> \brief Optimization configurations
-  !> \details All relevant configurations for the optimization parameters.
-  type, public :: nml_optimization_t
-    logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: max_iter = max_iter__default !< runtime dimension for max_iter
+  private :: nml_optimization_read__from_file
+  private :: nml__achar, nml__all, nml__allocated, nml__any, nml__huge, nml__len, &
+    nml__len_trim, nml__minval, nml__present, nml__reshape, nml__shape, nml__size, &
+    nml__trim
+  private :: nml__ieee_value, nml__ieee_quiet_nan, nml__ieee_is_nan
+
+  !> \class nml_optimization_data_t
+  !> \brief Schema-backed values for optimization
+  type, public :: nml_optimization_data_t
     character(len=buf) :: name !< Optimization name
     character(len=buf) :: method !< Optimization method
     character(len=buf), dimension(3) :: try_methods !< Try alternative methods
@@ -70,6 +87,21 @@ module nml_optimization
     logical :: mcmc_opti !< MCMC optimization
     real(dp), allocatable, dimension(:, :, :) :: mcmc_error_params !< MCMC error parameters per iteration
     logical, dimension(3) :: include_parameters !< Include parameters
+  end type nml_optimization_data_t
+
+  !> \class nml_optimization_dims_t
+  !> \brief Runtime dimensions for optimization
+  type, public :: nml_optimization_dims_t
+    integer :: max_iter = max_iter__dim_default !< runtime dimension for max_iter
+  end type nml_optimization_dims_t
+
+  !> \class nml_optimization_t
+  !> \brief Optimization configurations
+  !> \details All relevant configurations for the optimization parameters.
+  type, public :: nml_optimization_t
+    type(nml_optimization_data_t) :: data !< schema-backed namelist values
+    type(nml_optimization_dims_t) :: dims !< runtime array dimensions
+    logical :: is_configured = .false. !< whether the namelist has been configured
   contains
     procedure :: init => nml_optimization_init
     procedure :: set_dims => nml_optimization_set_dims
@@ -87,15 +119,15 @@ contains
     character(len=*), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
+    if (nml__present(allow_missing)) then
       if (allow_missing) then
-        if (val == achar(0)) then
+        if (val == nml__achar(0)) then
           in_enum = .true.
           return
         end if
       end if
     end if
-    in_enum = any(trim(val) == method__enum_values)
+    in_enum = nml__any(nml__trim(val) == method__enum_values)
   end function method__in_enum
 
   !> \brief Check whether a value is part of an enum
@@ -103,15 +135,15 @@ contains
     character(len=*), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
+    if (nml__present(allow_missing)) then
       if (allow_missing) then
-        if (val == achar(0)) then
+        if (val == nml__achar(0)) then
           in_enum = .true.
           return
         end if
       end if
     end if
-    in_enum = any(trim(val) == try_methods__enum_values)
+    in_enum = nml__any(nml__trim(val) == try_methods__enum_values)
   end function try_methods__in_enum
 
   !> \brief Check whether a value is part of an enum
@@ -119,15 +151,15 @@ contains
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
+    if (nml__present(allow_missing)) then
       if (allow_missing) then
-        if (val == -huge(val)) then
+        if (val == -nml__huge(val)) then
           in_enum = .true.
           return
         end if
       end if
     end if
-    in_enum = any(val == complex_sizes__enum_values)
+    in_enum = nml__any(val == complex_sizes__enum_values)
   end function complex_sizes__in_enum
 
   !> \brief Check whether a value is within bounds
@@ -135,9 +167,9 @@ contains
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
+    if (nml__present(allow_missing)) then
       if (allow_missing) then
-        if (val == -huge(val)) then
+        if (val == -nml__huge(val)) then
           in_bounds = .true.
           return
         end if
@@ -153,9 +185,9 @@ contains
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
+    if (nml__present(allow_missing)) then
       if (allow_missing) then
-        if (ieee_is_nan(val)) then
+        if (nml__ieee_is_nan(val)) then
           in_bounds = .true.
           return
         end if
@@ -171,9 +203,9 @@ contains
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
+    if (nml__present(allow_missing)) then
       if (allow_missing) then
-        if (ieee_is_nan(val)) then
+        if (nml__ieee_is_nan(val)) then
           in_bounds = .true.
           return
         end if
@@ -189,9 +221,9 @@ contains
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
+    if (nml__present(allow_missing)) then
       if (allow_missing) then
-        if (ieee_is_nan(val)) then
+        if (nml__ieee_is_nan(val)) then
           in_bounds = .true.
           return
         end if
@@ -203,67 +235,76 @@ contains
   end function mcmc_error_params__in_bounds
 
   !> \brief Initialize defaults and sentinels for optimization
-  integer function nml_optimization_init(this, errmsg) result(status)
-    class(nml_optimization_t), intent(inout) :: this !< namelist instance
+  integer function nml_optimization_init(nml__obj, errmsg) result(nml__status)
+    class(nml_optimization_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
-    if (present(errmsg)) errmsg = ""
-    this%is_configured = .false.
+    nml__status = NML_OK
+    if (nml__present(errmsg)) errmsg = ""
+    nml__obj%is_configured = .false.
 
     ! allocate runtime-sized fields
-    if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
-    allocate(this%mcmc_error_params(3, 2, this%max_iter))
+    if (nml__allocated(nml__obj%data%mcmc_error_params)) deallocate(nml__obj%data%mcmc_error_params)
+    allocate(nml__obj%data%mcmc_error_params(3, 2, nml__obj%dims%max_iter))
 
     ! sentinel values for required/optional parameters
-    this%name = achar(0) ! sentinel for optional string
-    this%method = achar(0) ! NULL string as sentinel for required string
-    this%try_methods = achar(0) ! sentinel for optional string array
-    this%complex_sizes = -huge(this%complex_sizes) ! sentinel for optional integer array
-    this%niterations = -huge(this%niterations) ! sentinel for required integer
-    this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
-    this%mcmc_error_params = ieee_value(this%mcmc_error_params, ieee_quiet_nan) ! sentinel for required real array
+    nml__obj%data%name = nml__achar(0) ! sentinel for optional string
+    nml__obj%data%method = nml__achar(0) ! NULL string as sentinel for required string
+    nml__obj%data%try_methods = nml__achar(0) ! sentinel for optional string array
+    nml__obj%data%complex_sizes = -nml__huge(nml__obj%data%complex_sizes) ! sentinel for optional integer array
+    nml__obj%data%niterations = -nml__huge(nml__obj%data%niterations) ! sentinel for required integer
+    nml__obj%data%tolerance = nml__ieee_value(nml__obj%data%tolerance, nml__ieee_quiet_nan) ! sentinel for required real
+    nml__obj%data%mcmc_error_params = nml__ieee_value(nml__obj%data%mcmc_error_params, nml__ieee_quiet_nan) ! sentinel for required real array
     ! default values
-    this%seed = seed__default
-    this%dds_r = dds_r__default
-    this%mcmc_opti = mcmc_opti__default ! bool values always need a default
-    this%include_parameters = include_parameters__default
+    nml__obj%data%seed = seed__default
+    nml__obj%data%dds_r = dds_r__default
+    nml__obj%data%mcmc_opti = mcmc_opti__default ! bool values always need a default
+    nml__obj%data%include_parameters = include_parameters__default
   end function nml_optimization_init
 
   !> \brief Reset runtime dimensions for optimization
-  integer function nml_optimization_set_dims(this, &
+  integer function nml_optimization_set_dims(nml__obj, &
     max_iter, &
-    errmsg) result(status)
-    class(nml_optimization_t), intent(inout) :: this !< namelist instance
+    errmsg) result(nml__status)
+    class(nml_optimization_t), intent(inout) :: nml__obj !< namelist instance
     integer, intent(in), optional :: max_iter !< runtime dimension override for max_iter
     integer :: candidate__max_iter
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
-    if (present(errmsg)) errmsg = ""
-    if (present(max_iter)) then
+    nml__status = NML_OK
+    if (nml__present(errmsg)) errmsg = ""
+    if (nml__present(max_iter)) then
       candidate__max_iter = max_iter
     else
-      candidate__max_iter = max_iter__default
+      candidate__max_iter = max_iter__dim_default
     end if
     if (candidate__max_iter <= 0) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "dimension 'max_iter' must be positive"
+      nml__status = NML_ERR_INVALID_INDEX
+      if (nml__present(errmsg)) errmsg = "dimension 'max_iter' must be positive"
       return
     end if
-    this%max_iter = candidate__max_iter
+    nml__obj%dims%max_iter = candidate__max_iter
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
-    if (allocated(this%mcmc_error_params)) deallocate(this%mcmc_error_params)
-    this%is_configured = .false.
+    if (nml__allocated(nml__obj%data%mcmc_error_params)) deallocate(nml__obj%data%mcmc_error_params)
+    nml__obj%is_configured = .false.
   end function nml_optimization_set_dims
 
 
   !> \brief Read optimization namelist from file
-  integer function nml_optimization_from_file(this, file, errmsg) result(status)
-    class(nml_optimization_t), intent(inout) :: this !< namelist instance
+  integer function nml_optimization_from_file(nml__obj, file, errmsg) result(nml__status)
+    class(nml_optimization_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    nml__status = nml_optimization_read__from_file(nml__obj, file, errmsg)
+  end function nml_optimization_from_file
+
+  integer function nml_optimization_read__from_file(nml__obj, nml__file, errmsg) &
+    result(nml__status)
+    class(nml_optimization_t), intent(inout) :: nml__obj
+    character(len=*), intent(in) :: nml__file
+    character(len=*), intent(out), optional :: errmsg
     ! namelist variables
     character(len=buf) :: name
     character(len=buf) :: method
@@ -277,10 +318,10 @@ contains
     real(dp), allocatable, dimension(:, :, :) :: mcmc_error_params
     logical, dimension(3) :: include_parameters
     ! locals
-    type(nml_file_t) :: nml
-    integer :: iostat
-    integer :: close_status
-    character(len=nml_line_buffer) :: iomsg
+    type(nml_file_t) :: nml__reader
+    integer :: nml__iostat
+    integer :: nml__close_status
+    character(len=nml_line_buffer) :: nml__iomsg
 
     namelist /optimization/ &
       name, &
@@ -295,66 +336,66 @@ contains
       mcmc_error_params, &
       include_parameters
 
-    status = this%init(errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
-    if (allocated(mcmc_error_params)) deallocate(mcmc_error_params)
-    allocate(mcmc_error_params(3, 2, this%max_iter))
-    name = this%name
-    method = this%method
-    try_methods = this%try_methods
-    complex_sizes = this%complex_sizes
-    niterations = this%niterations
-    tolerance = this%tolerance
-    seed = this%seed
-    dds_r = this%dds_r
-    mcmc_opti = this%mcmc_opti
-    mcmc_error_params = this%mcmc_error_params
-    include_parameters = this%include_parameters
+    if (nml__allocated(mcmc_error_params)) deallocate(mcmc_error_params)
+    allocate(mcmc_error_params(3, 2, nml__obj%dims%max_iter))
+    name = nml__obj%data%name
+    method = nml__obj%data%method
+    try_methods = nml__obj%data%try_methods
+    complex_sizes = nml__obj%data%complex_sizes
+    niterations = nml__obj%data%niterations
+    tolerance = nml__obj%data%tolerance
+    seed = nml__obj%data%seed
+    dds_r = nml__obj%data%dds_r
+    mcmc_opti = nml__obj%data%mcmc_opti
+    mcmc_error_params = nml__obj%data%mcmc_error_params
+    include_parameters = nml__obj%data%include_parameters
 
-    status = nml%open(file, errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__reader%open(nml__file, errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 
-    status = nml%find("optimization", errmsg=errmsg)
-    if (status /= NML_OK) then
-      close_status = nml%close()
+    nml__status = nml__reader%find("optimization", errmsg=errmsg)
+    if (nml__status /= NML_OK) then
+      nml__close_status = nml__reader%close()
       return
     end if
 
     ! read namelist
-    read(nml%unit, nml=optimization, iostat=iostat, iomsg=iomsg)
-    if (iostat /= 0) then
-      status = NML_ERR_READ
-      if (present(errmsg)) errmsg = trim(iomsg)
-      close_status = nml%close()
+    read(nml__reader%unit, nml=optimization, iostat=nml__iostat, iomsg=nml__iomsg)
+    if (nml__iostat /= 0) then
+      nml__status = NML_ERR_READ
+      if (nml__present(errmsg)) errmsg = nml__trim(nml__iomsg)
+      nml__close_status = nml__reader%close()
       return
     end if
-    close_status = nml%close(errmsg=errmsg)
-    if (close_status /= NML_OK) then
-      status = close_status
+    nml__close_status = nml__reader%close(errmsg=errmsg)
+    if (nml__close_status /= NML_OK) then
+      nml__status = nml__close_status
       return
     end if
 
     ! assign values
-    this%name = name
-    this%method = method
-    this%try_methods = try_methods
-    this%complex_sizes = complex_sizes
-    this%niterations = niterations
-    this%tolerance = tolerance
-    this%seed = seed
-    this%dds_r = dds_r
-    this%mcmc_opti = mcmc_opti
-    this%mcmc_error_params = mcmc_error_params
-    this%include_parameters = include_parameters
+    nml__obj%data%name = name
+    nml__obj%data%method = method
+    nml__obj%data%try_methods = try_methods
+    nml__obj%data%complex_sizes = complex_sizes
+    nml__obj%data%niterations = niterations
+    nml__obj%data%tolerance = tolerance
+    nml__obj%data%seed = seed
+    nml__obj%data%dds_r = dds_r
+    nml__obj%data%mcmc_opti = mcmc_opti
+    nml__obj%data%mcmc_error_params = mcmc_error_params
+    nml__obj%data%include_parameters = include_parameters
 
     ! mark as configured
-    this%is_configured = .true.
-    status = NML_OK
-  end function nml_optimization_from_file
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
+  end function nml_optimization_read__from_file
 
   !> \brief Set optimization values
-  integer function nml_optimization_set(this, &
+  integer function nml_optimization_set(nml__obj, &
     method, &
     niterations, &
     tolerance, &
@@ -366,9 +407,9 @@ contains
     dds_r, &
     mcmc_opti, &
     include_parameters, &
-    errmsg) result(status)
+    errmsg) result(nml__status)
 
-    class(nml_optimization_t), intent(inout) :: this !< namelist instance
+    class(nml_optimization_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     character(len=*), intent(in) :: method !< Optimization method
     integer(i4), intent(in) :: niterations !< Number of iterations
@@ -381,398 +422,372 @@ contains
     real(dp), intent(in), optional :: dds_r !< DDS perturbation rate
     logical, intent(in), optional :: mcmc_opti !< MCMC optimization
     logical, dimension(:), intent(in), optional :: include_parameters !< Include parameters
-    integer :: &
-      lb__1, &
-      lb__2, &
-      lb__3, &
-      ub__1, &
-      ub__2, &
-      ub__3
-
-    status = this%init(errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 
     ! required parameters
-    this%method = method
-    this%niterations = niterations
-    this%tolerance = tolerance
-    if (size(mcmc_error_params, 1) > size(this%mcmc_error_params, 1)) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'mcmc_error_params'"
+    nml__obj%data%method = method
+    nml__obj%data%niterations = niterations
+    nml__obj%data%tolerance = tolerance
+    if (nml__size(mcmc_error_params, 1) > nml__size(nml__obj%data%mcmc_error_params, 1)) then
+      nml__status = NML_ERR_INVALID_INDEX
+      if (nml__present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'mcmc_error_params'"
       return
     end if
-    lb__1 = lbound(this%mcmc_error_params, 1)
-    ub__1 = lb__1 + size(mcmc_error_params, 1) - 1
-    if (size(mcmc_error_params, 2) > size(this%mcmc_error_params, 2)) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'mcmc_error_params'"
+    if (nml__size(mcmc_error_params, 2) > nml__size(nml__obj%data%mcmc_error_params, 2)) then
+      nml__status = NML_ERR_INVALID_INDEX
+      if (nml__present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'mcmc_error_params'"
       return
     end if
-    lb__2 = lbound(this%mcmc_error_params, 2)
-    ub__2 = lb__2 + size(mcmc_error_params, 2) - 1
-    if (size(mcmc_error_params, 3) > size(this%mcmc_error_params, 3)) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "dimension 3 exceeds bounds for 'mcmc_error_params'"
+    if (nml__size(mcmc_error_params, 3) > nml__size(nml__obj%data%mcmc_error_params, 3)) then
+      nml__status = NML_ERR_INVALID_INDEX
+      if (nml__present(errmsg)) errmsg = "dimension 3 exceeds bounds for 'mcmc_error_params'"
       return
     end if
-    lb__3 = lbound(this%mcmc_error_params, 3)
-    ub__3 = lb__3 + size(mcmc_error_params, 3) - 1
-    this%mcmc_error_params(lb__1:ub__1, lb__2:ub__2, lb__3:ub__3) = mcmc_error_params
+    nml__obj%data%mcmc_error_params( &
+      1:nml__size(mcmc_error_params, 1), &
+      1:nml__size(mcmc_error_params, 2), &
+      1:nml__size(mcmc_error_params, 3)) = mcmc_error_params
     ! override with provided values
-    if (present(name)) this%name = name
-    if (present(try_methods)) then
-      if (size(try_methods, 1) > size(this%try_methods, 1)) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'try_methods'"
+    if (nml__present(name)) nml__obj%data%name = name
+    if (nml__present(try_methods)) then
+      if (nml__size(try_methods, 1) > nml__size(nml__obj%data%try_methods, 1)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'try_methods'"
         return
       end if
-      lb__1 = lbound(this%try_methods, 1)
-      ub__1 = lb__1 + size(try_methods, 1) - 1
-      this%try_methods(lb__1:ub__1) = try_methods
+      nml__obj%data%try_methods( &
+        1:nml__size(try_methods, 1)) = try_methods
     end if
-    if (present(complex_sizes)) then
-      if (size(complex_sizes, 1) > size(this%complex_sizes, 1)) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'complex_sizes'"
+    if (nml__present(complex_sizes)) then
+      if (nml__size(complex_sizes, 1) > nml__size(nml__obj%data%complex_sizes, 1)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'complex_sizes'"
         return
       end if
-      lb__1 = lbound(this%complex_sizes, 1)
-      ub__1 = lb__1 + size(complex_sizes, 1) - 1
-      this%complex_sizes(lb__1:ub__1) = complex_sizes
+      nml__obj%data%complex_sizes( &
+        1:nml__size(complex_sizes, 1)) = complex_sizes
     end if
-    if (present(seed)) this%seed = seed
-    if (present(dds_r)) this%dds_r = dds_r
-    if (present(mcmc_opti)) this%mcmc_opti = mcmc_opti
-    if (present(include_parameters)) then
-      if (size(include_parameters, 1) > size(this%include_parameters, 1)) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'include_parameters'"
+    if (nml__present(seed)) nml__obj%data%seed = seed
+    if (nml__present(dds_r)) nml__obj%data%dds_r = dds_r
+    if (nml__present(mcmc_opti)) nml__obj%data%mcmc_opti = mcmc_opti
+    if (nml__present(include_parameters)) then
+      if (nml__size(include_parameters, 1) > nml__size(nml__obj%data%include_parameters, 1)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'include_parameters'"
         return
       end if
-      lb__1 = lbound(this%include_parameters, 1)
-      ub__1 = lb__1 + size(include_parameters, 1) - 1
-      this%include_parameters(lb__1:ub__1) = include_parameters
+      nml__obj%data%include_parameters( &
+        1:nml__size(include_parameters, 1)) = include_parameters
     end if
 
     ! mark as configured
-    this%is_configured = .true.
-    status = NML_OK
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
   end function nml_optimization_set
 
   !> \brief Check whether a namelist value was set
-  integer function nml_optimization_is_set(this, name, idx, errmsg) result(status)
-    class(nml_optimization_t), intent(in) :: this !< namelist instance
+  integer function nml_optimization_is_set(nml__obj, name, idx, errmsg) result(nml__status)
+    class(nml_optimization_t), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
-    if (present(errmsg)) errmsg = ""
-    if (.not. this%is_configured) then
-      status = NML_ERR_NOT_SET
-      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+    nml__status = NML_OK
+    if (nml__present(errmsg)) errmsg = ""
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
+      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
-    select case (to_lower(trim(name)))
+    select case (to_lower(nml__trim(name)))
     case ("name")
-      if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "index not supported for 'name'"
+      if (nml__present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "index not supported for 'name'"
         return
       end if
-      if (this%name == achar(0)) status = NML_ERR_NOT_SET
+      if (nml__obj%data%name == nml__achar(0)) nml__status = NML_ERR_NOT_SET
     case ("method")
-      if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "index not supported for 'method'"
+      if (nml__present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "index not supported for 'method'"
         return
       end if
-      if (this%method == achar(0)) status = NML_ERR_NOT_SET
+      if (nml__obj%data%method == nml__achar(0)) nml__status = NML_ERR_NOT_SET
     case ("try_methods")
-      if (present(idx)) then
-        status = idx_check(idx, lbound(this%try_methods), ubound(this%try_methods), &
+      if (nml__present(idx)) then
+        nml__status = idx_check(idx, nml__shape(nml__obj%data%try_methods), &
           "try_methods", errmsg)
-        if (status /= NML_OK) return
-        if (this%try_methods(idx(1)) == achar(0)) status = NML_ERR_NOT_SET
+        if (nml__status /= NML_OK) return
+        if (nml__obj%data%try_methods(idx(1)) == nml__achar(0)) nml__status = NML_ERR_NOT_SET
       else
-        if (all(this%try_methods == achar(0))) status = NML_ERR_NOT_SET
+        if (nml__all(nml__obj%data%try_methods == nml__achar(0))) nml__status = NML_ERR_NOT_SET
       end if
     case ("complex_sizes")
-      if (present(idx)) then
-        status = idx_check(idx, lbound(this%complex_sizes), ubound(this%complex_sizes), &
+      if (nml__present(idx)) then
+        nml__status = idx_check(idx, nml__shape(nml__obj%data%complex_sizes), &
           "complex_sizes", errmsg)
-        if (status /= NML_OK) return
-        if (this%complex_sizes(idx(1)) == -huge(this%complex_sizes(idx(1)))) status = NML_ERR_NOT_SET
+        if (nml__status /= NML_OK) return
+        if (nml__obj%data%complex_sizes(idx(1)) == -nml__huge(nml__obj%data%complex_sizes(idx(1)))) nml__status = NML_ERR_NOT_SET
       else
-        if (all(this%complex_sizes == -huge(this%complex_sizes))) status = NML_ERR_NOT_SET
+        if (nml__all(nml__obj%data%complex_sizes == -nml__huge(nml__obj%data%complex_sizes))) nml__status = NML_ERR_NOT_SET
       end if
     case ("niterations")
-      if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "index not supported for 'niterations'"
+      if (nml__present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "index not supported for 'niterations'"
         return
       end if
-      if (this%niterations == -huge(this%niterations)) status = NML_ERR_NOT_SET
+      if (nml__obj%data%niterations == -nml__huge(nml__obj%data%niterations)) nml__status = NML_ERR_NOT_SET
     case ("tolerance")
-      if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "index not supported for 'tolerance'"
+      if (nml__present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "index not supported for 'tolerance'"
         return
       end if
-      if (ieee_is_nan(this%tolerance)) status = NML_ERR_NOT_SET
+      if (nml__ieee_is_nan(nml__obj%data%tolerance)) nml__status = NML_ERR_NOT_SET
     case ("seed")
-      if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "index not supported for 'seed'"
+      if (nml__present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "index not supported for 'seed'"
         return
       end if
     case ("dds_r")
-      if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "index not supported for 'dds_r'"
+      if (nml__present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "index not supported for 'dds_r'"
         return
       end if
     case ("mcmc_opti")
-      if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "index not supported for 'mcmc_opti'"
+      if (nml__present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "index not supported for 'mcmc_opti'"
         return
       end if
     case ("mcmc_error_params")
-      if (.not. allocated(this%mcmc_error_params)) then
-        status = NML_ERR_NOT_SET
+      if (.not. nml__allocated(nml__obj%data%mcmc_error_params)) then
+        nml__status = NML_ERR_NOT_SET
         return
       end if
-      if (present(idx)) then
-        status = idx_check(idx, lbound(this%mcmc_error_params), ubound(this%mcmc_error_params), &
+      if (nml__present(idx)) then
+        nml__status = idx_check(idx, nml__shape(nml__obj%data%mcmc_error_params), &
           "mcmc_error_params", errmsg)
-        if (status /= NML_OK) return
-        if (ieee_is_nan(this%mcmc_error_params(idx(1), idx(2), idx(3)))) status = NML_ERR_NOT_SET
+        if (nml__status /= NML_OK) return
+        if (nml__ieee_is_nan(nml__obj%data%mcmc_error_params(idx(1), idx(2), idx(3)))) nml__status = NML_ERR_NOT_SET
       else
-        if (all(ieee_is_nan(this%mcmc_error_params))) status = NML_ERR_NOT_SET
+        if (nml__all(nml__ieee_is_nan(nml__obj%data%mcmc_error_params))) nml__status = NML_ERR_NOT_SET
       end if
     case ("include_parameters")
-      if (present(idx)) then
-        status = idx_check(idx, lbound(this%include_parameters), ubound(this%include_parameters), &
+      if (nml__present(idx)) then
+        nml__status = idx_check(idx, nml__shape(nml__obj%data%include_parameters), &
           "include_parameters", errmsg)
-        if (status /= NML_OK) return
+        if (nml__status /= NML_OK) return
       else
       end if
     case default
-      status = NML_ERR_INVALID_NAME
-      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+      nml__status = NML_ERR_INVALID_NAME
+      if (nml__present(errmsg)) errmsg = "unknown field: " // nml__trim(name)
     end select
-    if (status == NML_ERR_NOT_SET .and. present(errmsg)) then
-      if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
+    if (nml__status == NML_ERR_NOT_SET .and. nml__present(errmsg)) then
+      if (nml__len_trim(errmsg) == 0) errmsg = "field not set: " // nml__trim(name)
     end if
   end function nml_optimization_is_set
 
   !> \brief Determine the filled shape along flexible dimensions
-  integer function nml_optimization_filled_shape(this, name, filled, errmsg) result(status)
-    class(nml_optimization_t), intent(in) :: this !< namelist instance
+  integer function nml_optimization_filled_shape(nml__obj, name, filled, errmsg) result(nml__status)
+    class(nml_optimization_t), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: name !< field name
     integer, intent(out) :: filled(:) !< filled shape of the requested field
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: idx
-    integer :: dim
-    integer :: &
-      lb__1, &
-      lb__2, &
-      lb__3, &
-      ub__1, &
-      ub__2, &
-      ub__3
+    integer :: nml__idx
+    integer :: nml__dim
 
-    status = NML_OK
-    if (present(errmsg)) errmsg = ""
-    select case (to_lower(trim(name)))
+    nml__status = NML_OK
+    if (nml__present(errmsg)) errmsg = ""
+    select case (to_lower(nml__trim(name)))
     case ("mcmc_error_params")
-      if (size(filled) /= 3) then
-        status = NML_ERR_INVALID_INDEX
-        if (present(errmsg)) errmsg = "shape rank mismatch for 'mcmc_error_params'"
+      if (nml__size(filled) /= 3) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (nml__present(errmsg)) errmsg = "shape rank mismatch for 'mcmc_error_params'"
         return
       end if
-      if (.not. allocated(this%mcmc_error_params)) then
+      if (.not. nml__allocated(nml__obj%data%mcmc_error_params)) then
         filled = 0
         return
       end if
-      do dim = 1, 3
-        filled(dim) = size(this%mcmc_error_params, dim)
+      do nml__dim = 1, 3
+        filled(nml__dim) = nml__size(nml__obj%data%mcmc_error_params, nml__dim)
       end do
       filled(2) = 0
-      do idx = ubound(this%mcmc_error_params, 2), &
-        lbound(this%mcmc_error_params, 2), -1
-        if (.not. (all(ieee_is_nan(this%mcmc_error_params(:, idx, :))))) then
-          filled(2) = idx - lbound(this%mcmc_error_params, 2) + 1
+      do nml__idx = nml__size(nml__obj%data%mcmc_error_params, 2), 1, -1
+        if (.not. (nml__all(nml__ieee_is_nan(nml__obj%data%mcmc_error_params(:, nml__idx, :))))) then
+          filled(2) = nml__idx
           exit
         end if
       end do
       filled(3) = 0
-      do idx = ubound(this%mcmc_error_params, 3), &
-        lbound(this%mcmc_error_params, 3), -1
-        if (.not. (all(ieee_is_nan(this%mcmc_error_params(:, :, idx))))) then
-          filled(3) = idx - lbound(this%mcmc_error_params, 3) + 1
+      do nml__idx = nml__size(nml__obj%data%mcmc_error_params, 3), 1, -1
+        if (.not. (nml__all(nml__ieee_is_nan(nml__obj%data%mcmc_error_params(:, :, nml__idx))))) then
+          filled(3) = nml__idx
           exit
         end if
       end do
-      if (minval(filled) > 0) then
-        lb__2 = lbound(this%mcmc_error_params, 2)
-        ub__2 = lb__2 + filled(2) - 1
-        lb__3 = lbound(this%mcmc_error_params, 3)
-        ub__3 = lb__3 + filled(3) - 1
-        if (any(ieee_is_nan(this%mcmc_error_params(:, lb__2:ub__2, lb__3:ub__3)))) then
-          status = NML_ERR_PARTLY_SET
-          if (present(errmsg)) errmsg = "array partly set: mcmc_error_params"
+      if (nml__minval(filled) > 0) then
+        if (nml__any(nml__ieee_is_nan(nml__obj%data%mcmc_error_params(:, 1:filled(2), 1:filled(3))))) then
+          nml__status = NML_ERR_PARTLY_SET
+          if (nml__present(errmsg)) errmsg = "array partly set: mcmc_error_params"
           return
         end if
       end if
     case default
-      status = NML_ERR_INVALID_NAME
-      if (present(errmsg)) errmsg = "field is not a flexible array: " // trim(name)
+      nml__status = NML_ERR_INVALID_NAME
+      if (nml__present(errmsg)) errmsg = "field is not a flexible array: " // nml__trim(name)
     end select
   end function nml_optimization_filled_shape
 
   !> \brief Validate required values and constraints
-  integer function nml_optimization_is_valid(this, errmsg) result(status)
-    class(nml_optimization_t), intent(in) :: this !< namelist instance
+  integer function nml_optimization_is_valid(nml__obj, errmsg) result(nml__status)
+    class(nml_optimization_t), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: istat
-    integer, allocatable :: filled(:)
+    integer :: nml__istat
+    integer, allocatable :: nml__filled(:)
 
-    status = NML_OK
-    if (present(errmsg)) errmsg = ""
-    if (.not. this%is_configured) then
-      status = NML_ERR_NOT_SET
-      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+    nml__status = NML_OK
+    if (nml__present(errmsg)) errmsg = ""
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
+      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
 
     ! required parameters
-    istat = this%is_set("method", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
-      if (present(errmsg)) then
-        if (len_trim(errmsg) == 0) then
+    nml__istat = nml__obj%is_set("method", errmsg=errmsg)
+    if (nml__istat == NML_ERR_NOT_SET) then
+      nml__status = NML_ERR_REQUIRED
+      if (nml__present(errmsg)) then
+        if (nml__len_trim(errmsg) == 0) then
           errmsg = "field not set: method"
         end if
-        errmsg = "required " // trim(errmsg)
+        errmsg = "required " // nml__trim(errmsg)
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
-    istat = this%is_set("niterations", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
-      if (present(errmsg)) then
-        if (len_trim(errmsg) == 0) then
+    nml__istat = nml__obj%is_set("niterations", errmsg=errmsg)
+    if (nml__istat == NML_ERR_NOT_SET) then
+      nml__status = NML_ERR_REQUIRED
+      if (nml__present(errmsg)) then
+        if (nml__len_trim(errmsg) == 0) then
           errmsg = "field not set: niterations"
         end if
-        errmsg = "required " // trim(errmsg)
+        errmsg = "required " // nml__trim(errmsg)
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
-    istat = this%is_set("tolerance", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
-      if (present(errmsg)) then
-        if (len_trim(errmsg) == 0) then
+    nml__istat = nml__obj%is_set("tolerance", errmsg=errmsg)
+    if (nml__istat == NML_ERR_NOT_SET) then
+      nml__status = NML_ERR_REQUIRED
+      if (nml__present(errmsg)) then
+        if (nml__len_trim(errmsg) == 0) then
           errmsg = "field not set: tolerance"
         end if
-        errmsg = "required " // trim(errmsg)
+        errmsg = "required " // nml__trim(errmsg)
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
     ! flexible arrays
-    if (allocated(filled)) deallocate(filled)
-    allocate(filled(3))
-    istat = this%filled_shape("mcmc_error_params", filled, errmsg=errmsg)
-    if (istat == NML_ERR_PARTLY_SET) then
-      status = istat
-      if (present(errmsg)) then
-        if (len_trim(errmsg) == 0) errmsg = "array partly set: mcmc_error_params"
+    if (nml__allocated(nml__filled)) deallocate(nml__filled)
+    allocate(nml__filled(3))
+    nml__istat = nml__obj%filled_shape( &
+      "mcmc_error_params", nml__filled, errmsg=errmsg)
+    if (nml__istat == NML_ERR_PARTLY_SET) then
+      nml__status = nml__istat
+      if (nml__present(errmsg)) then
+        if (nml__len_trim(errmsg) == 0) errmsg = "array partly set: mcmc_error_params"
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
-    if (minval(filled) == 0) then
-      status = NML_ERR_REQUIRED
-      if (present(errmsg)) errmsg = "required field not set: mcmc_error_params"
+    if (nml__minval(nml__filled) == 0) then
+      nml__status = NML_ERR_REQUIRED
+      if (nml__present(errmsg)) errmsg = "required field not set: mcmc_error_params"
       return
     end if
     ! enum constraints
-    istat = this%is_set("method", errmsg=errmsg)
-    if (istat == NML_OK) then
-      if (.not. method__in_enum(this%method)) then
-        status = NML_ERR_ENUM
-        if (present(errmsg)) errmsg = "enum constraint failed: method"
+    nml__istat = nml__obj%is_set("method", errmsg=errmsg)
+    if (nml__istat == NML_OK) then
+      if (.not. method__in_enum(nml__obj%data%method)) then
+        nml__status = NML_ERR_ENUM
+        if (nml__present(errmsg)) errmsg = "enum constraint failed: method"
         return
       end if
-    else if (istat /= NML_ERR_NOT_SET) then
-      status = istat
+    else if (nml__istat /= NML_ERR_NOT_SET) then
+      nml__status = nml__istat
       return
     end if
-    if (.not. all(try_methods__in_enum(this%try_methods, allow_missing=.true.))) then
-      status = NML_ERR_ENUM
-      if (present(errmsg)) errmsg = "enum constraint failed: try_methods"
+    if (.not. nml__all(try_methods__in_enum(nml__obj%data%try_methods, allow_missing=.true.))) then
+      nml__status = NML_ERR_ENUM
+      if (nml__present(errmsg)) errmsg = "enum constraint failed: try_methods"
       return
     end if
-    if (.not. all(complex_sizes__in_enum(this%complex_sizes, allow_missing=.true.))) then
-      status = NML_ERR_ENUM
-      if (present(errmsg)) errmsg = "enum constraint failed: complex_sizes"
+    if (.not. nml__all(complex_sizes__in_enum(nml__obj%data%complex_sizes, allow_missing=.true.))) then
+      nml__status = NML_ERR_ENUM
+      if (nml__present(errmsg)) errmsg = "enum constraint failed: complex_sizes"
       return
     end if
     ! bounds constraints
-    istat = this%is_set("niterations", errmsg=errmsg)
-    if (istat == NML_OK) then
-      if (.not. niterations__in_bounds(this%niterations)) then
-        status = NML_ERR_BOUNDS
-        if (present(errmsg)) errmsg = "bounds constraint failed: niterations"
+    nml__istat = nml__obj%is_set("niterations", errmsg=errmsg)
+    if (nml__istat == NML_OK) then
+      if (.not. niterations__in_bounds(nml__obj%data%niterations)) then
+        nml__status = NML_ERR_BOUNDS
+        if (nml__present(errmsg)) errmsg = "bounds constraint failed: niterations"
         return
       end if
-    else if (istat /= NML_ERR_NOT_SET) then
-      status = istat
+    else if (nml__istat /= NML_ERR_NOT_SET) then
+      nml__status = nml__istat
       return
     end if
-    istat = this%is_set("tolerance", errmsg=errmsg)
-    if (istat == NML_OK) then
-      if (.not. tolerance__in_bounds(this%tolerance)) then
-        status = NML_ERR_BOUNDS
-        if (present(errmsg)) errmsg = "bounds constraint failed: tolerance"
+    nml__istat = nml__obj%is_set("tolerance", errmsg=errmsg)
+    if (nml__istat == NML_OK) then
+      if (.not. tolerance__in_bounds(nml__obj%data%tolerance)) then
+        nml__status = NML_ERR_BOUNDS
+        if (nml__present(errmsg)) errmsg = "bounds constraint failed: tolerance"
         return
       end if
-    else if (istat /= NML_ERR_NOT_SET) then
-      status = istat
+    else if (nml__istat /= NML_ERR_NOT_SET) then
+      nml__status = nml__istat
       return
     end if
-    istat = this%is_set("dds_r", errmsg=errmsg)
-    if (istat == NML_OK) then
-      if (.not. dds_r__in_bounds(this%dds_r)) then
-        status = NML_ERR_BOUNDS
-        if (present(errmsg)) errmsg = "bounds constraint failed: dds_r"
+    nml__istat = nml__obj%is_set("dds_r", errmsg=errmsg)
+    if (nml__istat == NML_OK) then
+      if (.not. dds_r__in_bounds(nml__obj%data%dds_r)) then
+        nml__status = NML_ERR_BOUNDS
+        if (nml__present(errmsg)) errmsg = "bounds constraint failed: dds_r"
         return
       end if
-    else if (istat /= NML_ERR_NOT_SET) then
-      status = istat
+    else if (nml__istat /= NML_ERR_NOT_SET) then
+      nml__status = nml__istat
       return
     end if
-    if (allocated(this%mcmc_error_params)) then
-    if (.not. all(mcmc_error_params__in_bounds(this%mcmc_error_params, allow_missing=.true.))) then
-      status = NML_ERR_BOUNDS
-      if (present(errmsg)) errmsg = "bounds constraint failed: mcmc_error_params"
+    if (nml__allocated(nml__obj%data%mcmc_error_params)) then
+    if (.not. nml__all(mcmc_error_params__in_bounds(nml__obj%data%mcmc_error_params, allow_missing=.true.))) then
+      nml__status = NML_ERR_BOUNDS
+      if (nml__present(errmsg)) errmsg = "bounds constraint failed: mcmc_error_params"
       return
     end if
     end if

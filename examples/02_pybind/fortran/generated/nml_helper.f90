@@ -4,6 +4,11 @@
 !> \brief Helper module for namelist file operations
 module nml_helper
 
+  intrinsic :: achar, all, allocated, any, huge, len, len_trim, minval, present, reshape, &
+    shape, size, trim
+  public :: achar, all, allocated, any, huge, len, len_trim, minval, present, reshape, &
+    shape, size, trim
+
   !> \brief Buffer length for reading lines
   integer, public :: nml_line_buffer = 512
   !> \brief Status code: success
@@ -39,7 +44,7 @@ module nml_helper
 
   !> \brief Shared constants for generated namelist modules
   integer, parameter, public :: str_len = 128 !< String buffer length for the pybind example.
-  integer, parameter, public :: n_weights__default = 3 !< Default number of weights.
+  integer, parameter, public :: n_weights__dim_default = 3 !< Default number of weights.
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations
@@ -150,19 +155,18 @@ contains
   end function to_lower
 
   !> \brief Validate index bounds for array access
-  integer function idx_check(idx, lower, upper, field, errmsg) result(status)
+  integer function idx_check(idx, extents, field, errmsg) result(status)
     integer, intent(in) :: idx(:)
-    integer, intent(in) :: lower(:)
-    integer, intent(in) :: upper(:)
+    integer, intent(in) :: extents(:)
     character(len=*), intent(in) :: field
     character(len=*), intent(out), optional :: errmsg
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (size(idx) /= size(lower)) then
+    if (size(idx) /= size(extents)) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "index rank mismatch for '" // trim(field) // "'"
-    else if (any(idx < lower) .or. any(idx > upper)) then
+    else if (any(idx < 1) .or. any(idx > extents)) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "index out of bounds for '" // trim(field) // "'"
     end if

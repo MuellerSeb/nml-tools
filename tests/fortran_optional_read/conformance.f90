@@ -18,7 +18,7 @@ program conformance
   status = optional%from_file(join_path(root, "other.nml"), errmsg)
   call expect_status(status, NML_OK, "optional missing group")
   if (.not. optional%is_configured) error stop "optional missing group was not configured"
-  if (optional%count /= 7) error stop "optional default was not retained"
+  if (optional%data%count /= 7) error stop "optional default was not retained"
   if (len_trim(errmsg) /= 0) error stop "optional missing group did not clear errmsg"
 
   status = optional%is_valid(errmsg=errmsg)

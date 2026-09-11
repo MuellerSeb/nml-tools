@@ -49,23 +49,23 @@ program main
     write(*,*) "filled shape of mcmc_error_params: ", shp
   end if
 
-  allocate(try_methods(size(cfg%try_methods)))
-  allocate(complex_sizes(size(cfg%complex_sizes)))
+  allocate(try_methods(size(cfg%data%try_methods)))
+  allocate(complex_sizes(size(cfg%data%complex_sizes)))
   allocate(mcmc_error_params( &
     shp(1), &
     shp(2), &
     shp(3)))
 
-  name = cfg%name
-  method = cfg%method
-  try_methods = cfg%try_methods
-  complex_sizes = cfg%complex_sizes
-  niterations = cfg%niterations
-  tolerance = cfg%tolerance
-  seed = cfg%seed
-  dds_r = cfg%dds_r
-  mcmc_opti = cfg%mcmc_opti
-  mcmc_error_params = cfg%mcmc_error_params(1:shp(1), 1:shp(2), 1:shp(3))
-  include_parameters = cfg%include_parameters
+  name = cfg%data%name
+  method = cfg%data%method
+  try_methods = cfg%data%try_methods
+  complex_sizes = cfg%data%complex_sizes
+  niterations = cfg%data%niterations
+  tolerance = cfg%data%tolerance
+  seed = cfg%data%seed
+  dds_r = cfg%data%dds_r
+  mcmc_opti = cfg%data%mcmc_opti
+  mcmc_error_params = cfg%data%mcmc_error_params(1:shp(1), 1:shp(2), 1:shp(3))
+  include_parameters = cfg%data%include_parameters
   write(*, nml=optimization)
 end program main
