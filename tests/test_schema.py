@@ -1177,7 +1177,7 @@ def test_schema_rejects_generated_dependency_properties(name: str) -> None:
         )
 
 
-@pytest.mark.parametrize("type_name", ["present", "NML_FILE_T"])
+@pytest.mark.parametrize("type_name", ["present", "NML_FILE_T", "nml_open"])
 def test_schema_rejects_generated_dependency_type_names(type_name: str) -> None:
     with pytest.raises(ValueError, match="reserved"):
         resolve_schema(

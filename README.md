@@ -520,6 +520,8 @@ Named runtime array dimension defaults.
   generated helper identifiers.
 - Names may match namelist properties and generated operation names because
   dimensions are stored below a separate `dims` component.
+- Used dimensions retain their `[dimensions]` configuration order in the public
+  `dims` type and positional Fortran `set_dims(...)` arguments.
 - Entries may be used in `x-fortran-shape`, but not in `x-fortran-len`.
 - Arrays whose shape contains a `[dimensions]` name are generated as
   allocatable runtime-sized arrays.

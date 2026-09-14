@@ -1512,6 +1512,12 @@ def _build_context(
         raise ValueError(f"property '{current_property}': {msg}") from exc
     if uses_partly_set and "NML_ERR_PARTLY_SET" not in helper_imports:
         helper_imports.append("NML_ERR_PARTLY_SET")
+    runtime_dimension_order = {
+        name: index for index, name in enumerate(runtime_dimension_values)
+    }
+    runtime_dimensions.sort(
+        key=lambda entry: runtime_dimension_order[str(entry["name"])]
+    )
     root_scope_names = set(property_name_map)
     type_name_collisions = sorted(derived_type_scope_names & root_scope_names)
     if type_name_collisions:
