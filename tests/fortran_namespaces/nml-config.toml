@@ -16,3 +16,9 @@ default = 2
 name = "namespaces"
 schema = "namespaces.yml"
 mod_path = "out/nml_namespaces.f90"
+
+[[namelists]]
+name = "wrapper_status"
+schema = "wrapper_status.yml"
+mod_path = "out/nml_wrapper_status.f90"
+f2py_path = "out/f2py_wrapper_status.f90"

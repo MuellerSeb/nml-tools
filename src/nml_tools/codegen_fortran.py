@@ -1511,11 +1511,11 @@ def _build_context(
         raise ValueError(f"property '{current_property}': {msg}") from exc
     if uses_partly_set and "NML_ERR_PARTLY_SET" not in helper_imports:
         helper_imports.append("NML_ERR_PARTLY_SET")
-    root_scope_names = set(property_name_map) | set(runtime_dimension_values)
+    root_scope_names = set(property_name_map)
     type_name_collisions = sorted(derived_type_scope_names & root_scope_names)
     if type_name_collisions:
         raise ValueError(
-            "derived type name conflicts with a root property or runtime dimension: "
+            "derived type name conflicts with a root property: "
             + ", ".join(type_name_collisions)
         )
     required_flex_names = {entry["name"] for entry in flex_arrays if entry["required"]}
