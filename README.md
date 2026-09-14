@@ -63,6 +63,17 @@ keyword on generated procedures. Properties and dimensions may otherwise
 match generated member names such as `set`, `is_valid`, or `is_configured`;
 they occupy separate generated containers.
 
+Generated Fortran calls a small, documented set of intrinsics directly. To
+avoid scope-dependent shadowing, the following names are unavailable
+case-insensitively wherever they are emitted unqualified: root properties,
+runtime dimensions, constants, kind aliases, and derived-type names:
+`present`, `size`, `shape`, `allocated`, `associated`, `trim`, `len`, `any`,
+`all`, `huge`, `reshape`, `achar`, `char`, `iachar`, `ichar`, `index`,
+`len_trim`, and `minval`. The generated helper API also reserves `NML_OK`, all
+`NML_ERR_*` names, `nml_file_t`, and `nml_line_buffer` in those scopes.
+An imported or generated derived-type name also cannot duplicate a root
+property name used in the same generated procedure scope.
+
 ### x-fortran-namelist
 
 - Location: schema root.
@@ -467,9 +478,14 @@ mod_path = "out/nml_optimization.f90"
 
 ### [helper]
 
-Controls the generated helper module.
+Controls the nml-tools-generated helper module. This source is required when
+generating any native Fortran module (`mod_path`) or f2py wrapper
+(`f2py_path`); it is not an application-provided extension point. Application
+derived types and kind modules remain supported through their schema and
+`[kinds]` configuration.
 
-- `path` (string, required to generate helper): output file for the helper module.
+- `path` (string, required for `mod_path` or `f2py_path`): output file for the
+  generated helper module.
 - `module` (string, optional): Fortran module name (default: `nml_helper`).
 - `buffer` (int, optional): line buffer length for the helper module.
 - `header` (string, optional): text inserted at the top of the helper file.
