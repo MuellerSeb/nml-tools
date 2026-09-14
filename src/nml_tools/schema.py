@@ -15,6 +15,7 @@ from urllib.parse import unquote, urlsplit
 import yaml
 
 from ._utils import (
+    validate_derived_component_identifier,
     validate_generated_fortran_identifier,
     validate_namelist_identifier,
     validate_user_fortran_identifier,
@@ -261,7 +262,13 @@ class SchemaResolver:
             if not isinstance(properties, Mapping):
                 raise ValueError(f"{_location(document, pointer)}: 'properties' must be an object")
             resolved["properties"] = {
-                name: self._resolve_property_value(value, document, pointer, name)
+                name: self._resolve_property_value(
+                    value,
+                    document,
+                    pointer,
+                    name,
+                    root_property=position == "root",
+                )
                 for name, value in properties.items()
             }
         if "items" in raw:
@@ -282,11 +289,16 @@ class SchemaResolver:
         document: _Document,
         pointer: str,
         name: Any,
+        *,
+        root_property: bool,
     ) -> dict[str, Any]:
         if not isinstance(name, str):
             raise ValueError(f"{_location(document, pointer)}: property names must be strings")
         try:
-            validate_namelist_identifier(name, label=f"property '{name}'")
+            if root_property:
+                validate_namelist_identifier(name, label=f"property '{name}'")
+            else:
+                validate_derived_component_identifier(name, label=f"property '{name}'")
         except ValueError as exc:
             raise ValueError(f"{_location(document, pointer)}: {exc}") from exc
         if not isinstance(value, Mapping):
@@ -498,7 +510,12 @@ def _validate_user_identifiers(raw: Any, document: _Document, pointer: str) -> N
                             "property names must be strings"
                         )
                     try:
-                        validate_namelist_identifier(name, label=f"property '{name}'")
+                        if namelist_name is not None:
+                            validate_namelist_identifier(name, label=f"property '{name}'")
+                        else:
+                            validate_derived_component_identifier(
+                                name, label=f"property '{name}'"
+                            )
                     except ValueError as exc:
                         raise ValueError(
                             f"{_location(document, child_pointer)}: {exc}"
@@ -840,7 +857,7 @@ def _validate_derived_object(schema: Mapping[str, Any]) -> None:
     for name, prop in properties.items():
         if not isinstance(name, str):
             raise ValueError("derived-type component names must be strings")
-        validate_user_fortran_identifier(name, label=f"derived-type component '{name}'")
+        validate_derived_component_identifier(name, label=f"derived-type component '{name}'")
         key = name.lower()
         if key in canonical:
             raise ValueError(f"derived-type object defines duplicate component '{name}'")

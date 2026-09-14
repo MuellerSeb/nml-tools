@@ -1416,6 +1416,41 @@ def test_generate_command_allows_missing_helper_path_without_fortran_output(
         assert not Path("nml_helper.f90").exists()
 
 
+@pytest.mark.parametrize("command", ["generate", "gen-fortran"])
+def test_commands_allow_helper_free_local_derived_types_without_fortran_output(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  value:
+                    type: object
+                    x-fortran-type: value_t
+                    properties:
+                      count:
+                        type: integer
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("nml-config.toml").write_text(
+            "[kinds]\nmodule = 'iso_fortran_env'\n\n[[namelists]]\n"
+            "schema = 'schema.yml'\ndoc_path = 'out/nml_demo.md'\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(cli_module.cli, [command])
+
+        assert result.exit_code == 0, result.output
+        assert not Path("nml_helper.f90").exists()
+
+
 def test_load_kind_settings_rejects_generated_dependency_alias() -> None:
     with pytest.raises(click.ClickException, match="reserved"):
         cli_module._load_kind_settings(

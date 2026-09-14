@@ -859,7 +859,8 @@ def test_generate_fortran_rejects_reserved_errmsg_dimension() -> None:
         )
 
 
-def test_generate_fortran_rejects_companion_type_import_collision() -> None:
+@pytest.mark.parametrize("type_name", ["nml_run_t", "nml_run_data_t"])
+def test_generate_fortran_rejects_generated_type_import_collision(type_name: str) -> None:
     codegen = _import_codegen_module()
     schema = {
         "x-fortran-namelist": "run",
@@ -867,15 +868,108 @@ def test_generate_fortran_rejects_companion_type_import_collision() -> None:
         "properties": {
             "value": {
                 "type": "object",
-                "x-fortran-type": "nml_run_data_t",
+                "x-fortran-type": type_name,
                 "x-fortran-module": "application_types",
                 "properties": {"count": {"type": "integer"}},
             }
         },
     }
 
-    with pytest.raises(ValueError, match="generated companion type 'nml_run_data_t'"):
+    with pytest.raises(ValueError, match=f"generated companion type '{type_name}'"):
         codegen.render_fortran(schema, file_name="nml_run.f90")
+
+
+@pytest.mark.parametrize(
+    ("schema", "kwargs"),
+    [
+        (
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {"value": {"type": "string", "x-fortran-len": "errmsg"}},
+            },
+            {"constants": {"errmsg": 8}},
+        ),
+        (
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "value": {"type": "integer", "x-fortran-kind": "errmsg"}
+                },
+            },
+            {"kind_map": {"errmsg": "int32"}, "kind_allowlist": {"int32"}},
+        ),
+        (
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "object",
+                        "x-fortran-type": "errmsg",
+                        "properties": {"code": {"type": "integer"}},
+                    }
+                },
+            },
+            {},
+        ),
+    ],
+)
+def test_generate_fortran_rejects_errmsg_in_generated_scope(
+    schema: dict[str, object], kwargs: dict[str, object]
+) -> None:
+    codegen = _import_codegen_module()
+
+    with pytest.raises(ValueError, match="reserved for the generated Fortran API"):
+        codegen.render_fortran(schema, file_name="nml_run.f90", **kwargs)
+
+
+def test_generate_fortran_rejects_generated_procedure_dummy_collisions() -> None:
+    codegen = _import_codegen_module()
+
+    with pytest.raises(ValueError, match="generated set procedure 'nml_run_set'"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {"nml_run_set": {"type": "integer"}},
+            },
+            file_name="nml_run.f90",
+        )
+
+    with pytest.raises(ValueError, match="generated init_type procedure 'nml_run_init_type'"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "nml_run_init_type": {
+                        "type": "object",
+                        "x-fortran-type": "period_t",
+                        "properties": {"year": {"type": "integer"}},
+                    }
+                },
+            },
+            file_name="nml_run.f90",
+        )
+
+    with pytest.raises(ValueError, match="generated set_dims procedure 'nml_run_set_dims'"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "values": {
+                        "type": "array",
+                        "x-fortran-shape": "nml_run_set_dims",
+                        "items": {"type": "integer"},
+                    }
+                },
+            },
+            file_name="nml_run.f90",
+            dimensions={"nml_run_set_dims": 2},
+        )
 
 
 @pytest.mark.parametrize("name", ["present", "Present", "size", "NML_OK"])

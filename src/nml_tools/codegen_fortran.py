@@ -15,6 +15,7 @@ from ._utils import (
     normalize_runtime_dimensions,
     reject_constant_dimension_overlap,
     strip_trailing_whitespace,
+    validate_derived_component_identifier,
     validate_generated_fortran_identifier,
     validate_namelist_identifier,
     validate_user_fortran_identifier,
@@ -623,7 +624,7 @@ def _build_context(
                 for child_display_name, child in components.items():
                     if not isinstance(child_display_name, str) or not isinstance(child, dict):
                         raise ValueError("derived object components must be schema objects")
-                    validate_namelist_identifier(
+                    validate_derived_component_identifier(
                         child_display_name,
                         label=f"property '{child_display_name}'",
                     )
@@ -1518,6 +1519,27 @@ def _build_context(
             "derived type name conflicts with a root property: "
             + ", ".join(type_name_collisions)
         )
+    set_name = f"{module_name}_set"
+    if set_name.lower() in property_name_map:
+        raise ValueError(
+            f"property '{property_name_map[set_name.lower()]}' conflicts with "
+            f"generated set procedure '{set_name}'"
+        )
+    if derived_init_type_fields:
+        init_type_name = f"{module_name}_init_type"
+        derived_field_names = {entry["name"].lower() for entry in derived_init_type_fields}
+        if init_type_name.lower() in derived_field_names:
+            raise ValueError(
+                f"property '{property_name_map[init_type_name.lower()]}' conflicts with "
+                f"generated init_type procedure '{init_type_name}'"
+            )
+    if runtime_dimension_values:
+        set_dims_name = f"{module_name}_set_dims"
+        if set_dims_name.lower() in runtime_dimension_values:
+            raise ValueError(
+                f"runtime dimension '{set_dims_name}' conflicts with "
+                f"generated set_dims procedure '{set_dims_name}'"
+            )
     required_flex_names = {entry["name"] for entry in flex_arrays if entry["required"]}
     required_input_names = [field.name for field in fields if field.requires_input]
     required_scalar_validations: list[str] = []
@@ -1613,7 +1635,7 @@ def _build_context(
         symbol.split("=>", maxsplit=1)[0].strip().lower()
         for symbol in helper_imports + resolved_kind_imports
     )
-    companion_names = [data_type_name]
+    companion_names = [type_name, data_type_name]
     if runtime_dimensions:
         companion_names.append(dims_type_name)
     for companion_name in companion_names:
