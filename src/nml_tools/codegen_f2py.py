@@ -937,16 +937,22 @@ def _derived_bridge_assignments(
     if rank and not init_allocates_array:
         dims = ", ".join(dim_names)
         lines.append(f"{indent}allocate({maybe_name}({dims}))")
-    lines.append(f"{indent}status = this%init_type({name}={maybe_name}, errmsg=errmsg)")
-    lines.append(f"{indent}if (status /= NML_OK) return")
+    lines.append(
+        f"{indent}nml__status = nml__obj%init_type({name}={maybe_name}, "
+        "errmsg=nml__errmsg)"
+    )
+    lines.append(f"{indent}if (nml__status /= NML_OK) return")
     if rank:
         if init_allocates_array:
             for dim_index, dim_name in enumerate(dim_names, start=1):
                 lines.extend(
                     [
                         f"{indent}if ({dim_name} > size({maybe_name}, {dim_index})) then",
-                        f"{indent}  status = NML_ERR_INVALID_INDEX",
-                        f'{indent}  errmsg = "dimension {dim_index} exceeds bounds for \'{name}\'"',
+                        f"{indent}  nml__status = NML_ERR_INVALID_INDEX",
+                        (
+                            f"{indent}  nml__errmsg = \"dimension {dim_index} "
+                            f"exceeds bounds for '{name}'\""
+                        ),
                         f"{indent}  return",
                         f"{indent}end if",
                     ]
