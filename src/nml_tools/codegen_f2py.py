@@ -405,7 +405,7 @@ def build_f2py_namelist_spec(
         "this",
     }
     namelist_name = cast("str", context["namelist_name"])
-    wrapper_reserved_names.update(
+    wrapper_procedure_names = {
         f"{namelist_name}_{suffix}".lower()
         for suffix in (
             "from_file_wrapper",
@@ -414,7 +414,14 @@ def build_f2py_namelist_spec(
             "is_set_wrapper",
             "is_valid_wrapper",
         )
-    )
+    }
+    wrapper_reserved_names.update(wrapper_procedure_names)
+    for kind_import in cast("list[str]", context["kind_imports"]):
+        kind_name = kind_import.split("=>", maxsplit=1)[0].strip().lower()
+        if kind_name in wrapper_procedure_names:
+            raise ValueError(
+                f"kind import '{kind_name}' conflicts with generated f2py wrapper procedure"
+            )
     field_abi_names: dict[str, str] = {}
     field_names_in_use = set(wrapper_reserved_names)
     for field in fields:
