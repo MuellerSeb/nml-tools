@@ -854,3 +854,21 @@ def test_f2py_mangles_schema_arguments_matching_wrapper_procedures(
         "    run_set_wrapper__value,"
     ) in generated
     assert "integer, intent(in) :: run_set_wrapper__value" in generated
+
+
+def test_f2py_rejects_kind_import_matching_wrapper_procedure() -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "value": {"type": "integer", "x-fortran-kind": "run_set_wrapper"}
+        },
+    }
+
+    with pytest.raises(ValueError, match="kind import 'run_set_wrapper' conflicts"):
+        codegen.build_f2py_namelist_spec(
+            schema,
+            kind_map={"run_set_wrapper": "int32"},
+            kind_allowlist={"int32"},
+        )

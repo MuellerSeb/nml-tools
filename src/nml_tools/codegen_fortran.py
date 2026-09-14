@@ -1634,13 +1634,26 @@ def _build_context(
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
     )
-    imported_module_symbols = {
-        str(entry["type_name"]).lower() for entry in derived_type_imports
-    }
-    imported_module_symbols.update(
-        symbol.split("=>", maxsplit=1)[0].strip().lower()
-        for symbol in helper_imports + resolved_kind_imports
-    )
+    imported_symbol_owners: dict[str, str] = {}
+
+    def _register_imported_symbol(symbol: str, module: str) -> None:
+        local_name = symbol.split("=>", maxsplit=1)[0].strip()
+        canonical_name = local_name.lower()
+        canonical_module = module.lower()
+        existing_module = imported_symbol_owners.get(canonical_name)
+        if existing_module is not None and existing_module != canonical_module:
+            raise ValueError(
+                f"imported symbol '{local_name}' is provided by both "
+                f"'{existing_module}' and '{canonical_module}'"
+            )
+        imported_symbol_owners[canonical_name] = canonical_module
+
+    for symbol in helper_imports:
+        _register_imported_symbol(symbol, helper_module)
+    for symbol in resolved_kind_imports:
+        _register_imported_symbol(symbol, resolved_kind_module)
+    for entry in derived_type_imports:
+        _register_imported_symbol(str(entry["type_name"]), str(entry["module"]))
     generated_module_symbols = [
         type_name,
         data_type_name,
@@ -1659,7 +1672,7 @@ def _build_context(
     if f2py_handle_helpers:
         generated_module_symbols.append(f"{module_name}_resolve_handle")
     for symbol_name in generated_module_symbols:
-        if symbol_name.lower() in imported_module_symbols:
+        if symbol_name.lower() in imported_symbol_owners:
             raise ValueError(
                 f"generated module symbol '{symbol_name}' conflicts with an imported symbol"
             )

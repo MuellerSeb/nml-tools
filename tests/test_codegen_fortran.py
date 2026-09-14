@@ -902,6 +902,55 @@ def test_generate_fortran_rejects_f2py_handle_helper_import_collision() -> None:
         )
 
 
+def test_generate_fortran_rejects_ambiguous_imported_type_names() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "first": {
+                "type": "object",
+                "x-fortran-type": "status",
+                "x-fortran-module": "application_a",
+                "properties": {"code": {"type": "integer"}},
+            },
+            "second": {
+                "type": "object",
+                "x-fortran-type": "status",
+                "x-fortran-module": "application_b",
+                "properties": {"code": {"type": "integer"}},
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="imported symbol 'status' is provided by both"):
+        codegen.render_fortran(schema, file_name="nml_run.f90")
+
+
+def test_generate_fortran_rejects_local_and_imported_type_name_collision() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "local": {
+                "type": "object",
+                "x-fortran-type": "status",
+                "properties": {"code": {"type": "integer"}},
+            },
+            "imported": {
+                "type": "object",
+                "x-fortran-type": "status",
+                "x-fortran-module": "application_types",
+                "properties": {"code": {"type": "integer"}},
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="imported symbol 'status' is provided by both"):
+        codegen.render_fortran(schema, file_name="nml_run.f90")
+
+
 @pytest.mark.parametrize(
     ("schema", "kwargs"),
     [
