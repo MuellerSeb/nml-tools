@@ -32,8 +32,11 @@ GENERATED_INTRINSIC_IDENTIFIERS = frozenset(
 )
 GENERATED_HELPER_IDENTIFIERS = frozenset(
     {
+        "nml_close",
         "nml_file_t",
+        "nml_find",
         "nml_line_buffer",
+        "nml_open",
         "nml_ok",
         "nml_err_file_not_found",
         "nml_err_open",

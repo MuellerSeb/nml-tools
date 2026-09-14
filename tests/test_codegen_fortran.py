@@ -1256,6 +1256,41 @@ def test_generate_fortran_runtime_sized_array_with_default_uses_partial_set(tmp_
     assert "dimension 1 mismatch for 'values'" not in generated
 
 
+def test_generate_fortran_orders_used_runtime_dimensions_by_configuration() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "first": {
+                "type": "array",
+                "x-fortran-shape": "a",
+                "items": {"type": "integer"},
+            },
+            "second": {
+                "type": "array",
+                "x-fortran-shape": "b",
+                "items": {"type": "integer"},
+            },
+        },
+    }
+
+    generated = codegen.render_fortran(
+        schema,
+        file_name="nml_run.f90",
+        dimensions={"b": 3, "a": 2},
+    )
+
+    dims_type = generated.index("type, public :: nml_run_dims_t")
+    b_component = generated.index("integer :: b = b__dim_default", dims_type)
+    a_component = generated.index("integer :: a = a__dim_default", dims_type)
+    set_dims = generated.index("integer function nml_run_set_dims")
+    b_argument = generated.index("    b, &", set_dims)
+    a_argument = generated.index("    a, &", set_dims)
+    assert b_component < a_component
+    assert b_argument < a_argument
+
+
 def test_generate_fortran_required_defaults_make_setter_arguments_optional() -> None:
     codegen = _import_codegen_module()
     schema = {
