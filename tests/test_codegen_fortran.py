@@ -859,8 +859,8 @@ def test_generate_fortran_rejects_reserved_errmsg_dimension() -> None:
         )
 
 
-@pytest.mark.parametrize("type_name", ["nml_run_t", "nml_run_data_t"])
-def test_generate_fortran_rejects_generated_type_import_collision(type_name: str) -> None:
+@pytest.mark.parametrize("type_name", ["nml_run_t", "nml_run_data_t", "nml_run_set"])
+def test_generate_fortran_rejects_generated_module_symbol_import_collision(type_name: str) -> None:
     codegen = _import_codegen_module()
     schema = {
         "x-fortran-namelist": "run",
@@ -875,8 +875,31 @@ def test_generate_fortran_rejects_generated_type_import_collision(type_name: str
         },
     }
 
-    with pytest.raises(ValueError, match=f"generated companion type '{type_name}'"):
+    with pytest.raises(ValueError, match=f"generated module symbol '{type_name}'"):
         codegen.render_fortran(schema, file_name="nml_run.f90")
+
+
+def test_generate_fortran_rejects_f2py_handle_helper_import_collision() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": "object",
+                "x-fortran-type": "nml_run_resolve_handle",
+                "x-fortran-module": "application_types",
+                "properties": {"count": {"type": "integer"}},
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="generated module symbol 'nml_run_resolve_handle'"):
+        codegen.render_fortran(
+            schema,
+            file_name="nml_run.f90",
+            f2py_handle_helpers=True,
+        )
 
 
 @pytest.mark.parametrize(
