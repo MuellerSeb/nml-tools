@@ -15,6 +15,7 @@ from ._utils import (
     normalize_runtime_dimensions,
     reject_constant_dimension_overlap,
     strip_trailing_whitespace,
+    validate_generated_fortran_identifier,
     validate_namelist_identifier,
     validate_user_fortran_identifier,
 )
@@ -395,6 +396,7 @@ def _build_context(
     bounds_functions: list[dict[str, Any]] = []
     bounds_checks: list[dict[str, Any]] = []
     derived_type_imports: list[dict[str, str]] = []
+    derived_type_scope_names: set[str] = set()
     derived_init_type_fields: list[dict[str, Any]] = []
     derived_presence_blocks: list[str] = []
     static_constants = normalize_constant_values(constants)
@@ -431,23 +433,8 @@ def _build_context(
         "NML_ERR_NOT_SET",
         "NML_ERR_INVALID_NAME",
         "NML_ERR_INVALID_INDEX",
-        "idx_check",
-        "to_lower",
-    ]
-    helper_intrinsic_imports = [
-        "nml__achar => achar",
-        "nml__all => all",
-        "nml__allocated => allocated",
-        "nml__any => any",
-        "nml__huge => huge",
-        "nml__len => len",
-        "nml__len_trim => len_trim",
-        "nml__minval => minval",
-        "nml__present => present",
-        "nml__reshape => reshape",
-        "nml__shape => shape",
-        "nml__size => size",
-        "nml__trim => trim",
+        "idx__check",
+        "to__lower",
     ]
     if f2py_handle_helpers:
         helper_imports.append("NML_ERR_INVALID_HANDLE")
@@ -610,6 +597,7 @@ def _build_context(
             requires_input = requirement.requires_input
             if derived is not None:
                 derived_type_name = _derived_type_name(derived)
+                derived_type_scope_names.add(derived_type_name.lower())
                 module = derived.get("x-fortran-module")
                 if module is None:
                     _add_helper_import(derived_type_name)
@@ -658,9 +646,9 @@ def _build_context(
                         )
                         init_lines.extend(
                             [
-                                f"if (nml__len({arg_target}) /= {expected_len}) then",
+                                f"if (len({arg_target}) /= {expected_len}) then",
                                 "  nml__status = NML_ERR_BOUNDS",
-                                "  if (nml__present(errmsg)) "
+                                "  if (present(errmsg)) "
                                 f'errmsg = "{storage_message}"',
                                 "  return",
                                 "end if",
@@ -874,11 +862,11 @@ def _build_context(
                     block = _render_partial_set_block(name, len(type_info.dimensions))
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
-                        f"if (nml__present({name})) then\n{indented_block}\nend if"
+                        f"if (present({name})) then\n{indented_block}\nend if"
                     )
                 else:
                     set_present_assignment = (
-                        f"if (nml__present({name})) {_data_ref(name)} = {name}"
+                        f"if (present({name})) {_data_ref(name)} = {name}"
                     )
 
                 init_argument_declaration = _render_argument_declaration(
@@ -896,7 +884,7 @@ def _build_context(
                             ", allocatable, intent(inout), optional",
                         )
                         allocation_lines.append(
-                            f"if (nml__allocated({name})) deallocate({name})"
+                            f"if (allocated({name})) deallocate({name})"
                         )
                         dims = ", ".join(runtime_shape)
                         allocation_lines.append(f"allocate({name}({dims}))")
@@ -1076,7 +1064,7 @@ def _build_context(
                         len_ref=_data_ref(name),
                     )
                     slice_missing_conditions.append(
-                        f"nml__all({slice_missing_expr})"
+                        f"all({slice_missing_expr})"
                         if rank > 1
                         else slice_missing_expr
                     )
@@ -1087,7 +1075,7 @@ def _build_context(
                     var_ref=prefix_ref,
                     len_ref=_data_ref(name),
                 )
-                prefix_any_missing_condition = f"nml__any({prefix_missing_expr})"
+                prefix_any_missing_condition = f"any({prefix_missing_expr})"
                 flex_arrays.append(
                     {
                         "name": name,
@@ -1434,11 +1422,11 @@ def _build_context(
                     )
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
-                        f"if (nml__present({name})) then\n{indented_block}\nend if"
+                        f"if (present({name})) then\n{indented_block}\nend if"
                     )
                 else:
                     set_present_assignment = (
-                        f"if (nml__present({name})) {_data_ref(name)} = {name}"
+                        f"if (present({name})) {_data_ref(name)} = {name}"
                     )
             else:
                 set_present_assignment = None
@@ -1523,6 +1511,13 @@ def _build_context(
         raise ValueError(f"property '{current_property}': {msg}") from exc
     if uses_partly_set and "NML_ERR_PARTLY_SET" not in helper_imports:
         helper_imports.append("NML_ERR_PARTLY_SET")
+    root_scope_names = set(property_name_map) | set(runtime_dimension_values)
+    type_name_collisions = sorted(derived_type_scope_names & root_scope_names)
+    if type_name_collisions:
+        raise ValueError(
+            "derived type name conflicts with a root property or runtime dimension: "
+            + ", ".join(type_name_collisions)
+        )
     required_flex_names = {entry["name"] for entry in flex_arrays if entry["required"]}
     required_input_names = [field.name for field in fields if field.requires_input]
     required_scalar_validations: list[str] = []
@@ -1682,9 +1677,7 @@ def _build_context(
         "kind_imports": resolved_kind_imports,
         "use_ieee": requires_ieee,
         "helper_module": helper_module,
-        "helper_intrinsic_module": f"{helper_module}_intrinsics",
         "helper_imports": helper_imports,
-        "helper_intrinsic_imports": helper_intrinsic_imports,
         "presence_cases": presence_cases,
         "data_type_name": data_type_name,
         "dims_type_name": dims_type_name,
@@ -1730,7 +1723,7 @@ def _derived_presence_cases(
         if runtime_array:
             lines.extend(
                 [
-                    f"  if (.not. nml__allocated({_data_ref(name)})) then",
+                    f"  if (.not. allocated({_data_ref(name)})) then",
                     "    nml__status = NML_ERR_NOT_SET",
                     "    return",
                     "  end if",
@@ -1744,8 +1737,8 @@ def _derived_presence_cases(
             array_prefix(lines)
             lines.extend(
                 [
-                    "  if (nml__present(idx)) then",
-                    f"    nml__status = idx_check(idx, nml__shape({_data_ref(name)}), &",
+                    "  if (present(idx)) then",
+                    f"    nml__status = idx__check(idx, shape({_data_ref(name)}), &",
                     f'      "{display_name}", errmsg)',
                     "    if (nml__status /= NML_OK) return",
                 ]
@@ -1759,15 +1752,15 @@ def _derived_presence_cases(
             if condition is not None:
                 lines.append("  else")
                 lines.append(
-                    f"    if (nml__all({condition})) nml__status = NML_ERR_NOT_SET"
+                    f"    if (all({condition})) nml__status = NML_ERR_NOT_SET"
                 )
             lines.append("  end if")
         else:
             lines.extend(
                 [
-                    "  if (nml__present(idx)) then",
+                    "  if (present(idx)) then",
                     "    nml__status = NML_ERR_INVALID_INDEX",
-                    "    if (nml__present(errmsg)) "
+                    "    if (present(errmsg)) "
                     f'errmsg = "index not supported for \'{display_name}\'"',
                     "    return",
                     "  end if",
@@ -1788,8 +1781,8 @@ def _derived_presence_cases(
         array_prefix(lines)
         lines.extend(
             [
-                "  if (nml__present(idx)) then",
-                f"    nml__status = idx_check(idx, nml__shape({_data_ref(name)}), &",
+                "  if (present(idx)) then",
+                f"    nml__status = idx__check(idx, shape({_data_ref(name)}), &",
                 f'      "{display_name}", errmsg)',
                 "    if (nml__status /= NML_OK) return",
             ]
@@ -1821,7 +1814,7 @@ def _derived_presence_cases(
             lines.append("  else")
             append_condition(
                 lines,
-                prefix="    if (nml__all(",
+                prefix="    if (all(",
                 conditions=aggregate_conditions,
                 operator=".and.",
                 suffix=")) then",
@@ -1830,7 +1823,7 @@ def _derived_presence_cases(
             if required_conditions and (len(aggregate_conditions) > 1 or is_array):
                 append_condition(
                     lines,
-                    prefix="    else if (nml__any(",
+                    prefix="    else if (any(",
                     conditions=aggregate_conditions,
                     operator=".or.",
                     suffix=")) then",
@@ -1841,9 +1834,9 @@ def _derived_presence_cases(
     else:
         lines.extend(
             [
-                "  if (nml__present(idx)) then",
+                "  if (present(idx)) then",
                 "    nml__status = NML_ERR_INVALID_INDEX",
-                "    if (nml__present(errmsg)) "
+                "    if (present(errmsg)) "
                 f'errmsg = "index not supported for \'{display_name}\'"',
                 "    return",
                 "  end if",
@@ -1908,6 +1901,8 @@ def _resolve_kind_imports(
     imports: list[str] = []
     target_aliases: dict[str, str] = {}
     for kind_id in _ordered_unique(kind_ids):
+        validate_user_fortran_identifier(kind_id, label=f"kind alias '{kind_id}'")
+        validate_generated_fortran_identifier(kind_id, label=f"kind alias '{kind_id}'")
         target = kind_id
         if kind_map is not None and kind_id in kind_map:
             mapped = kind_map[kind_id]
@@ -2009,6 +2004,7 @@ def _derived_type_name(schema: dict[str, Any]) -> str:
         raise ValueError("derived object must define non-empty 'x-fortran-type'")
     stripped = type_name.strip()
     validate_user_fortran_identifier(stripped, label="'x-fortran-type'")
+    validate_generated_fortran_identifier(stripped, label="'x-fortran-type'")
     return stripped
 
 
@@ -2306,7 +2302,7 @@ def _render_runtime_allocations(
     if any(dim == ":" for dim in runtime_dimensions):
         raise ValueError("runtime-sized arrays do not support deferred-size dimensions")
 
-    lines.append(f"if (nml__allocated({target_ref})) deallocate({target_ref})")
+    lines.append(f"if (allocated({target_ref})) deallocate({target_ref})")
     dims_expr = ", ".join(runtime_dimensions)
     if type_info.element_category == "string" and runtime_length_expr is not None:
         lines.append(f"allocate(character(len={runtime_length_expr}) :: {target_ref}({dims_expr}))")
@@ -2317,7 +2313,7 @@ def _render_runtime_allocations(
 
 def _render_runtime_deallocations(name: str, *, target_prefix: str = "") -> list[str]:
     target_ref = f"{target_prefix}{name}"
-    return [f"if (nml__allocated({target_ref})) deallocate({target_ref})"]
+    return [f"if (allocated({target_ref})) deallocate({target_ref})"]
 
 
 def _render_runtime_local_allocations(
@@ -2433,26 +2429,26 @@ def _sentinel_expressions(
     if category == "array":
         element = type_info.element_category
         if element == "string":
-            return "nml__achar(0)", f"nml__all({var_ref} == nml__achar(0))", False
+            return "achar(0)", f"all({var_ref} == achar(0))", False
         if element == "integer":
             return (
-                f"-nml__huge({var_ref})",
-                f"nml__all({var_ref} == -nml__huge({var_ref}))",
+                f"-huge({var_ref})",
+                f"all({var_ref} == -huge({var_ref}))",
                 False,
             )
         if element == "real":
             return (
                 f"nml__ieee_value({var_ref}, nml__ieee_quiet_nan)",
-                f"nml__all(nml__ieee_is_nan({var_ref}))",
+                f"all(nml__ieee_is_nan({var_ref}))",
                 True,
             )
         if element == "boolean":
             raise ValueError("boolean arrays cannot use sentinels")
         raise ValueError(f"unsupported sentinel array element '{element}'")
     if category == "string":
-        return "nml__achar(0)", f"{var_ref} == nml__achar(0)", False
+        return "achar(0)", f"{var_ref} == achar(0)", False
     if category == "integer":
-        return f"-nml__huge({var_ref})", f"{var_ref} == -nml__huge({var_ref})", False
+        return f"-huge({var_ref})", f"{var_ref} == -huge({var_ref})", False
     if category == "real":
         return (
             f"nml__ieee_value({var_ref}, nml__ieee_quiet_nan)",
@@ -2471,9 +2467,9 @@ def _element_missing_expression(
     len_ref: str | None = None,
 ) -> tuple[str, bool]:
     if category == "string":
-        return f"{var_ref} == nml__achar(0)", False
+        return f"{var_ref} == achar(0)", False
     if category == "integer":
-        return f"{var_ref} == -nml__huge({var_ref})", False
+        return f"{var_ref} == -huge({var_ref})", False
     if category == "real":
         return f"nml__ieee_is_nan({var_ref})", True
     raise ValueError(f"unsupported missing category '{category}'")
@@ -2488,7 +2484,7 @@ def _array_missing_conditions(
     missing_expr, uses_ieee = _element_missing_expression(
         element_category, var_ref=var_ref, len_ref=len_ref
     )
-    return f"nml__all({missing_expr})", f"nml__any({missing_expr})", uses_ieee
+    return f"all({missing_expr})", f"any({missing_expr})", uses_ieee
 
 
 def _slice_ref(name: str, rank: int, dim: int, index_var: str) -> str:
@@ -2511,11 +2507,11 @@ def _render_partial_set_block(name: str, rank: int) -> str:
     lines: list[str] = []
     for dim in range(1, rank + 1):
         lines.append(
-            f"if (nml__size({name}, {dim}) > nml__size({_data_ref(name)}, {dim})) then"
+            f"if (size({name}, {dim}) > size({_data_ref(name)}, {dim})) then"
         )
         lines.append("  nml__status = NML_ERR_INVALID_INDEX")
         lines.append(
-            f"  if (nml__present(errmsg)) "
+            f"  if (present(errmsg)) "
             f"errmsg = \"dimension {dim} exceeds bounds for '{name}'\""
         )
         lines.append("  return")
@@ -2523,12 +2519,12 @@ def _render_partial_set_block(name: str, rank: int) -> str:
     lines.append(f"{_data_ref(name)}( &")
     for dim in range(1, rank + 1):
         suffix = ", &" if dim < rank else f") = {name}"
-        lines.append(f"  1:nml__size({name}, {dim}){suffix}")
+        lines.append(f"  1:size({name}, {dim}){suffix}")
     return "\n".join(lines)
 
 
 def _format_reshape_assignment(name: str, arguments: list[str]) -> str:
-    lines = [f"{_data_ref(name)} = nml__reshape( &"]
+    lines = [f"{_data_ref(name)} = reshape( &"]
     for index, arg in enumerate(arguments):
         suffix = ", &" if index < len(arguments) - 1 else ")"
         lines.append(f"  {arg}{suffix}")
@@ -2571,7 +2567,7 @@ def _format_default(
             ]
             arguments.append(f"pad=[{', '.join(pad_elements)}]")
 
-        return f"nml__reshape({', '.join(arguments)})"
+        return f"reshape({', '.join(arguments)})"
     return _format_scalar_default(value, type_info.kind, type_info.category)
 
 

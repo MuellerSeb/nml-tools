@@ -20,23 +20,10 @@ module nml_run
     NML_ERR_NOT_SET, &
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
-    idx_check, &
-    to_lower, &
+    idx__check, &
+    to__lower, &
     label_len, &
     n_stations__dim_default
-  use nml_helper_intrinsics, only: nml__achar => achar
-  use nml_helper_intrinsics, only: nml__all => all
-  use nml_helper_intrinsics, only: nml__allocated => allocated
-  use nml_helper_intrinsics, only: nml__any => any
-  use nml_helper_intrinsics, only: nml__huge => huge
-  use nml_helper_intrinsics, only: nml__len => len
-  use nml_helper_intrinsics, only: nml__len_trim => len_trim
-  use nml_helper_intrinsics, only: nml__minval => minval
-  use nml_helper_intrinsics, only: nml__present => present
-  use nml_helper_intrinsics, only: nml__reshape => reshape
-  use nml_helper_intrinsics, only: nml__shape => shape
-  use nml_helper_intrinsics, only: nml__size => size
-  use nml_helper_intrinsics, only: nml__trim => trim
   use ieee_arithmetic, only: nml__ieee_value => ieee_value, &
     nml__ieee_quiet_nan => ieee_quiet_nan, nml__ieee_is_nan => ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
@@ -64,9 +51,6 @@ module nml_run
   real(dp), parameter, public :: relaxation__max = 0.5_dp
 
   private :: nml_run_read__from_file
-  private :: nml__achar, nml__all, nml__allocated, nml__any, nml__huge, nml__len, &
-    nml__len_trim, nml__minval, nml__present, nml__reshape, nml__shape, nml__size, &
-    nml__trim
   private :: nml__ieee_value, nml__ieee_quiet_nan, nml__ieee_is_nan
 
   !> \class nml_run_data_t
@@ -108,15 +92,15 @@ contains
     character(len=*), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (nml__present(allow_missing)) then
+    if (present(allow_missing)) then
       if (allow_missing) then
-        if (val == nml__achar(0)) then
+        if (val == achar(0)) then
           in_enum = .true.
           return
         end if
       end if
     end if
-    in_enum = nml__any(nml__trim(val) == method__enum_values)
+    in_enum = any(trim(val) == method__enum_values)
   end function method__in_enum
 
   !> \brief Check whether a value is within bounds
@@ -124,9 +108,9 @@ contains
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (nml__present(allow_missing)) then
+    if (present(allow_missing)) then
       if (allow_missing) then
-        if (val == -nml__huge(val)) then
+        if (val == -huge(val)) then
           in_bounds = .true.
           return
         end if
@@ -143,7 +127,7 @@ contains
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (nml__present(allow_missing)) then
+    if (present(allow_missing)) then
       if (allow_missing) then
         if (nml__ieee_is_nan(val)) then
           in_bounds = .true.
@@ -161,7 +145,7 @@ contains
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (nml__present(allow_missing)) then
+    if (present(allow_missing)) then
       if (allow_missing) then
         if (nml__ieee_is_nan(val)) then
           in_bounds = .true.
@@ -181,18 +165,18 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     nml__obj%is_configured = .false.
 
     ! allocate runtime-sized fields
-    if (nml__allocated(nml__obj%data%station_weights)) deallocate(nml__obj%data%station_weights)
+    if (allocated(nml__obj%data%station_weights)) deallocate(nml__obj%data%station_weights)
     allocate(nml__obj%data%station_weights(nml__obj%dims%n_stations))
 
     ! sentinel values for required/optional parameters
-    nml__obj%data%steps = -nml__huge(nml__obj%data%steps) ! sentinel for required integer
+    nml__obj%data%steps = -huge(nml__obj%data%steps) ! sentinel for required integer
     ! default values
     nml__obj%data%label = label__default
-    nml__obj%data%station_weights = nml__reshape( &
+    nml__obj%data%station_weights = reshape( &
       station_weights__default, &
       shape=[nml__obj%dims%n_stations], &
       pad=station_weights__default)
@@ -210,26 +194,26 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
-    if (nml__present(n_stations)) then
+    if (present(errmsg)) errmsg = ""
+    if (present(n_stations)) then
       candidate__n_stations = n_stations
     else
       candidate__n_stations = n_stations__dim_default
     end if
     if (candidate__n_stations <= 0) then
       nml__status = NML_ERR_INVALID_INDEX
-      if (nml__present(errmsg)) errmsg = "dimension 'n_stations' must be positive"
+      if (present(errmsg)) errmsg = "dimension 'n_stations' must be positive"
       return
     end if
     if (candidate__n_stations < 2) then
       nml__status = NML_ERR_INVALID_INDEX
-      if (nml__present(errmsg)) errmsg = "shape constants for 'station_weights' must allow at least 2 default values"
+      if (present(errmsg)) errmsg = "shape constants for 'station_weights' must allow at least 2 default values"
       return
     end if
     nml__obj%dims%n_stations = candidate__n_stations
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
-    if (nml__allocated(nml__obj%data%station_weights)) deallocate(nml__obj%data%station_weights)
+    if (allocated(nml__obj%data%station_weights)) deallocate(nml__obj%data%station_weights)
     nml__obj%is_configured = .false.
   end function nml_run_set_dims
 
@@ -270,7 +254,7 @@ contains
     nml__status = nml__obj%init(errmsg=errmsg)
     if (nml__status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
-    if (nml__allocated(station_weights)) deallocate(station_weights)
+    if (allocated(station_weights)) deallocate(station_weights)
     allocate(station_weights(nml__obj%dims%n_stations))
     label = nml__obj%data%label
     steps = nml__obj%data%steps
@@ -291,7 +275,7 @@ contains
     read(nml__reader%unit, nml=run, iostat=nml__iostat, iomsg=nml__iomsg)
     if (nml__iostat /= 0) then
       nml__status = NML_ERR_READ
-      if (nml__present(errmsg)) errmsg = nml__trim(nml__iomsg)
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
       nml__close_status = nml__reader%close()
       return
     end if
@@ -335,18 +319,18 @@ contains
     ! required parameters
     nml__obj%data%steps = steps
     ! override with provided values
-    if (nml__present(label)) nml__obj%data%label = label
-    if (nml__present(station_weights)) then
-      if (nml__size(station_weights, 1) > nml__size(nml__obj%data%station_weights, 1)) then
+    if (present(label)) nml__obj%data%label = label
+    if (present(station_weights)) then
+      if (size(station_weights, 1) > size(nml__obj%data%station_weights, 1)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'station_weights'"
+        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'station_weights'"
         return
       end if
       nml__obj%data%station_weights( &
-        1:nml__size(station_weights, 1)) = station_weights
+        1:size(station_weights, 1)) = station_weights
     end if
-    if (nml__present(method)) nml__obj%data%method = method
-    if (nml__present(relaxation)) nml__obj%data%relaxation = relaxation
+    if (present(method)) nml__obj%data%method = method
+    if (present(relaxation)) nml__obj%data%relaxation = relaxation
 
     ! mark as configured
     nml__obj%is_configured = .true.
@@ -361,55 +345,55 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     if (.not. nml__obj%is_configured) then
       nml__status = NML_ERR_NOT_SET
-      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
-    select case (to_lower(nml__trim(name)))
+    select case (to__lower(trim(name)))
     case ("label")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'label'"
+        if (present(errmsg)) errmsg = "index not supported for 'label'"
         return
       end if
     case ("steps")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'steps'"
+        if (present(errmsg)) errmsg = "index not supported for 'steps'"
         return
       end if
-      if (nml__obj%data%steps == -nml__huge(nml__obj%data%steps)) nml__status = NML_ERR_NOT_SET
+      if (nml__obj%data%steps == -huge(nml__obj%data%steps)) nml__status = NML_ERR_NOT_SET
     case ("station_weights")
-      if (.not. nml__allocated(nml__obj%data%station_weights)) then
+      if (.not. allocated(nml__obj%data%station_weights)) then
         nml__status = NML_ERR_NOT_SET
         return
       end if
-      if (nml__present(idx)) then
-        nml__status = idx_check(idx, nml__shape(nml__obj%data%station_weights), &
+      if (present(idx)) then
+        nml__status = idx__check(idx, shape(nml__obj%data%station_weights), &
           "station_weights", errmsg)
         if (nml__status /= NML_OK) return
       else
       end if
     case ("method")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'method'"
+        if (present(errmsg)) errmsg = "index not supported for 'method'"
         return
       end if
     case ("relaxation")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'relaxation'"
+        if (present(errmsg)) errmsg = "index not supported for 'relaxation'"
         return
       end if
     case default
       nml__status = NML_ERR_INVALID_NAME
-      if (nml__present(errmsg)) errmsg = "unknown field: " // nml__trim(name)
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
-    if (nml__status == NML_ERR_NOT_SET .and. nml__present(errmsg)) then
-      if (nml__len_trim(errmsg) == 0) errmsg = "field not set: " // nml__trim(name)
+    if (nml__status == NML_ERR_NOT_SET .and. present(errmsg)) then
+      if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function nml_run_is_set
 
@@ -420,10 +404,10 @@ contains
     integer :: nml__istat
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     if (.not. nml__obj%is_configured) then
       nml__status = NML_ERR_NOT_SET
-      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
 
@@ -431,11 +415,11 @@ contains
     nml__istat = nml__obj%is_set("steps", errmsg=errmsg)
     if (nml__istat == NML_ERR_NOT_SET) then
       nml__status = NML_ERR_REQUIRED
-      if (nml__present(errmsg)) then
-        if (nml__len_trim(errmsg) == 0) then
+      if (present(errmsg)) then
+        if (len_trim(errmsg) == 0) then
           errmsg = "field not set: steps"
         end if
-        errmsg = "required " // nml__trim(errmsg)
+        errmsg = "required " // trim(errmsg)
       end if
       return
     end if
@@ -448,7 +432,7 @@ contains
     if (nml__istat == NML_OK) then
       if (.not. method__in_enum(nml__obj%data%method)) then
         nml__status = NML_ERR_ENUM
-        if (nml__present(errmsg)) errmsg = "enum constraint failed: method"
+        if (present(errmsg)) errmsg = "enum constraint failed: method"
         return
       end if
     else if (nml__istat /= NML_ERR_NOT_SET) then
@@ -460,17 +444,17 @@ contains
     if (nml__istat == NML_OK) then
       if (.not. steps__in_bounds(nml__obj%data%steps)) then
         nml__status = NML_ERR_BOUNDS
-        if (nml__present(errmsg)) errmsg = "bounds constraint failed: steps"
+        if (present(errmsg)) errmsg = "bounds constraint failed: steps"
         return
       end if
     else if (nml__istat /= NML_ERR_NOT_SET) then
       nml__status = nml__istat
       return
     end if
-    if (nml__allocated(nml__obj%data%station_weights)) then
-    if (.not. nml__all(station_weights__in_bounds(nml__obj%data%station_weights, allow_missing=.true.))) then
+    if (allocated(nml__obj%data%station_weights)) then
+    if (.not. all(station_weights__in_bounds(nml__obj%data%station_weights, allow_missing=.true.))) then
       nml__status = NML_ERR_BOUNDS
-      if (nml__present(errmsg)) errmsg = "bounds constraint failed: station_weights"
+      if (present(errmsg)) errmsg = "bounds constraint failed: station_weights"
       return
     end if
     end if
@@ -478,7 +462,7 @@ contains
     if (nml__istat == NML_OK) then
       if (.not. relaxation__in_bounds(nml__obj%data%relaxation)) then
         nml__status = NML_ERR_BOUNDS
-        if (nml__present(errmsg)) errmsg = "bounds constraint failed: relaxation"
+        if (present(errmsg)) errmsg = "bounds constraint failed: relaxation"
         return
       end if
     else if (nml__istat /= NML_ERR_NOT_SET) then

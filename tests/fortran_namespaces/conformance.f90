@@ -19,10 +19,9 @@ program conformance
   if (config%dims%set_dims /= 2) error stop "operation-named dimension mismatch"
 
   source = [7, 8]
-  status = config%set(status=42, present=5, set_dims=6, values=source, errmsg=errmsg)
+  status = config%set(status=42, set_dims=6, values=source, errmsg=errmsg)
   call expect_status(status, NML_OK, "set values")
   if (config%data%status /= 42) error stop "status property mismatch"
-  if (config%data%present /= 5) error stop "present property mismatch"
   if (config%data%set_dims /= 6) error stop "set_dims property mismatch"
   if (any(config%data%values /= [7, 8, 0])) error stop "partial array assignment mismatch"
   if (lbound(config%data%values, 1) /= 1) error stop "generated storage is not one-based"
@@ -54,8 +53,6 @@ program conformance
     error stop "validation/shape-named property mismatch"
   end if
   if (config%data%is_configured /= 27) error stop "lifecycle-named property mismatch"
-  if (config%data%size /= 28) error stop "intrinsic-named property mismatch"
-
   status = config%is_valid(errmsg=errmsg)
   call expect_status(status, NML_OK, "validate")
 

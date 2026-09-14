@@ -20,21 +20,8 @@ module nml_required
     NML_ERR_NOT_SET, &
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
-    idx_check, &
-    to_lower
-  use nml_helper_intrinsics, only: nml__achar => achar
-  use nml_helper_intrinsics, only: nml__all => all
-  use nml_helper_intrinsics, only: nml__allocated => allocated
-  use nml_helper_intrinsics, only: nml__any => any
-  use nml_helper_intrinsics, only: nml__huge => huge
-  use nml_helper_intrinsics, only: nml__len => len
-  use nml_helper_intrinsics, only: nml__len_trim => len_trim
-  use nml_helper_intrinsics, only: nml__minval => minval
-  use nml_helper_intrinsics, only: nml__present => present
-  use nml_helper_intrinsics, only: nml__reshape => reshape
-  use nml_helper_intrinsics, only: nml__shape => shape
-  use nml_helper_intrinsics, only: nml__size => size
-  use nml_helper_intrinsics, only: nml__trim => trim
+    idx__check, &
+    to__lower
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
     i4=>int32
@@ -42,9 +29,6 @@ module nml_required
   implicit none
 
   private :: nml_required_read__from_file
-  private :: nml__achar, nml__all, nml__allocated, nml__any, nml__huge, nml__len, &
-    nml__len_trim, nml__minval, nml__present, nml__reshape, nml__shape, nml__size, &
-    nml__trim
 
   !> \class nml_required_data_t
   !> \brief Schema-backed values for required
@@ -74,11 +58,11 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     nml__obj%is_configured = .false.
 
     ! sentinel values for required/optional parameters
-    nml__obj%data%count = -nml__huge(nml__obj%data%count) ! sentinel for required integer
+    nml__obj%data%count = -huge(nml__obj%data%count) ! sentinel for required integer
   end function nml_required_init
 
 
@@ -124,7 +108,7 @@ contains
     read(nml__reader%unit, nml=required, iostat=nml__iostat, iomsg=nml__iomsg)
     if (nml__iostat /= 0) then
       nml__status = NML_ERR_READ
-      if (nml__present(errmsg)) errmsg = nml__trim(nml__iomsg)
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
       nml__close_status = nml__reader%close()
       return
     end if
@@ -169,26 +153,26 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     if (.not. nml__obj%is_configured) then
       nml__status = NML_ERR_NOT_SET
-      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
-    select case (to_lower(nml__trim(name)))
+    select case (to__lower(trim(name)))
     case ("count")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'count'"
+        if (present(errmsg)) errmsg = "index not supported for 'count'"
         return
       end if
-      if (nml__obj%data%count == -nml__huge(nml__obj%data%count)) nml__status = NML_ERR_NOT_SET
+      if (nml__obj%data%count == -huge(nml__obj%data%count)) nml__status = NML_ERR_NOT_SET
     case default
       nml__status = NML_ERR_INVALID_NAME
-      if (nml__present(errmsg)) errmsg = "unknown field: " // nml__trim(name)
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
-    if (nml__status == NML_ERR_NOT_SET .and. nml__present(errmsg)) then
-      if (nml__len_trim(errmsg) == 0) errmsg = "field not set: " // nml__trim(name)
+    if (nml__status == NML_ERR_NOT_SET .and. present(errmsg)) then
+      if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function nml_required_is_set
 
@@ -199,10 +183,10 @@ contains
     integer :: nml__istat
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     if (.not. nml__obj%is_configured) then
       nml__status = NML_ERR_NOT_SET
-      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
 
@@ -210,11 +194,11 @@ contains
     nml__istat = nml__obj%is_set("count", errmsg=errmsg)
     if (nml__istat == NML_ERR_NOT_SET) then
       nml__status = NML_ERR_REQUIRED
-      if (nml__present(errmsg)) then
-        if (nml__len_trim(errmsg) == 0) then
+      if (present(errmsg)) then
+        if (len_trim(errmsg) == 0) then
           errmsg = "field not set: count"
         end if
-        errmsg = "required " // nml__trim(errmsg)
+        errmsg = "required " // trim(errmsg)
       end if
       return
     end if

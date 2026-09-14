@@ -698,7 +698,7 @@ def test_generate_fortran_emits_bounds_helpers(tmp_path: Path) -> None:
     assert "elemental logical function tolerance__in_bounds" in generated
     assert "elemental logical function counts__in_bounds" in generated
     assert (
-        "nml__all(counts__in_bounds(nml__obj%data%counts, allow_missing=.true.))"
+        "all(counts__in_bounds(nml__obj%data%counts, allow_missing=.true.))"
         in generated
     )
 
@@ -878,51 +878,56 @@ def test_generate_fortran_rejects_companion_type_import_collision() -> None:
         codegen.render_fortran(schema, file_name="nml_run.f90")
 
 
-def test_generate_fortran_aliases_present_for_schema_names() -> None:
+@pytest.mark.parametrize("name", ["present", "Present", "size", "NML_OK"])
+def test_generate_fortran_rejects_generated_dependency_names(name: str) -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {name: {"type": "integer"}},
+    }
+
+    with pytest.raises(ValueError, match="reserved"):
+        codegen.render_fortran(schema, file_name="nml_run.f90")
+
+
+def test_generate_fortran_uses_direct_intrinsics_and_internal_helper_procedures() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {"value": {"type": "integer"}},
+    }
+
+    generated = codegen.render_fortran(schema, file_name="nml_run.f90")
+    helper = codegen.render_helper(file_name="nml_helper.f90")
+
+    assert "nml_helper_intrinsics" not in generated
+    assert "nml_helper_intrinsics" not in helper
+    assert "if (present(errmsg))" in generated
+    assert "idx__check" in generated
+    assert "to__lower" in generated
+    assert "function to__lower" in helper
+    assert "function idx__check" in helper
+
+
+def test_generate_fortran_rejects_derived_type_root_symbol_collision() -> None:
     codegen = _import_codegen_module()
     schema = {
         "x-fortran-namelist": "run",
         "type": "object",
         "properties": {
-            "present": {"type": "integer"},
-            "values": {
-                "type": "array",
-                "items": {"type": "integer"},
-                "x-fortran-shape": "present",
+            "period": {"type": "integer"},
+            "value": {
+                "type": "object",
+                "x-fortran-type": "period",
+                "properties": {"year": {"type": "integer"}},
             },
         },
     }
 
-    generated = codegen.render_fortran(
-        schema,
-        file_name="nml_run.f90",
-        dimensions={"present": 2},
-    )
-    helper = codegen.render_helper(file_name="nml_helper.f90")
-
-    intrinsic_aliases = (
-        "nml__achar => achar",
-        "nml__all => all",
-        "nml__allocated => allocated",
-        "nml__any => any",
-        "nml__huge => huge",
-        "nml__len => len",
-        "nml__len_trim => len_trim",
-        "nml__minval => minval",
-        "nml__present => present",
-        "nml__reshape => reshape",
-        "nml__shape => shape",
-        "nml__size => size",
-        "nml__trim => trim",
-    )
-    generated_lines = generated.splitlines()
-    for intrinsic_alias in intrinsic_aliases:
-        assert f"  use nml_helper_intrinsics, only: {intrinsic_alias}" in generated_lines
-    assert "module nml_helper_intrinsics" in helper
-    assert "end module nml_helper_intrinsics" in helper
-    assert helper.index("end module nml_helper_intrinsics") < helper.index("module nml_helper\n")
-    assert "if (nml__present(present))" in generated
-    assert "nml__obj%dims%present" in generated
+    with pytest.raises(ValueError, match="derived type name conflicts"):
+        codegen.render_fortran(schema, file_name="nml_run.f90")
 
 
 def test_generate_fortran_accepts_required_case_insensitive(tmp_path: Path) -> None:
@@ -1125,10 +1130,10 @@ def test_generate_fortran_runtime_sized_array_with_default_uses_partial_set(tmp_
 
     generated = output.read_text()
     assert (
-        "if (nml__size(values, 1) > nml__size(nml__obj%data%values, 1)) then"
+        "if (size(values, 1) > size(nml__obj%data%values, 1)) then"
         in generated
     )
-    assert "nml__obj%data%values( &\n        1:nml__size(values, 1)) = values" in generated
+    assert "nml__obj%data%values( &\n        1:size(values, 1)) = values" in generated
     assert "lbound(" not in generated
     assert "ubound(" not in generated
     assert "dimension 1 mismatch for 'values'" not in generated
@@ -1330,10 +1335,10 @@ def test_generate_fortran_fixed_array_setters_use_assumed_shape(
     generated = output.read_text()
     assert "integer(i4), dimension(:), intent(in), optional :: values" in generated
     assert (
-        "if (nml__size(values, 1) > nml__size(nml__obj%data%values, 1)) then"
+        "if (size(values, 1) > size(nml__obj%data%values, 1)) then"
         in generated
     )
-    assert "nml__obj%data%values( &\n        1:nml__size(values, 1)) = values" in generated
+    assert "nml__obj%data%values( &\n        1:size(values, 1)) = values" in generated
     assert "dimension(3), intent(in), optional :: values" not in generated
 
 
@@ -1399,8 +1404,8 @@ def test_generate_fortran_multidimensional_string_array_sentinels(
     )
 
     generated = output.read_text()
-    assert "nml__obj%data%names = nml__achar(0)" in generated
-    assert "nml__all(nml__obj%data%names == nml__achar(0))" in generated
+    assert "nml__obj%data%names = achar(0)" in generated
+    assert "all(nml__obj%data%names == achar(0))" in generated
 
 
 def test_generate_fortran_array_default_pad_order(tmp_path: Path) -> None:
@@ -1548,7 +1553,7 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
     assert "elemental logical function period__start_year__in_bounds" in generated
     assert "period__label__in_enum(nml__obj%data%period%label)" in generated
     assert "periods__start_year__in_bounds(nml__obj%data%periods%start_year" in generated
-    assert "if (nml__allocated(nml__obj%data%periods)) then" in generated
+    assert "if (allocated(nml__obj%data%periods)) then" in generated
 
 
 def test_generate_fortran_init_type_accepts_fixed_derived_arrays() -> None:
@@ -1637,8 +1642,8 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
     assert "type(location_t), dimension(:), intent(in), optional :: locations" in generated
     assert 'nml__istat = nml__obj%is_set("location", errmsg=errmsg)' not in generated
     assert 'nml__istat = nml__obj%is_set("locations", errmsg=errmsg)' not in generated
-    assert "if (nml__len(location%name) /= 8) then" in generated
-    assert "if (nml__len(locations%name) /= 8) then" in generated
+    assert "if (len(location%name) /= 8) then" in generated
+    assert "if (len(locations%name) /= 8) then" in generated
     assert "imported string storage length mismatch: location%name" in generated
     assert '+ 1:) = ""' not in generated
 

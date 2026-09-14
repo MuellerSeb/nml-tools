@@ -1,6 +1,5 @@
 &namespaces
   status = 17
-  present = 18
   file = 19
   nml = 20
   iostat = 21
@@ -16,7 +15,6 @@
   is_valid = 32
   filled_shape = 33
   is_configured = 27
-  size = 28
   values = 3, 4, 5
   more_values = 6, 7
 /

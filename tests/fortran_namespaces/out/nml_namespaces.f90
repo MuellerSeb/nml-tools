@@ -20,29 +20,15 @@ module nml_namespaces
     NML_ERR_NOT_SET, &
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
-    idx_check, &
-    to_lower, &
+    idx__check, &
+    to__lower, &
     status__dim_default, &
     set_dims__dim_default
-  use nml_helper_intrinsics, only: nml__achar => achar
-  use nml_helper_intrinsics, only: nml__all => all
-  use nml_helper_intrinsics, only: nml__allocated => allocated
-  use nml_helper_intrinsics, only: nml__any => any
-  use nml_helper_intrinsics, only: nml__huge => huge
-  use nml_helper_intrinsics, only: nml__len => len
-  use nml_helper_intrinsics, only: nml__len_trim => len_trim
-  use nml_helper_intrinsics, only: nml__minval => minval
-  use nml_helper_intrinsics, only: nml__present => present
-  use nml_helper_intrinsics, only: nml__reshape => reshape
-  use nml_helper_intrinsics, only: nml__shape => shape
-  use nml_helper_intrinsics, only: nml__size => size
-  use nml_helper_intrinsics, only: nml__trim => trim
 
   implicit none
 
   ! default values
   integer, parameter, public :: status__default = 0
-  integer, parameter, public :: present__default = 0
   integer, parameter, public :: file__default = 0
   integer, parameter, public :: nml__default = 0
   integer, parameter, public :: iostat__default = 0
@@ -58,20 +44,15 @@ module nml_namespaces
   integer, parameter, public :: is_valid__default = 0
   integer, parameter, public :: filled_shape__default = 0
   integer, parameter, public :: is_configured__default = 0
-  integer, parameter, public :: size__default = 0
   integer, parameter, public :: values__default = 0
   integer, parameter, public :: more_values__default = 0
 
   private :: nml_namespaces_read__from_file
-  private :: nml__achar, nml__all, nml__allocated, nml__any, nml__huge, nml__len, &
-    nml__len_trim, nml__minval, nml__present, nml__reshape, nml__shape, nml__size, &
-    nml__trim
 
   !> \class nml_namespaces_data_t
   !> \brief Schema-backed values for namespaces
   type, public :: nml_namespaces_data_t
     integer :: status !< status
-    integer :: present !< present
     integer :: file !< file
     integer :: nml !< nml
     integer :: iostat !< iostat
@@ -87,7 +68,6 @@ module nml_namespaces
     integer :: is_valid !< is_valid
     integer :: filled_shape !< filled_shape
     integer :: is_configured !< is_configured
-    integer :: size !< size
     integer, allocatable, dimension(:) :: values !< values
     integer, allocatable, dimension(:) :: more_values !< more_values
   end type nml_namespaces_data_t
@@ -123,18 +103,17 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     nml__obj%is_configured = .false.
 
     ! allocate runtime-sized fields
-    if (nml__allocated(nml__obj%data%values)) deallocate(nml__obj%data%values)
+    if (allocated(nml__obj%data%values)) deallocate(nml__obj%data%values)
     allocate(nml__obj%data%values(nml__obj%dims%status))
-    if (nml__allocated(nml__obj%data%more_values)) deallocate(nml__obj%data%more_values)
+    if (allocated(nml__obj%data%more_values)) deallocate(nml__obj%data%more_values)
     allocate(nml__obj%data%more_values(nml__obj%dims%set_dims))
 
     ! default values
     nml__obj%data%status = status__default
-    nml__obj%data%present = present__default
     nml__obj%data%file = file__default
     nml__obj%data%nml = nml__default
     nml__obj%data%iostat = iostat__default
@@ -150,7 +129,6 @@ contains
     nml__obj%data%is_valid = is_valid__default
     nml__obj%data%filled_shape = filled_shape__default
     nml__obj%data%is_configured = is_configured__default
-    nml__obj%data%size = size__default
     nml__obj%data%values = values__default
     nml__obj%data%more_values = more_values__default
   end function nml_namespaces_init
@@ -168,33 +146,33 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
-    if (nml__present(status)) then
+    if (present(errmsg)) errmsg = ""
+    if (present(status)) then
       candidate__status = status
     else
       candidate__status = status__dim_default
     end if
     if (candidate__status <= 0) then
       nml__status = NML_ERR_INVALID_INDEX
-      if (nml__present(errmsg)) errmsg = "dimension 'status' must be positive"
+      if (present(errmsg)) errmsg = "dimension 'status' must be positive"
       return
     end if
-    if (nml__present(set_dims)) then
+    if (present(set_dims)) then
       candidate__set_dims = set_dims
     else
       candidate__set_dims = set_dims__dim_default
     end if
     if (candidate__set_dims <= 0) then
       nml__status = NML_ERR_INVALID_INDEX
-      if (nml__present(errmsg)) errmsg = "dimension 'set_dims' must be positive"
+      if (present(errmsg)) errmsg = "dimension 'set_dims' must be positive"
       return
     end if
     nml__obj%dims%status = candidate__status
     nml__obj%dims%set_dims = candidate__set_dims
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
-    if (nml__allocated(nml__obj%data%values)) deallocate(nml__obj%data%values)
-    if (nml__allocated(nml__obj%data%more_values)) deallocate(nml__obj%data%more_values)
+    if (allocated(nml__obj%data%values)) deallocate(nml__obj%data%values)
+    if (allocated(nml__obj%data%more_values)) deallocate(nml__obj%data%more_values)
     nml__obj%is_configured = .false.
   end function nml_namespaces_set_dims
 
@@ -215,7 +193,6 @@ contains
     character(len=*), intent(out), optional :: errmsg
     ! namelist variables
     integer :: status
-    integer :: present
     integer :: file
     integer :: nml
     integer :: iostat
@@ -231,7 +208,6 @@ contains
     integer :: is_valid
     integer :: filled_shape
     integer :: is_configured
-    integer :: size
     integer, allocatable, dimension(:) :: values
     integer, allocatable, dimension(:) :: more_values
     ! locals
@@ -242,7 +218,6 @@ contains
 
     namelist /namespaces/ &
       status, &
-      present, &
       file, &
       nml, &
       iostat, &
@@ -258,19 +233,17 @@ contains
       is_valid, &
       filled_shape, &
       is_configured, &
-      size, &
       values, &
       more_values
 
     nml__status = nml__obj%init(errmsg=errmsg)
     if (nml__status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
-    if (nml__allocated(values)) deallocate(values)
+    if (allocated(values)) deallocate(values)
     allocate(values(nml__obj%dims%status))
-    if (nml__allocated(more_values)) deallocate(more_values)
+    if (allocated(more_values)) deallocate(more_values)
     allocate(more_values(nml__obj%dims%set_dims))
     status = nml__obj%data%status
-    present = nml__obj%data%present
     file = nml__obj%data%file
     nml = nml__obj%data%nml
     iostat = nml__obj%data%iostat
@@ -286,7 +259,6 @@ contains
     is_valid = nml__obj%data%is_valid
     filled_shape = nml__obj%data%filled_shape
     is_configured = nml__obj%data%is_configured
-    size = nml__obj%data%size
     values = nml__obj%data%values
     more_values = nml__obj%data%more_values
 
@@ -313,7 +285,7 @@ contains
     read(nml__reader%unit, nml=namespaces, iostat=nml__iostat, iomsg=nml__iomsg)
     if (nml__iostat /= 0) then
       nml__status = NML_ERR_READ
-      if (nml__present(errmsg)) errmsg = nml__trim(nml__iomsg)
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
       nml__close_status = nml__reader%close()
       return
     end if
@@ -325,7 +297,6 @@ contains
 
     ! assign values
     nml__obj%data%status = status
-    nml__obj%data%present = present
     nml__obj%data%file = file
     nml__obj%data%nml = nml
     nml__obj%data%iostat = iostat
@@ -341,7 +312,6 @@ contains
     nml__obj%data%is_valid = is_valid
     nml__obj%data%filled_shape = filled_shape
     nml__obj%data%is_configured = is_configured
-    nml__obj%data%size = size
     nml__obj%data%values = values
     nml__obj%data%more_values = more_values
 
@@ -353,7 +323,6 @@ contains
   !> \brief Set namespaces values
   integer function nml_namespaces_set(nml__obj, &
     status, &
-    present, &
     file, &
     nml, &
     iostat, &
@@ -369,7 +338,6 @@ contains
     is_valid, &
     filled_shape, &
     is_configured, &
-    size, &
     values, &
     more_values, &
     errmsg) result(nml__status)
@@ -377,7 +345,6 @@ contains
     class(nml_namespaces_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer, intent(in), optional :: status !< status
-    integer, intent(in), optional :: present !< present
     integer, intent(in), optional :: file !< file
     integer, intent(in), optional :: nml !< nml
     integer, intent(in), optional :: iostat !< iostat
@@ -393,7 +360,6 @@ contains
     integer, intent(in), optional :: is_valid !< is_valid
     integer, intent(in), optional :: filled_shape !< filled_shape
     integer, intent(in), optional :: is_configured !< is_configured
-    integer, intent(in), optional :: size !< size
     integer, dimension(:), intent(in), optional :: values !< values
     integer, dimension(:), intent(in), optional :: more_values !< more_values
     nml__status = nml__obj%init(errmsg=errmsg)
@@ -401,41 +367,39 @@ contains
 
     ! required parameters
     ! override with provided values
-    if (nml__present(status)) nml__obj%data%status = status
-    if (nml__present(present)) nml__obj%data%present = present
-    if (nml__present(file)) nml__obj%data%file = file
-    if (nml__present(nml)) nml__obj%data%nml = nml
-    if (nml__present(iostat)) nml__obj%data%iostat = iostat
-    if (nml__present(close_status)) nml__obj%data%close_status = close_status
-    if (nml__present(data)) nml__obj%data%data = data
-    if (nml__present(dims)) nml__obj%data%dims = dims
-    if (nml__present(set)) nml__obj%data%set = set
-    if (nml__present(set_dims)) nml__obj%data%set_dims = set_dims
-    if (nml__present(init)) nml__obj%data%init = init
-    if (nml__present(init_type)) nml__obj%data%init_type = init_type
-    if (nml__present(from_file)) nml__obj%data%from_file = from_file
-    if (nml__present(is_set)) nml__obj%data%is_set = is_set
-    if (nml__present(is_valid)) nml__obj%data%is_valid = is_valid
-    if (nml__present(filled_shape)) nml__obj%data%filled_shape = filled_shape
-    if (nml__present(is_configured)) nml__obj%data%is_configured = is_configured
-    if (nml__present(size)) nml__obj%data%size = size
-    if (nml__present(values)) then
-      if (nml__size(values, 1) > nml__size(nml__obj%data%values, 1)) then
+    if (present(status)) nml__obj%data%status = status
+    if (present(file)) nml__obj%data%file = file
+    if (present(nml)) nml__obj%data%nml = nml
+    if (present(iostat)) nml__obj%data%iostat = iostat
+    if (present(close_status)) nml__obj%data%close_status = close_status
+    if (present(data)) nml__obj%data%data = data
+    if (present(dims)) nml__obj%data%dims = dims
+    if (present(set)) nml__obj%data%set = set
+    if (present(set_dims)) nml__obj%data%set_dims = set_dims
+    if (present(init)) nml__obj%data%init = init
+    if (present(init_type)) nml__obj%data%init_type = init_type
+    if (present(from_file)) nml__obj%data%from_file = from_file
+    if (present(is_set)) nml__obj%data%is_set = is_set
+    if (present(is_valid)) nml__obj%data%is_valid = is_valid
+    if (present(filled_shape)) nml__obj%data%filled_shape = filled_shape
+    if (present(is_configured)) nml__obj%data%is_configured = is_configured
+    if (present(values)) then
+      if (size(values, 1) > size(nml__obj%data%values, 1)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'values'"
+        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'values'"
         return
       end if
       nml__obj%data%values( &
-        1:nml__size(values, 1)) = values
+        1:size(values, 1)) = values
     end if
-    if (nml__present(more_values)) then
-      if (nml__size(more_values, 1) > nml__size(nml__obj%data%more_values, 1)) then
+    if (present(more_values)) then
+      if (size(more_values, 1) > size(nml__obj%data%more_values, 1)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'more_values'"
+        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'more_values'"
         return
       end if
       nml__obj%data%more_values( &
-        1:nml__size(more_values, 1)) = more_values
+        1:size(more_values, 1)) = more_values
     end if
 
     ! mark as configured
@@ -451,149 +415,137 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     if (.not. nml__obj%is_configured) then
       nml__status = NML_ERR_NOT_SET
-      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
-    select case (to_lower(nml__trim(name)))
+    select case (to__lower(trim(name)))
     case ("status")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'status'"
-        return
-      end if
-    case ("present")
-      if (nml__present(idx)) then
-        nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'present'"
+        if (present(errmsg)) errmsg = "index not supported for 'status'"
         return
       end if
     case ("file")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'file'"
+        if (present(errmsg)) errmsg = "index not supported for 'file'"
         return
       end if
     case ("nml")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'nml'"
+        if (present(errmsg)) errmsg = "index not supported for 'nml'"
         return
       end if
     case ("iostat")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'iostat'"
+        if (present(errmsg)) errmsg = "index not supported for 'iostat'"
         return
       end if
     case ("close_status")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'close_status'"
+        if (present(errmsg)) errmsg = "index not supported for 'close_status'"
         return
       end if
     case ("data")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'data'"
+        if (present(errmsg)) errmsg = "index not supported for 'data'"
         return
       end if
     case ("dims")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'dims'"
+        if (present(errmsg)) errmsg = "index not supported for 'dims'"
         return
       end if
     case ("set")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'set'"
+        if (present(errmsg)) errmsg = "index not supported for 'set'"
         return
       end if
     case ("set_dims")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'set_dims'"
+        if (present(errmsg)) errmsg = "index not supported for 'set_dims'"
         return
       end if
     case ("init")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'init'"
+        if (present(errmsg)) errmsg = "index not supported for 'init'"
         return
       end if
     case ("init_type")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'init_type'"
+        if (present(errmsg)) errmsg = "index not supported for 'init_type'"
         return
       end if
     case ("from_file")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'from_file'"
+        if (present(errmsg)) errmsg = "index not supported for 'from_file'"
         return
       end if
     case ("is_set")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'is_set'"
+        if (present(errmsg)) errmsg = "index not supported for 'is_set'"
         return
       end if
     case ("is_valid")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'is_valid'"
+        if (present(errmsg)) errmsg = "index not supported for 'is_valid'"
         return
       end if
     case ("filled_shape")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'filled_shape'"
+        if (present(errmsg)) errmsg = "index not supported for 'filled_shape'"
         return
       end if
     case ("is_configured")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'is_configured'"
-        return
-      end if
-    case ("size")
-      if (nml__present(idx)) then
-        nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'size'"
+        if (present(errmsg)) errmsg = "index not supported for 'is_configured'"
         return
       end if
     case ("values")
-      if (.not. nml__allocated(nml__obj%data%values)) then
+      if (.not. allocated(nml__obj%data%values)) then
         nml__status = NML_ERR_NOT_SET
         return
       end if
-      if (nml__present(idx)) then
-        nml__status = idx_check(idx, nml__shape(nml__obj%data%values), &
+      if (present(idx)) then
+        nml__status = idx__check(idx, shape(nml__obj%data%values), &
           "values", errmsg)
         if (nml__status /= NML_OK) return
       else
       end if
     case ("more_values")
-      if (.not. nml__allocated(nml__obj%data%more_values)) then
+      if (.not. allocated(nml__obj%data%more_values)) then
         nml__status = NML_ERR_NOT_SET
         return
       end if
-      if (nml__present(idx)) then
-        nml__status = idx_check(idx, nml__shape(nml__obj%data%more_values), &
+      if (present(idx)) then
+        nml__status = idx__check(idx, shape(nml__obj%data%more_values), &
           "more_values", errmsg)
         if (nml__status /= NML_OK) return
       else
       end if
     case default
       nml__status = NML_ERR_INVALID_NAME
-      if (nml__present(errmsg)) errmsg = "unknown field: " // nml__trim(name)
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
-    if (nml__status == NML_ERR_NOT_SET .and. nml__present(errmsg)) then
-      if (nml__len_trim(errmsg) == 0) errmsg = "field not set: " // nml__trim(name)
+    if (nml__status == NML_ERR_NOT_SET .and. present(errmsg)) then
+      if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function nml_namespaces_is_set
 
@@ -604,10 +556,10 @@ contains
     integer :: nml__istat
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     if (.not. nml__obj%is_configured) then
       nml__status = NML_ERR_NOT_SET
-      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
 

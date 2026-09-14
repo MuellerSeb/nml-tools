@@ -9,11 +9,6 @@
 module {{ module_name }}
   use {{ helper_module }}, only: &
     {{ helper_imports | join(', &\n    ') }}
-{# Import from a declaration-only module. gfortran 10+ omits an intrinsic from
-   a module interface when that intrinsic is also referenced inside the module. #}
-{% for intrinsic_import in helper_intrinsic_imports %}
-  use {{ helper_intrinsic_module }}, only: {{ intrinsic_import }}
-{% endfor %}
 {% if use_ieee %}
   use ieee_arithmetic, only: nml__ieee_value => ieee_value, &
     nml__ieee_quiet_nan => ieee_quiet_nan, nml__ieee_is_nan => ieee_is_nan
@@ -54,9 +49,6 @@ module {{ module_name }}
 
 {% endif %}
   private :: {{ type_prefix }}_read__from_file
-  private :: nml__achar, nml__all, nml__allocated, nml__any, nml__huge, nml__len, &
-    nml__len_trim, nml__minval, nml__present, nml__reshape, nml__shape, nml__size, &
-    nml__trim
 {% if use_ieee %}
   private :: nml__ieee_value, nml__ieee_quiet_nan, nml__ieee_is_nan
 {% endif %}
@@ -114,7 +106,7 @@ contains
     {{ enum.arg_type_spec }}, intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (nml__present(allow_missing)) then
+    if (present(allow_missing)) then
       if (allow_missing) then
         if ({{ enum.missing_condition }}) then
           in_enum = .true.
@@ -123,9 +115,9 @@ contains
       end if
     end if
 {% if enum.use_trim %}
-    in_enum = nml__any(nml__trim(val) == {{ enum.enum_values_name }})
+    in_enum = any(trim(val) == {{ enum.enum_values_name }})
 {% else %}
-    in_enum = nml__any(val == {{ enum.enum_values_name }})
+    in_enum = any(val == {{ enum.enum_values_name }})
 {% endif %}
   end function {{ enum.func_name }}
 
@@ -138,7 +130,7 @@ contains
     {{ bounds.arg_type_spec }}, intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (nml__present(allow_missing)) then
+    if (present(allow_missing)) then
       if (allow_missing) then
         if ({{ bounds.missing_condition }}) then
           in_bounds = .true.
@@ -167,11 +159,11 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     type(c_ptr) :: ptr
 
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     nullify(nml__obj)
     if (handle == 0_c_intptr_t) then
       nml__status = NML_ERR_INVALID_HANDLE
-      if (nml__present(errmsg)) errmsg = "zero handle"
+      if (present(errmsg)) errmsg = "zero handle"
       return
     end if
     ptr = transfer(handle, c_null_ptr)
@@ -186,7 +178,7 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     nml__obj%is_configured = .false.
 {% if runtime_allocations %}
 
@@ -237,9 +229,9 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
 {% for field in derived_init_type_fields %}
-    if (nml__present({{ field.name }})) then
+    if (present({{ field.name }})) then
 {% for stmt in field.allocation_lines %}
 {{ stmt | indent(6, True) }}
 {% endfor %}
@@ -270,22 +262,22 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
 {% for entry in set_dims_arguments %}
-    if (nml__present({{ entry.arg_name }})) then
+    if (present({{ entry.arg_name }})) then
       {{ entry.candidate_name }} = {{ entry.arg_name }}
     else
       {{ entry.candidate_name }} = {{ entry.default_name }}
     end if
     if ({{ entry.candidate_name }} <= 0) then
       nml__status = NML_ERR_INVALID_INDEX
-      if (nml__present(errmsg)) errmsg = "dimension '{{ entry.name }}' must be positive"
+      if (present(errmsg)) errmsg = "dimension '{{ entry.name }}' must be positive"
       return
     end if
 {% if entry.min_required > 1 %}
     if ({{ entry.candidate_name }} < {{ entry.min_required }}) then
       nml__status = NML_ERR_INVALID_INDEX
-      if (nml__present(errmsg)) errmsg = "dimension '{{ entry.name }}' must be >= {{ entry.min_required }}"
+      if (present(errmsg)) errmsg = "dimension '{{ entry.name }}' must be >= {{ entry.min_required }}"
       return
     end if
 {% endif %}
@@ -293,7 +285,7 @@ contains
 {% for check in set_dims_extent_checks %}
     if ({{ check.condition }}) then
       nml__status = NML_ERR_INVALID_INDEX
-      if (nml__present(errmsg)) errmsg = "{{ check.message }}"
+      if (present(errmsg)) errmsg = "{{ check.message }}"
       return
     end if
 {% endfor %}
@@ -376,7 +368,7 @@ contains
     read(nml__reader%unit, nml={{ namelist_name }}, iostat=nml__iostat, iomsg=nml__iomsg)
     if (nml__iostat /= 0) then
       nml__status = NML_ERR_READ
-      if (nml__present(errmsg)) errmsg = nml__trim(nml__iomsg)
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
       nml__close_status = nml__reader%close()
       return
     end if
@@ -440,24 +432,24 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     if (.not. nml__obj%is_configured) then
       nml__status = NML_ERR_NOT_SET
-      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
-    select case (to_lower(nml__trim(name)))
+    select case (to__lower(trim(name)))
 {% for case in presence_cases %}
     case ("{{ case.name }}")
 {% if case.is_array %}
 {% if case.runtime_array %}
-      if (.not. nml__allocated(nml__obj%data%{{ case.name }})) then
+      if (.not. allocated(nml__obj%data%{{ case.name }})) then
         nml__status = NML_ERR_NOT_SET
         return
       end if
 {% endif %}
-      if (nml__present(idx)) then
-        nml__status = idx_check(idx, nml__shape(nml__obj%data%{{ case.name }}), &
+      if (present(idx)) then
+        nml__status = idx__check(idx, shape(nml__obj%data%{{ case.name }}), &
           "{{ case.display_name }}", errmsg)
         if (nml__status /= NML_OK) return
 {% if not case.always_true %}
@@ -469,9 +461,9 @@ contains
 {% endif %}
       end if
 {% else %}
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for '{{ case.display_name }}'"
+        if (present(errmsg)) errmsg = "index not supported for '{{ case.display_name }}'"
         return
       end if
 {% if not case.always_true %}
@@ -484,10 +476,10 @@ contains
 {% endfor %}
     case default
       nml__status = NML_ERR_INVALID_NAME
-      if (nml__present(errmsg)) errmsg = "unknown field: " // nml__trim(name)
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
-    if (nml__status == NML_ERR_NOT_SET .and. nml__present(errmsg)) then
-      if (nml__len_trim(errmsg) == 0) errmsg = "field not set: " // nml__trim(name)
+    if (nml__status == NML_ERR_NOT_SET .and. present(errmsg)) then
+      if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function {{ type_prefix }}_is_set
 
@@ -502,44 +494,44 @@ contains
     integer :: nml__dim
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
-    select case (to_lower(nml__trim(name)))
+    if (present(errmsg)) errmsg = ""
+    select case (to__lower(trim(name)))
 {% for flex in flex_arrays %}
     case ("{{ flex.name }}")
-      if (nml__size(filled) /= {{ flex.rank }}) then
+      if (size(filled) /= {{ flex.rank }}) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "shape rank mismatch for '{{ flex.display_name }}'"
+        if (present(errmsg)) errmsg = "shape rank mismatch for '{{ flex.display_name }}'"
         return
       end if
 {% if flex.runtime_array %}
-      if (.not. nml__allocated(nml__obj%data%{{ flex.name }})) then
+      if (.not. allocated(nml__obj%data%{{ flex.name }})) then
         filled = 0
         return
       end if
 {% endif %}
       do nml__dim = 1, {{ flex.rank }}
-        filled(nml__dim) = nml__size(nml__obj%data%{{ flex.name }}, nml__dim)
+        filled(nml__dim) = size(nml__obj%data%{{ flex.name }}, nml__dim)
       end do
 {% for dim in flex.flex_dims %}
       filled({{ dim }}) = 0
-      do nml__idx = nml__size(nml__obj%data%{{ flex.name }}, {{ dim }}), 1, -1
+      do nml__idx = size(nml__obj%data%{{ flex.name }}, {{ dim }}), 1, -1
         if (.not. ({{ flex.slice_missing_conditions[loop.index0] }})) then
           filled({{ dim }}) = nml__idx
           exit
         end if
       end do
 {% endfor %}
-      if (nml__minval(filled) > 0) then
+      if (minval(filled) > 0) then
         if ({{ flex.prefix_any_missing_condition }}) then
           nml__status = NML_ERR_PARTLY_SET
-          if (nml__present(errmsg)) errmsg = "array partly set: {{ flex.display_name }}"
+          if (present(errmsg)) errmsg = "array partly set: {{ flex.display_name }}"
           return
         end if
       end if
 {% endfor %}
     case default
       nml__status = NML_ERR_INVALID_NAME
-      if (nml__present(errmsg)) errmsg = "field is not a flexible array: " // nml__trim(name)
+      if (present(errmsg)) errmsg = "field is not a flexible array: " // trim(name)
     end select
   end function {{ type_prefix }}_filled_shape
 
@@ -554,10 +546,10 @@ contains
 {% endif %}
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     if (.not. nml__obj%is_configured) then
       nml__status = NML_ERR_NOT_SET
-      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
 
@@ -567,11 +559,11 @@ contains
     nml__istat = nml__obj%is_set("{{ name }}", errmsg=errmsg)
     if (nml__istat == NML_ERR_NOT_SET) then
       nml__status = NML_ERR_REQUIRED
-      if (nml__present(errmsg)) then
-        if (nml__len_trim(errmsg) == 0) then
+      if (present(errmsg)) then
+        if (len_trim(errmsg) == 0) then
           errmsg = "field not set: {{ name }}"
         end if
-        errmsg = "required " // nml__trim(errmsg)
+        errmsg = "required " // trim(errmsg)
       end if
       return
     end if
@@ -585,20 +577,20 @@ contains
     ! required arrays
 {% for entry in required_array_validations %}
 {% if entry.runtime_array %}
-    if (.not. nml__allocated(nml__obj%data%{{ entry.attr_name }})) then
+    if (.not. allocated(nml__obj%data%{{ entry.attr_name }})) then
       nml__status = NML_ERR_REQUIRED
-      if (nml__present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
+      if (present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
       return
     end if
 {% endif %}
     if ({{ entry.all_missing_condition }}) then
       nml__status = NML_ERR_REQUIRED
-      if (nml__present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
+      if (present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
       return
     end if
     if ({{ entry.any_missing_condition }}) then
       nml__status = NML_ERR_PARTLY_SET
-      if (nml__present(errmsg)) errmsg = "array partly set: {{ entry.name }}"
+      if (present(errmsg)) errmsg = "array partly set: {{ entry.name }}"
       return
     end if
 {% endfor %}
@@ -606,14 +598,14 @@ contains
 {% if flex_arrays %}
     ! flexible arrays
 {% for entry in flex_arrays %}
-    if (nml__allocated(nml__filled)) deallocate(nml__filled)
+    if (allocated(nml__filled)) deallocate(nml__filled)
     allocate(nml__filled({{ entry.rank }}))
     nml__istat = nml__obj%filled_shape( &
       "{{ entry.display_name }}", nml__filled, errmsg=errmsg)
     if (nml__istat == NML_ERR_PARTLY_SET) then
       nml__status = nml__istat
-      if (nml__present(errmsg)) then
-        if (nml__len_trim(errmsg) == 0) errmsg = "array partly set: {{ entry.display_name }}"
+      if (present(errmsg)) then
+        if (len_trim(errmsg) == 0) errmsg = "array partly set: {{ entry.display_name }}"
       end if
       return
     end if
@@ -622,9 +614,9 @@ contains
       return
     end if
 {% if entry.required %}
-    if (nml__minval(nml__filled) == 0) then
+    if (minval(nml__filled) == 0) then
       nml__status = NML_ERR_REQUIRED
-      if (nml__present(errmsg)) errmsg = "required field not set: {{ entry.display_name }}"
+      if (present(errmsg)) errmsg = "required field not set: {{ entry.display_name }}"
       return
     end if
 {% endif %}
@@ -635,11 +627,11 @@ contains
 {% for check in enum_checks %}
 {% if check.is_array %}
 {% if check.runtime_array %}
-    if (nml__allocated({{ check.allocation_ref }})) then
+    if (allocated({{ check.allocation_ref }})) then
 {% endif %}
-    if (.not. nml__all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
+    if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
       nml__status = NML_ERR_ENUM
-      if (nml__present(errmsg)) errmsg = "enum constraint failed: {{ check.display_name }}"
+      if (present(errmsg)) errmsg = "enum constraint failed: {{ check.display_name }}"
       return
     end if
 {% if check.runtime_array %}
@@ -650,7 +642,7 @@ contains
     if (nml__istat == NML_OK) then
       if (.not. {{ check.func_name }}({{ check.element_ref }})) then
         nml__status = NML_ERR_ENUM
-        if (nml__present(errmsg)) errmsg = "enum constraint failed: {{ check.display_name }}"
+        if (present(errmsg)) errmsg = "enum constraint failed: {{ check.display_name }}"
         return
       end if
     else if (nml__istat /= NML_ERR_NOT_SET) then
@@ -665,11 +657,11 @@ contains
 {% for check in bounds_checks %}
 {% if check.is_array %}
 {% if check.runtime_array %}
-    if (nml__allocated({{ check.allocation_ref }})) then
+    if (allocated({{ check.allocation_ref }})) then
 {% endif %}
-    if (.not. nml__all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
+    if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
       nml__status = NML_ERR_BOUNDS
-      if (nml__present(errmsg)) errmsg = "bounds constraint failed: {{ check.display_name }}"
+      if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.display_name }}"
       return
     end if
 {% if check.runtime_array %}
@@ -680,7 +672,7 @@ contains
     if (nml__istat == NML_OK) then
       if (.not. {{ check.func_name }}({{ check.element_ref }})) then
         nml__status = NML_ERR_BOUNDS
-        if (nml__present(errmsg)) errmsg = "bounds constraint failed: {{ check.display_name }}"
+        if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.display_name }}"
         return
       end if
     else if (nml__istat /= NML_ERR_NOT_SET) then
