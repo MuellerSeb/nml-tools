@@ -1635,13 +1635,27 @@ def _build_context(
         symbol.split("=>", maxsplit=1)[0].strip().lower()
         for symbol in helper_imports + resolved_kind_imports
     )
-    companion_names = [type_name, data_type_name]
+    generated_module_symbols = [
+        type_name,
+        data_type_name,
+        f"{module_name}_init",
+        f"{module_name}_from_file",
+        f"{module_name}_set",
+        f"{module_name}_is_set",
+        f"{module_name}_is_valid",
+    ]
     if runtime_dimensions:
-        companion_names.append(dims_type_name)
-    for companion_name in companion_names:
-        if companion_name.lower() in imported_module_symbols:
+        generated_module_symbols.extend([dims_type_name, f"{module_name}_set_dims"])
+    if derived_init_type_fields:
+        generated_module_symbols.append(f"{module_name}_init_type")
+    if flex_arrays:
+        generated_module_symbols.append(f"{module_name}_filled_shape")
+    if f2py_handle_helpers:
+        generated_module_symbols.append(f"{module_name}_resolve_handle")
+    for symbol_name in generated_module_symbols:
+        if symbol_name.lower() in imported_module_symbols:
             raise ValueError(
-                f"generated companion type '{companion_name}' conflicts with an imported symbol"
+                f"generated module symbol '{symbol_name}' conflicts with an imported symbol"
             )
 
     context = {

@@ -836,15 +836,21 @@ def test_f2py_derived_leaf_names_avoid_internal_wrapper_state() -> None:
     assert "integer, intent(out) :: nml__status !< nml-tools status code" in generated
 
 
-def test_f2py_mangles_schema_arguments_matching_wrapper_procedures() -> None:
+@pytest.mark.parametrize("namelist_name", ["run", "Run"])
+def test_f2py_mangles_schema_arguments_matching_wrapper_procedures(
+    namelist_name: str,
+) -> None:
     codegen = _import_codegen_f2py()
     schema = {
-        "x-fortran-namelist": "run",
+        "x-fortran-namelist": namelist_name,
         "type": "object",
         "properties": {"run_set_wrapper": {"type": "integer"}},
     }
 
     generated = codegen.render_f2py_wrappers([schema], file_name="f2py_run.f90")
 
-    assert "subroutine run_set_wrapper(nml__handle, &\n    run_set_wrapper__value," in generated
+    assert (
+        f"subroutine {namelist_name}_set_wrapper(nml__handle, &\n"
+        "    run_set_wrapper__value,"
+    ) in generated
     assert "integer, intent(in) :: run_set_wrapper__value" in generated

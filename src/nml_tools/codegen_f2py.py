@@ -406,7 +406,7 @@ def build_f2py_namelist_spec(
     }
     namelist_name = cast("str", context["namelist_name"])
     wrapper_reserved_names.update(
-        f"{namelist_name}_{suffix}"
+        f"{namelist_name}_{suffix}".lower()
         for suffix in (
             "from_file_wrapper",
             "set_wrapper",
