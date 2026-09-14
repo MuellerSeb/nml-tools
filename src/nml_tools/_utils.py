@@ -72,14 +72,21 @@ def validate_user_fortran_identifier(name: str, *, label: str) -> None:
 def validate_namelist_identifier(name: str, *, label: str) -> None:
     """Validate an identifier used for a namelist property or runtime dimension."""
     validate_user_fortran_identifier(name, label=label)
+    validate_generated_fortran_identifier(name, label=label)
+
+
+def validate_derived_component_identifier(name: str, *, label: str) -> None:
+    """Validate a qualified component identifier without reserving direct intrinsics."""
+    validate_user_fortran_identifier(name, label=label)
     if name.lower() in RESERVED_NAMELIST_IDENTIFIERS:
         raise ValueError(f"{label} is reserved for the generated Fortran API")
-    validate_generated_fortran_identifier(name, label=label)
 
 
 def validate_generated_fortran_identifier(name: str, *, label: str) -> None:
     """Reject names that shadow generated Fortran dependencies."""
     canonical_name = name.lower()
+    if canonical_name in RESERVED_NAMELIST_IDENTIFIERS:
+        raise ValueError(f"{label} is reserved for the generated Fortran API")
     if canonical_name in GENERATED_INTRINSIC_IDENTIFIERS:
         raise ValueError(f"{label} is reserved as a Fortran intrinsic used by generated code")
     if canonical_name in GENERATED_HELPER_IDENTIFIERS:

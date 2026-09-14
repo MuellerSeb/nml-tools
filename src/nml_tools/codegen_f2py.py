@@ -396,10 +396,25 @@ def build_f2py_namelist_spec(
         "errmsg",
         "handle",
         "len",
+        "nml__errmsg",
+        "nml__handle",
+        "nml__obj",
+        "nml__status",
         "size",
         "status",
         "this",
     }
+    namelist_name = cast("str", context["namelist_name"])
+    wrapper_reserved_names.update(
+        f"{namelist_name}_{suffix}"
+        for suffix in (
+            "from_file_wrapper",
+            "set_wrapper",
+            "set_dims_wrapper",
+            "is_set_wrapper",
+            "is_valid_wrapper",
+        )
+    )
     field_abi_names: dict[str, str] = {}
     field_names_in_use = set(wrapper_reserved_names)
     for field in fields:

@@ -806,3 +806,45 @@ def test_f2py_wrapper_uses_internal_status_for_imported_status_type() -> None:
     assert "type(status), allocatable :: maybe__state" in generated
     assert "integer, intent(out) :: nml__status" in generated
     assert "type(status) :: nml__status" not in generated
+
+
+def test_f2py_derived_leaf_names_avoid_internal_wrapper_state() -> None:
+    codegen = _import_codegen_f2py()
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "nml": {
+                    "type": "object",
+                    "x-fortran-type": "state_t",
+                    "properties": {
+                        "status": {"type": "integer"},
+                        "handle": {"type": "integer"},
+                        "obj": {"type": "integer"},
+                    },
+                }
+            },
+        }
+    )
+
+    generated = codegen.render_f2py_wrappers([schema], file_name="f2py_run.f90")
+
+    assert "integer, intent(in) :: nml__status_1 !< nml%status" in generated
+    assert "integer, intent(in) :: nml__handle_1 !< nml%handle" in generated
+    assert "integer, intent(in) :: nml__obj_1 !< nml%obj" in generated
+    assert "integer, intent(out) :: nml__status !< nml-tools status code" in generated
+
+
+def test_f2py_mangles_schema_arguments_matching_wrapper_procedures() -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {"run_set_wrapper": {"type": "integer"}},
+    }
+
+    generated = codegen.render_f2py_wrappers([schema], file_name="f2py_run.f90")
+
+    assert "subroutine run_set_wrapper(nml__handle, &\n    run_set_wrapper__value," in generated
+    assert "integer, intent(in) :: run_set_wrapper__value" in generated

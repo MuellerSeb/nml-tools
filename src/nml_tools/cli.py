@@ -1044,13 +1044,11 @@ def _collect_generated_outputs(
                 raise click.ClickException(str(exc)) from exc
 
     try:
-        local_derived_types = collect_local_derived_types(
-            [loaded.schema for loaded in loaded_namelists],
-            constants=constants,
-        )
-        if local_derived_types and helper_path is None:
-            raise ValueError("locally generated derived types require a configured helper output")
         if helper_path is not None:
+            local_derived_types = collect_local_derived_types(
+                [loaded.schema for loaded in loaded_namelists],
+                constants=constants,
+            )
             logger.debug("Rendering helper module at %s", helper_path)
             outputs.append(
                 GeneratedOutput(
@@ -1398,13 +1396,11 @@ def gen_fortran(config_path: Path | None) -> None:
             raise click.ClickException(str(exc)) from exc
 
     try:
-        local_derived_types = collect_local_derived_types(
-            [loaded["schema"] for loaded in loaded_entries],
-            constants=constants,
-        )
-        if local_derived_types and helper_path is None:
-            raise ValueError("locally generated derived types require a configured helper output")
         if helper_path is not None:
+            local_derived_types = collect_local_derived_types(
+                [loaded["schema"] for loaded in loaded_entries],
+                constants=constants,
+            )
             logger.info("Generating helper module at %s", helper_path)
             generate_helper(
                 helper_path,
