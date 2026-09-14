@@ -14,7 +14,11 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
-from ._utils import validate_namelist_identifier, validate_user_fortran_identifier
+from ._utils import (
+    validate_generated_fortran_identifier,
+    validate_namelist_identifier,
+    validate_user_fortran_identifier,
+)
 
 _DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
 _DOCUMENT_SUFFIXES = {".json", ".yml", ".yaml"}
@@ -463,6 +467,9 @@ def _validate_user_identifiers(raw: Any, document: _Document, pointer: str) -> N
                 )
             try:
                 validate_user_fortran_identifier(type_name.strip(), label="'x-fortran-type'")
+                validate_generated_fortran_identifier(
+                    type_name.strip(), label="'x-fortran-type'"
+                )
             except ValueError as exc:
                 raise ValueError(f"{_location(document, pointer)}: {exc}") from exc
         module_name = raw.get("x-fortran-module")
@@ -491,7 +498,7 @@ def _validate_user_identifiers(raw: Any, document: _Document, pointer: str) -> N
                             "property names must be strings"
                         )
                     try:
-                        validate_user_fortran_identifier(name, label=f"property '{name}'")
+                        validate_namelist_identifier(name, label=f"property '{name}'")
                     except ValueError as exc:
                         raise ValueError(
                             f"{_location(document, child_pointer)}: {exc}"
@@ -820,6 +827,7 @@ def _validate_derived_object(schema: Mapping[str, Any]) -> None:
     if not isinstance(type_name, str) or not type_name.strip():
         raise ValueError("derived-type object must define non-empty 'x-fortran-type'")
     validate_user_fortran_identifier(type_name.strip(), label="'x-fortran-type'")
+    validate_generated_fortran_identifier(type_name.strip(), label="'x-fortran-type'")
     module_name = schema.get("x-fortran-module")
     if module_name is not None:
         if not isinstance(module_name, str):

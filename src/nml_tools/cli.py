@@ -19,6 +19,7 @@ from ._namelist_eval import evaluate_group
 from ._namelist_parser import NamelistSyntaxError, ParsedFile, ParsedGroup, parse_namelist
 from ._utils import (
     constant_dimension_overlap,
+    validate_generated_fortran_identifier,
     validate_namelist_identifier,
     validate_user_fortran_identifier,
 )
@@ -83,6 +84,7 @@ class NamedIntegerType(_NamedIntegerTypeBase):  # type: ignore[valid-type, misc]
             self.fail("must use non-empty names", param, ctx)
         try:
             validate_user_fortran_identifier(name, label=f"{self._label} '{name}'")
+            validate_generated_fortran_identifier(name, label=f"{self._label} '{name}'")
         except ValueError as exc:
             self.fail(str(exc), param, ctx)
 
@@ -343,6 +345,11 @@ def _load_kind_settings(config: dict[str, Any]) -> tuple[str, dict[str, str], se
     for alias, target in map_raw.items():
         if not isinstance(alias, str) or not isinstance(target, str):
             raise click.ClickException("config 'kinds.map' keys and values must be strings")
+        try:
+            validate_user_fortran_identifier(alias, label=f"config kind alias '{alias}'")
+            validate_generated_fortran_identifier(alias, label=f"config kind alias '{alias}'")
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
         kind_map[alias] = target
 
     real_raw = kinds_raw.get("real", [])
@@ -433,6 +440,7 @@ def _load_constants(config: dict[str, Any]) -> tuple[dict[str, int], list[Consta
             raise click.ClickException("config constants must have non-empty names")
         try:
             validate_user_fortran_identifier(name, label=f"config constant '{name}'")
+            validate_generated_fortran_identifier(name, label=f"config constant '{name}'")
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
         canonical_name = name.lower()
@@ -1084,6 +1092,10 @@ def _collect_generated_outputs(
     outputs: list[GeneratedOutput] = []
 
     loaded_namelists = _load_namelist_registry(config, base_dir, resolver)
+    if helper_path is None and any(
+        loaded.entry["mod_path"] is not None for loaded in loaded_namelists
+    ):
+        raise click.ClickException("Fortran module generation requires [helper].path")
     loaded_by_key = _namelist_registry_by_key(loaded_namelists)
     profiles = _load_config_metadata(config, loaded_by_key).file_profiles
     logger.debug("Found %d schema entries", len(loaded_namelists))
@@ -1458,6 +1470,10 @@ def gen_fortran(config_path: Path | None) -> None:
     resolver = SchemaResolver()
     loaded_namelists = _load_namelist_registry(config, base_dir, resolver)
     _load_config_metadata(config, _namelist_registry_by_key(loaded_namelists))
+    if helper_path is None and any(
+        loaded.entry["mod_path"] is not None for loaded in loaded_namelists
+    ):
+        raise click.ClickException("Fortran module generation requires [helper].path")
     logger.info("Found %d schema entries", len(loaded_namelists))
     loaded_entries: list[dict[str, Any]] = []
     for loaded in loaded_namelists:

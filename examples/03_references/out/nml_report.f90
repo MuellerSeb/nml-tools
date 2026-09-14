@@ -20,22 +20,9 @@ module nml_report
     NML_ERR_NOT_SET, &
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
-    idx_check, &
-    to_lower, &
+    idx__check, &
+    to__lower, &
     label_len
-  use nml_helper_intrinsics, only: nml__achar => achar
-  use nml_helper_intrinsics, only: nml__all => all
-  use nml_helper_intrinsics, only: nml__allocated => allocated
-  use nml_helper_intrinsics, only: nml__any => any
-  use nml_helper_intrinsics, only: nml__huge => huge
-  use nml_helper_intrinsics, only: nml__len => len
-  use nml_helper_intrinsics, only: nml__len_trim => len_trim
-  use nml_helper_intrinsics, only: nml__minval => minval
-  use nml_helper_intrinsics, only: nml__present => present
-  use nml_helper_intrinsics, only: nml__reshape => reshape
-  use nml_helper_intrinsics, only: nml__shape => shape
-  use nml_helper_intrinsics, only: nml__size => size
-  use nml_helper_intrinsics, only: nml__trim => trim
   use ieee_arithmetic, only: nml__ieee_value => ieee_value, &
     nml__ieee_quiet_nan => ieee_quiet_nan, nml__ieee_is_nan => ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
@@ -58,9 +45,6 @@ module nml_report
   real(dp), parameter, public :: acceptance_fraction__max = 1.0_dp
 
   private :: nml_report_read__from_file
-  private :: nml__achar, nml__all, nml__allocated, nml__any, nml__huge, nml__len, &
-    nml__len_trim, nml__minval, nml__present, nml__reshape, nml__shape, nml__size, &
-    nml__trim
   private :: nml__ieee_value, nml__ieee_quiet_nan, nml__ieee_is_nan
 
   !> \class nml_report_data_t
@@ -92,15 +76,15 @@ contains
     integer(i4), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (nml__present(allow_missing)) then
+    if (present(allow_missing)) then
       if (allow_missing) then
-        if (val == -nml__huge(val)) then
+        if (val == -huge(val)) then
           in_enum = .true.
           return
         end if
       end if
     end if
-    in_enum = nml__any(val == level__enum_values)
+    in_enum = any(val == level__enum_values)
   end function level__in_enum
 
   !> \brief Check whether a value is within bounds
@@ -108,7 +92,7 @@ contains
     real(dp), intent(in) :: val !< value to check
     logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
 
-    if (nml__present(allow_missing)) then
+    if (present(allow_missing)) then
       if (allow_missing) then
         if (nml__ieee_is_nan(val)) then
           in_bounds = .true.
@@ -128,7 +112,7 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     nml__obj%is_configured = .false.
 
     ! default values
@@ -196,7 +180,7 @@ contains
     read(nml__reader%unit, nml=report, iostat=nml__iostat, iomsg=nml__iomsg)
     if (nml__iostat /= 0) then
       nml__status = NML_ERR_READ
-      if (nml__present(errmsg)) errmsg = nml__trim(nml__iomsg)
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
       nml__close_status = nml__reader%close()
       return
     end if
@@ -233,9 +217,9 @@ contains
 
     ! required parameters
     ! override with provided values
-    if (nml__present(label)) nml__obj%data%label = label
-    if (nml__present(level)) nml__obj%data%level = level
-    if (nml__present(acceptance_fraction)) nml__obj%data%acceptance_fraction = acceptance_fraction
+    if (present(label)) nml__obj%data%label = label
+    if (present(level)) nml__obj%data%level = level
+    if (present(acceptance_fraction)) nml__obj%data%acceptance_fraction = acceptance_fraction
 
     ! mark as configured
     nml__obj%is_configured = .true.
@@ -250,37 +234,37 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     if (.not. nml__obj%is_configured) then
       nml__status = NML_ERR_NOT_SET
-      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
-    select case (to_lower(nml__trim(name)))
+    select case (to__lower(trim(name)))
     case ("label")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'label'"
+        if (present(errmsg)) errmsg = "index not supported for 'label'"
         return
       end if
     case ("level")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'level'"
+        if (present(errmsg)) errmsg = "index not supported for 'level'"
         return
       end if
     case ("acceptance_fraction")
-      if (nml__present(idx)) then
+      if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
-        if (nml__present(errmsg)) errmsg = "index not supported for 'acceptance_fraction'"
+        if (present(errmsg)) errmsg = "index not supported for 'acceptance_fraction'"
         return
       end if
     case default
       nml__status = NML_ERR_INVALID_NAME
-      if (nml__present(errmsg)) errmsg = "unknown field: " // nml__trim(name)
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
-    if (nml__status == NML_ERR_NOT_SET .and. nml__present(errmsg)) then
-      if (nml__len_trim(errmsg) == 0) errmsg = "field not set: " // nml__trim(name)
+    if (nml__status == NML_ERR_NOT_SET .and. present(errmsg)) then
+      if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function nml_report_is_set
 
@@ -291,10 +275,10 @@ contains
     integer :: nml__istat
 
     nml__status = NML_OK
-    if (nml__present(errmsg)) errmsg = ""
+    if (present(errmsg)) errmsg = ""
     if (.not. nml__obj%is_configured) then
       nml__status = NML_ERR_NOT_SET
-      if (nml__present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
 
@@ -303,7 +287,7 @@ contains
     if (nml__istat == NML_OK) then
       if (.not. level__in_enum(nml__obj%data%level)) then
         nml__status = NML_ERR_ENUM
-        if (nml__present(errmsg)) errmsg = "enum constraint failed: level"
+        if (present(errmsg)) errmsg = "enum constraint failed: level"
         return
       end if
     else if (nml__istat /= NML_ERR_NOT_SET) then
@@ -315,7 +299,7 @@ contains
     if (nml__istat == NML_OK) then
       if (.not. acceptance_fraction__in_bounds(nml__obj%data%acceptance_fraction)) then
         nml__status = NML_ERR_BOUNDS
-        if (nml__present(errmsg)) errmsg = "bounds constraint failed: acceptance_fraction"
+        if (present(errmsg)) errmsg = "bounds constraint failed: acceptance_fraction"
         return
       end if
     else if (nml__istat /= NML_ERR_NOT_SET) then

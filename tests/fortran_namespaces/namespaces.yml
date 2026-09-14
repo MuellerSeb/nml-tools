@@ -5,9 +5,6 @@ properties:
   status:
     type: integer
     default: 0
-  present:
-    type: integer
-    default: 0
   file:
     type: integer
     default: 0
@@ -51,9 +48,6 @@ properties:
     type: integer
     default: 0
   is_configured:
-    type: integer
-    default: 0
-  size:
     type: integer
     default: 0
   values:

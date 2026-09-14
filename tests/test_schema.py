@@ -1141,6 +1141,36 @@ def test_schema_rejects_reserved_errmsg_properties(name: str) -> None:
         )
 
 
+@pytest.mark.parametrize("name", ["present", "SIZE", "NML_OK"])
+def test_schema_rejects_generated_dependency_properties(name: str) -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {name: {"type": "integer"}},
+            }
+        )
+
+
+@pytest.mark.parametrize("type_name", ["present", "NML_FILE_T"])
+def test_schema_rejects_generated_dependency_type_names(type_name: str) -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "object",
+                        "x-fortran-type": type_name,
+                        "properties": {"code": {"type": "integer"}},
+                    }
+                },
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("property_schema", "match"),
     [
