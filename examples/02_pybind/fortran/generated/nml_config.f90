@@ -24,12 +24,13 @@ module nml_config
     NML_ERR_NOT_SET, &
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
-    idx_check, &
-    to_lower, &
+    idx__check, &
+    to__lower, &
     NML_ERR_INVALID_HANDLE, &
     str_len, &
-    n_weights__default
-  use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
+    n_weights__dim_default
+  use ieee_arithmetic, only: nml__ieee_value => ieee_value, &
+    nml__ieee_quiet_nan => ieee_quiet_nan, nml__ieee_is_nan => ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
     i4=>int32, &
@@ -47,6 +48,24 @@ module nml_config
   integer(i4), parameter, public :: iterations__min = 1_i4
   real(dp), parameter, public :: tolerance__min_excl = 0.0_dp
 
+  private :: nml_config_read__from_file
+
+  !> \class nml_config_data_t
+  !> \brief Schema-backed values for config
+  type, public :: nml_config_data_t
+    character(len=str_len) :: name !< Config name
+    integer(i4) :: iterations !< Iterations
+    real(dp) :: tolerance !< Tolerance
+    logical :: enabled !< Enabled
+    real(dp), allocatable, dimension(:) :: weights !< Weights
+  end type nml_config_data_t
+
+  !> \class nml_config_dims_t
+  !> \brief Runtime dimensions for config
+  type, public :: nml_config_dims_t
+    integer :: n_weights = n_weights__dim_default !< runtime dimension for n_weights
+  end type nml_config_dims_t
+
   !> \class nml_config_t
   !> \brief Python binding config
   !> \details Minimal namelist used by the pybind example.
@@ -55,13 +74,9 @@ module nml_config
   !! through an opaque integer handle.
   !!
   type, public :: nml_config_t
+    type(nml_config_data_t) :: data !< schema-backed namelist values
+    type(nml_config_dims_t) :: dims !< runtime array dimensions
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: n_weights = n_weights__default !< runtime dimension for n_weights
-    character(len=str_len) :: name !< Config name
-    integer(i4) :: iterations !< Iterations
-    real(dp) :: tolerance !< Tolerance
-    logical :: enabled !< Enabled
-    real(dp), allocatable, dimension(:) :: weights !< Weights
   contains
     procedure :: init => nml_config_init
     procedure :: set_dims => nml_config_set_dims
@@ -98,7 +113,7 @@ contains
 
     if (present(allow_missing)) then
       if (allow_missing) then
-        if (ieee_is_nan(val)) then
+        if (nml__ieee_is_nan(val)) then
           in_bounds = .true.
           return
         end if
@@ -110,81 +125,90 @@ contains
   end function tolerance__in_bounds
 
   !> \brief Resolve an opaque C pointer handle to a nml_config_t pointer
-  subroutine nml_config_resolve_handle(handle, this, status, errmsg)
+  subroutine nml_config_resolve_handle(handle, nml__obj, nml__status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
-    type(nml_config_t), pointer :: this !< resolved namelist pointer
-    integer, intent(out) :: status !< nml-tools status code
+    type(nml_config_t), pointer :: nml__obj !< resolved namelist pointer
+    integer, intent(out) :: nml__status !< nml-tools status code
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     type(c_ptr) :: ptr
 
     if (present(errmsg)) errmsg = ""
-    nullify(this)
+    nullify(nml__obj)
     if (handle == 0_c_intptr_t) then
-      status = NML_ERR_INVALID_HANDLE
+      nml__status = NML_ERR_INVALID_HANDLE
       if (present(errmsg)) errmsg = "zero handle"
       return
     end if
     ptr = transfer(handle, c_null_ptr)
-    call c_f_pointer(ptr, this)
-    status = NML_OK
+    call c_f_pointer(ptr, nml__obj)
+    nml__status = NML_OK
   end subroutine nml_config_resolve_handle
 
   !> \brief Initialize defaults and sentinels for config
-  integer function nml_config_init(this, errmsg) result(status)
-    class(nml_config_t), intent(inout) :: this !< namelist instance
+  integer function nml_config_init(nml__obj, errmsg) result(nml__status)
+    class(nml_config_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    this%is_configured = .false.
+    nml__obj%is_configured = .false.
 
     ! allocate runtime-sized fields
-    if (allocated(this%weights)) deallocate(this%weights)
-    allocate(this%weights(this%n_weights))
+    if (allocated(nml__obj%data%weights)) deallocate(nml__obj%data%weights)
+    allocate(nml__obj%data%weights(nml__obj%dims%n_weights))
 
     ! sentinel values for required/optional parameters
-    this%iterations = -huge(this%iterations) ! sentinel for required integer
-    this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
+    nml__obj%data%iterations = -huge(nml__obj%data%iterations) ! sentinel for required integer
+    nml__obj%data%tolerance = nml__ieee_value(nml__obj%data%tolerance, nml__ieee_quiet_nan) ! sentinel for required real
     ! default values
-    this%name = name__default
-    this%enabled = enabled__default ! bool values always need a default
-    this%weights = weights__default
+    nml__obj%data%name = name__default
+    nml__obj%data%enabled = enabled__default ! bool values always need a default
+    nml__obj%data%weights = weights__default
   end function nml_config_init
 
   !> \brief Reset runtime dimensions for config
-  integer function nml_config_set_dims(this, &
+  integer function nml_config_set_dims(nml__obj, &
     n_weights, &
-    errmsg) result(status)
-    class(nml_config_t), intent(inout) :: this !< namelist instance
+    errmsg) result(nml__status)
+    class(nml_config_t), intent(inout) :: nml__obj !< namelist instance
     integer, intent(in), optional :: n_weights !< runtime dimension override for n_weights
     integer :: candidate__n_weights
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(n_weights)) then
       candidate__n_weights = n_weights
     else
-      candidate__n_weights = n_weights__default
+      candidate__n_weights = n_weights__dim_default
     end if
     if (candidate__n_weights <= 0) then
-      status = NML_ERR_INVALID_INDEX
+      nml__status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'n_weights' must be positive"
       return
     end if
-    this%n_weights = candidate__n_weights
+    nml__obj%dims%n_weights = candidate__n_weights
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
-    if (allocated(this%weights)) deallocate(this%weights)
-    this%is_configured = .false.
+    if (allocated(nml__obj%data%weights)) deallocate(nml__obj%data%weights)
+    nml__obj%is_configured = .false.
   end function nml_config_set_dims
 
 
   !> \brief Read config namelist from file
-  integer function nml_config_from_file(this, file, errmsg) result(status)
-    class(nml_config_t), intent(inout) :: this !< namelist instance
+  integer function nml_config_from_file(nml__obj, file, errmsg) result(nml__status)
+    class(nml_config_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    nml__status = nml_config_read__from_file(nml__obj, file, errmsg)
+  end function nml_config_from_file
+
+  integer function nml_config_read__from_file(nml__obj, nml__file, errmsg) &
+    result(nml__status)
+    class(nml_config_t), intent(inout) :: nml__obj
+    character(len=*), intent(in) :: nml__file
+    character(len=*), intent(out), optional :: errmsg
     ! namelist variables
     character(len=str_len) :: name
     integer(i4) :: iterations
@@ -192,10 +216,10 @@ contains
     logical :: enabled
     real(dp), allocatable, dimension(:) :: weights
     ! locals
-    type(nml_file_t) :: nml
-    integer :: iostat
-    integer :: close_status
-    character(len=nml_line_buffer) :: iomsg
+    type(nml_file_t) :: nml__reader
+    integer :: nml__iostat
+    integer :: nml__close_status
+    character(len=nml_line_buffer) :: nml__iomsg
 
     namelist /config/ &
       name, &
@@ -204,176 +228,171 @@ contains
       enabled, &
       weights
 
-    status = this%init(errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(weights)) deallocate(weights)
-    allocate(weights(this%n_weights))
-    name = this%name
-    iterations = this%iterations
-    tolerance = this%tolerance
-    enabled = this%enabled
-    weights = this%weights
+    allocate(weights(nml__obj%dims%n_weights))
+    name = nml__obj%data%name
+    iterations = nml__obj%data%iterations
+    tolerance = nml__obj%data%tolerance
+    enabled = nml__obj%data%enabled
+    weights = nml__obj%data%weights
 
-    status = nml%open(file, errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__reader%open(nml__file, errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 
-    status = nml%find("config", errmsg=errmsg)
-    if (status /= NML_OK) then
-      close_status = nml%close()
+    nml__status = nml__reader%find("config", errmsg=errmsg)
+    if (nml__status /= NML_OK) then
+      nml__close_status = nml__reader%close()
       return
     end if
 
     ! read namelist
-    read(nml%unit, nml=config, iostat=iostat, iomsg=iomsg)
-    if (iostat /= 0) then
-      status = NML_ERR_READ
-      if (present(errmsg)) errmsg = trim(iomsg)
-      close_status = nml%close()
+    read(nml__reader%unit, nml=config, iostat=nml__iostat, iomsg=nml__iomsg)
+    if (nml__iostat /= 0) then
+      nml__status = NML_ERR_READ
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
+      nml__close_status = nml__reader%close()
       return
     end if
-    close_status = nml%close(errmsg=errmsg)
-    if (close_status /= NML_OK) then
-      status = close_status
+    nml__close_status = nml__reader%close(errmsg=errmsg)
+    if (nml__close_status /= NML_OK) then
+      nml__status = nml__close_status
       return
     end if
 
     ! assign values
-    this%name = name
-    this%iterations = iterations
-    this%tolerance = tolerance
-    this%enabled = enabled
-    this%weights = weights
+    nml__obj%data%name = name
+    nml__obj%data%iterations = iterations
+    nml__obj%data%tolerance = tolerance
+    nml__obj%data%enabled = enabled
+    nml__obj%data%weights = weights
 
     ! mark as configured
-    this%is_configured = .true.
-    status = NML_OK
-  end function nml_config_from_file
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
+  end function nml_config_read__from_file
 
   !> \brief Set config values
-  integer function nml_config_set(this, &
+  integer function nml_config_set(nml__obj, &
     iterations, &
     tolerance, &
     name, &
     enabled, &
     weights, &
-    errmsg) result(status)
+    errmsg) result(nml__status)
 
-    class(nml_config_t), intent(inout) :: this !< namelist instance
+    class(nml_config_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer(i4), intent(in) :: iterations !< Iterations
     real(dp), intent(in) :: tolerance !< Tolerance
     character(len=*), intent(in), optional :: name !< Config name
     logical, intent(in), optional :: enabled !< Enabled
     real(dp), dimension(:), intent(in), optional :: weights !< Weights
-    integer :: &
-      lb__1, &
-      ub__1
-
-    status = this%init(errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 
     ! required parameters
-    this%iterations = iterations
-    this%tolerance = tolerance
+    nml__obj%data%iterations = iterations
+    nml__obj%data%tolerance = tolerance
     ! override with provided values
-    if (present(name)) this%name = name
-    if (present(enabled)) this%enabled = enabled
+    if (present(name)) nml__obj%data%name = name
+    if (present(enabled)) nml__obj%data%enabled = enabled
     if (present(weights)) then
-      if (size(weights, 1) > size(this%weights, 1)) then
-        status = NML_ERR_INVALID_INDEX
+      if (size(weights, 1) > size(nml__obj%data%weights, 1)) then
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'weights'"
         return
       end if
-      lb__1 = lbound(this%weights, 1)
-      ub__1 = lb__1 + size(weights, 1) - 1
-      this%weights(lb__1:ub__1) = weights
+      nml__obj%data%weights( &
+        1:size(weights, 1)) = weights
     end if
 
     ! mark as configured
-    this%is_configured = .true.
-    status = NML_OK
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
   end function nml_config_set
 
   !> \brief Check whether a namelist value was set
-  integer function nml_config_is_set(this, name, idx, errmsg) result(status)
-    class(nml_config_t), intent(in) :: this !< namelist instance
+  integer function nml_config_is_set(nml__obj, name, idx, errmsg) result(nml__status)
+    class(nml_config_t), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (.not. this%is_configured) then
-      status = NML_ERR_NOT_SET
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
       if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
-    select case (to_lower(trim(name)))
+    select case (to__lower(trim(name)))
     case ("name")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'name'"
         return
       end if
     case ("iterations")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'iterations'"
         return
       end if
-      if (this%iterations == -huge(this%iterations)) status = NML_ERR_NOT_SET
+      if (nml__obj%data%iterations == -huge(nml__obj%data%iterations)) nml__status = NML_ERR_NOT_SET
     case ("tolerance")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'tolerance'"
         return
       end if
-      if (ieee_is_nan(this%tolerance)) status = NML_ERR_NOT_SET
+      if (nml__ieee_is_nan(nml__obj%data%tolerance)) nml__status = NML_ERR_NOT_SET
     case ("enabled")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'enabled'"
         return
       end if
     case ("weights")
-      if (.not. allocated(this%weights)) then
-        status = NML_ERR_NOT_SET
+      if (.not. allocated(nml__obj%data%weights)) then
+        nml__status = NML_ERR_NOT_SET
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%weights), ubound(this%weights), &
+        nml__status = idx__check(idx, shape(nml__obj%data%weights), &
           "weights", errmsg)
-        if (status /= NML_OK) return
+        if (nml__status /= NML_OK) return
       else
       end if
     case default
-      status = NML_ERR_INVALID_NAME
+      nml__status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
-    if (status == NML_ERR_NOT_SET .and. present(errmsg)) then
+    if (nml__status == NML_ERR_NOT_SET .and. present(errmsg)) then
       if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function nml_config_is_set
 
   !> \brief Validate required values and constraints
-  integer function nml_config_is_valid(this, errmsg) result(status)
-    class(nml_config_t), intent(in) :: this !< namelist instance
+  integer function nml_config_is_valid(nml__obj, errmsg) result(nml__status)
+    class(nml_config_t), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: istat
+    integer :: nml__istat
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (.not. this%is_configured) then
-      status = NML_ERR_NOT_SET
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
       if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
 
     ! required parameters
-    istat = this%is_set("iterations", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
+    nml__istat = nml__obj%is_set("iterations", errmsg=errmsg)
+    if (nml__istat == NML_ERR_NOT_SET) then
+      nml__status = NML_ERR_REQUIRED
       if (present(errmsg)) then
         if (len_trim(errmsg) == 0) then
           errmsg = "field not set: iterations"
@@ -382,13 +401,13 @@ contains
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
-    istat = this%is_set("tolerance", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
+    nml__istat = nml__obj%is_set("tolerance", errmsg=errmsg)
+    if (nml__istat == NML_ERR_NOT_SET) then
+      nml__status = NML_ERR_REQUIRED
       if (present(errmsg)) then
         if (len_trim(errmsg) == 0) then
           errmsg = "field not set: tolerance"
@@ -397,31 +416,31 @@ contains
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
     ! bounds constraints
-    istat = this%is_set("iterations", errmsg=errmsg)
-    if (istat == NML_OK) then
-      if (.not. iterations__in_bounds(this%iterations)) then
-        status = NML_ERR_BOUNDS
+    nml__istat = nml__obj%is_set("iterations", errmsg=errmsg)
+    if (nml__istat == NML_OK) then
+      if (.not. iterations__in_bounds(nml__obj%data%iterations)) then
+        nml__status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: iterations"
         return
       end if
-    else if (istat /= NML_ERR_NOT_SET) then
-      status = istat
+    else if (nml__istat /= NML_ERR_NOT_SET) then
+      nml__status = nml__istat
       return
     end if
-    istat = this%is_set("tolerance", errmsg=errmsg)
-    if (istat == NML_OK) then
-      if (.not. tolerance__in_bounds(this%tolerance)) then
-        status = NML_ERR_BOUNDS
+    nml__istat = nml__obj%is_set("tolerance", errmsg=errmsg)
+    if (nml__istat == NML_OK) then
+      if (.not. tolerance__in_bounds(nml__obj%data%tolerance)) then
+        nml__status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: tolerance"
         return
       end if
-    else if (istat /= NML_ERR_NOT_SET) then
-      status = istat
+    else if (nml__istat /= NML_ERR_NOT_SET) then
+      nml__status = nml__istat
       return
     end if
   end function nml_config_is_valid

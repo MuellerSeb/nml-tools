@@ -10,7 +10,8 @@ module {{ module_name }}
   use {{ helper_module }}, only: &
     {{ helper_imports | join(', &\n    ') }}
 {% if use_ieee %}
-  use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
+  use ieee_arithmetic, only: nml__ieee_value => ieee_value, &
+    nml__ieee_quiet_nan => ieee_quiet_nan, nml__ieee_is_nan => ieee_is_nan
 {% endif %}
 {% if kind_imports %}
   ! kind specifiers listed in the nml-tools configuration file
@@ -47,19 +48,35 @@ module {{ module_name }}
 {% endfor %}
 
 {% endif %}
+  private :: {{ type_prefix }}_read__from_file
+
+  !> \class {{ data_type_name }}
+  !> \brief Schema-backed values for {{ namelist_name }}
+  type, public :: {{ data_type_name }}
+{% for field in fields %}
+{{ field.declaration | indent(4, True) }}
+{% endfor %}
+  end type {{ data_type_name }}
+
+{% if runtime_dimensions %}
+  !> \class {{ dims_type_name }}
+  !> \brief Runtime dimensions for {{ namelist_name }}
+  type, public :: {{ dims_type_name }}
+{% for entry in runtime_dimensions %}
+    integer :: {{ entry.local_name }} = {{ entry.default_name }} !< runtime dimension for {{ entry.name }}
+{% endfor %}
+  end type {{ dims_type_name }}
+
+{% endif %}
   !> \class {{ doc_class }}
   !> \brief {{ brief_text }}
   !> \details {{ details_text | replace('\n', '\n  !! ') }}
   type, public :: {{ type_name }}
-    logical :: is_configured = .false. !< whether the namelist has been configured
+    type({{ data_type_name }}) :: data !< schema-backed namelist values
 {% if runtime_dimensions %}
-{% for entry in runtime_dimensions %}
-    integer :: {{ entry.local_name }} = {{ entry.default_name }} !< runtime dimension for {{ entry.name }}
-{% endfor %}
+    type({{ dims_type_name }}) :: dims !< runtime array dimensions
 {% endif %}
-{% for field in fields %}
-{{ field.declaration | indent(4, True) }}
-{% endfor %}
+    logical :: is_configured = .false. !< whether the namelist has been configured
   contains
     procedure :: init => {{ type_prefix }}_init
 {% if derived_init_type_fields %}
@@ -132,34 +149,34 @@ contains
 {% endif %}
 {% if f2py_handle_helpers %}
   !> \brief Resolve an opaque C pointer handle to a {{ type_name }} pointer
-  subroutine {{ type_prefix }}_resolve_handle(handle, this, status, errmsg)
+  subroutine {{ type_prefix }}_resolve_handle(handle, nml__obj, nml__status, errmsg)
     integer(c_intptr_t), intent(in) :: handle !< opaque handle to a {{ type_name }} instance
-    type({{ type_name }}), pointer :: this !< resolved namelist pointer
-    integer, intent(out) :: status !< nml-tools status code
+    type({{ type_name }}), pointer :: nml__obj !< resolved namelist pointer
+    integer, intent(out) :: nml__status !< nml-tools status code
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     type(c_ptr) :: ptr
 
     if (present(errmsg)) errmsg = ""
-    nullify(this)
+    nullify(nml__obj)
     if (handle == 0_c_intptr_t) then
-      status = NML_ERR_INVALID_HANDLE
+      nml__status = NML_ERR_INVALID_HANDLE
       if (present(errmsg)) errmsg = "zero handle"
       return
     end if
     ptr = transfer(handle, c_null_ptr)
-    call c_f_pointer(ptr, this)
-    status = NML_OK
+    call c_f_pointer(ptr, nml__obj)
+    nml__status = NML_OK
   end subroutine {{ type_prefix }}_resolve_handle
 
 {% endif %}
   !> \brief Initialize defaults and sentinels for {{ namelist_name }}
-  integer function {{ type_prefix }}_init(this, errmsg) result(status)
-    class({{ type_name }}), intent(inout) :: this !< namelist instance
+  integer function {{ type_prefix }}_init(nml__obj, errmsg) result(nml__status)
+    class({{ type_name }}), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    this%is_configured = .false.
+    nml__obj%is_configured = .false.
 {% if runtime_allocations %}
 
     ! allocate runtime-sized fields
@@ -188,27 +205,27 @@ contains
 
 {% endif %}
     ! derived values
-    status = this%init_type( &
+    nml__status = nml__obj%init_type( &
 {% for field in derived_init_type_fields %}
-      {{ field.name }}=this%{{ field.name }}, &
+      {{ field.name }}=nml__obj%data%{{ field.name }}, &
 {% endfor %}
       errmsg=errmsg)
-    if (status /= NML_OK) return
+    if (nml__status /= NML_OK) return
 {% endif %}
   end function {{ type_prefix }}_init
 
 {% if derived_init_type_fields %}
   !> \brief Initialize derived values with their field-specific defaults
-  integer function {{ type_prefix }}_init_type(this, &
+  integer function {{ type_prefix }}_init_type(nml__obj, &
     {{ derived_init_type_fields | map(attribute='name') | join(', &\n    ') }}, &
-    errmsg) result(status)
-    class({{ type_name }}), intent(in) :: this !< parent namelist instance
+    errmsg) result(nml__status)
+    class({{ type_name }}), intent(in) :: nml__obj !< parent namelist instance
 {% for field in derived_init_type_fields %}
 {{ field.declaration | indent(4, True) }}
 {% endfor %}
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
 {% for field in derived_init_type_fields %}
     if (present({{ field.name }})) then
@@ -226,13 +243,13 @@ contains
 {% if runtime_dimensions %}
   !> \brief Reset runtime dimensions for {{ namelist_name }}
 {% if set_dims_arguments %}
-  integer function {{ type_prefix }}_set_dims(this, &
+  integer function {{ type_prefix }}_set_dims(nml__obj, &
     {{ set_dims_arguments | map(attribute='arg_name') | join(', &\n    ') }}, &
-    errmsg) result(status)
+    errmsg) result(nml__status)
 {% else %}
-  integer function {{ type_prefix }}_set_dims(this, errmsg) result(status)
+  integer function {{ type_prefix }}_set_dims(nml__obj, errmsg) result(nml__status)
 {% endif %}
-    class({{ type_name }}), intent(inout) :: this !< namelist instance
+    class({{ type_name }}), intent(inout) :: nml__obj !< namelist instance
 {% for entry in set_dims_arguments %}
     integer, intent(in), optional :: {{ entry.arg_name }} !< runtime dimension override for {{ entry.name }}
 {% endfor %}
@@ -241,7 +258,7 @@ contains
 {% endfor %}
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
 {% for entry in set_dims_arguments %}
     if (present({{ entry.arg_name }})) then
@@ -250,13 +267,13 @@ contains
       {{ entry.candidate_name }} = {{ entry.default_name }}
     end if
     if ({{ entry.candidate_name }} <= 0) then
-      status = NML_ERR_INVALID_INDEX
+      nml__status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension '{{ entry.name }}' must be positive"
       return
     end if
 {% if entry.min_required > 1 %}
     if ({{ entry.candidate_name }} < {{ entry.min_required }}) then
-      status = NML_ERR_INVALID_INDEX
+      nml__status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension '{{ entry.name }}' must be >= {{ entry.min_required }}"
       return
     end if
@@ -264,13 +281,13 @@ contains
 {% endfor %}
 {% for check in set_dims_extent_checks %}
     if ({{ check.condition }}) then
-      status = NML_ERR_INVALID_INDEX
+      nml__status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "{{ check.message }}"
       return
     end if
 {% endfor %}
 {% for entry in set_dims_arguments %}
-    this%{{ entry.local_name }} = {{ entry.candidate_name }}
+    nml__obj%dims%{{ entry.local_name }} = {{ entry.candidate_name }}
 {% endfor %}
 {% if runtime_deallocations %}
 
@@ -279,31 +296,40 @@ contains
 {{ stmt | indent(4, True) }}
 {% endfor %}
 {% endif %}
-    this%is_configured = .false.
+    nml__obj%is_configured = .false.
   end function {{ type_prefix }}_set_dims
 
 {% endif %}
 
   !> \brief Read {{ namelist_name }} namelist from file
-  integer function {{ type_prefix }}_from_file(this, file, errmsg) result(status)
-    class({{ type_name }}), intent(inout) :: this !< namelist instance
+  integer function {{ type_prefix }}_from_file(nml__obj, file, errmsg) result(nml__status)
+    class({{ type_name }}), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    nml__status = {{ type_prefix }}_read__from_file(nml__obj, file, errmsg)
+  end function {{ type_prefix }}_from_file
+
+  integer function {{ type_prefix }}_read__from_file(nml__obj, nml__file, errmsg) &
+    result(nml__status)
+    class({{ type_name }}), intent(inout) :: nml__obj
+    character(len=*), intent(in) :: nml__file
+    character(len=*), intent(out), optional :: errmsg
     ! namelist variables
 {% for field in fields %}
 {{ field.local_declaration | indent(4, True) }}
 {% endfor %}
     ! locals
-    type(nml_file_t) :: nml
-    integer :: iostat
-    integer :: close_status
-    character(len=nml_line_buffer) :: iomsg
+    type(nml_file_t) :: nml__reader
+    integer :: nml__iostat
+    integer :: nml__close_status
+    character(len=nml_line_buffer) :: nml__iomsg
 
     namelist /{{ namelist_name }}/ &
       {{ namelist_vars | join(', &\n      ') }}
 
-    status = this%init(errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 {% if runtime_local_allocations %}
     ! allocate local namelist variables matching runtime-sized fields
 {% for stmt in runtime_local_allocations %}
@@ -314,38 +340,38 @@ contains
 {{ stmt | indent(4, True) }}
 {% endfor %}
 
-    status = nml%open(file, errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__reader%open(nml__file, errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 
-    status = nml%find("{{ namelist_name }}", errmsg=errmsg)
-    if (status /= NML_OK) then
+    nml__status = nml__reader%find("{{ namelist_name }}", errmsg=errmsg)
+    if (nml__status /= NML_OK) then
 {% if allow_missing_namelist %}
-      if (status == NML_ERR_NML_NOT_FOUND) then
-        close_status = nml%close(errmsg=errmsg)
-        if (close_status /= NML_OK) then
-          status = close_status
+      if (nml__status == NML_ERR_NML_NOT_FOUND) then
+        nml__close_status = nml__reader%close(errmsg=errmsg)
+        if (nml__close_status /= NML_OK) then
+          nml__status = nml__close_status
           return
         end if
-        this%is_configured = .true.
-        status = NML_OK
+        nml__obj%is_configured = .true.
+        nml__status = NML_OK
         return
       end if
 {% endif %}
-      close_status = nml%close()
+      nml__close_status = nml__reader%close()
       return
     end if
 
     ! read namelist
-    read(nml%unit, nml={{ namelist_name }}, iostat=iostat, iomsg=iomsg)
-    if (iostat /= 0) then
-      status = NML_ERR_READ
-      if (present(errmsg)) errmsg = trim(iomsg)
-      close_status = nml%close()
+    read(nml__reader%unit, nml={{ namelist_name }}, iostat=nml__iostat, iomsg=nml__iomsg)
+    if (nml__iostat /= 0) then
+      nml__status = NML_ERR_READ
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
+      nml__close_status = nml__reader%close()
       return
     end if
-    close_status = nml%close(errmsg=errmsg)
-    if (close_status /= NML_OK) then
-      status = close_status
+    nml__close_status = nml__reader%close(errmsg=errmsg)
+    if (nml__close_status /= NML_OK) then
+      nml__status = nml__close_status
       return
     end if
 
@@ -355,20 +381,20 @@ contains
 {% endfor %}
 
     ! mark as configured
-    this%is_configured = .true.
-    status = NML_OK
-  end function {{ type_prefix }}_from_file
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
+  end function {{ type_prefix }}_read__from_file
 
   !> \brief Set {{ namelist_name }} values
 {% if argument_list %}
-  integer function {{ type_prefix }}_set(this, &
+  integer function {{ type_prefix }}_set(nml__obj, &
     {{ argument_list | join(', &\n    ') }}, &
-    errmsg) result(status)
+    errmsg) result(nml__status)
 {% else %}
-  integer function {{ type_prefix }}_set(this, errmsg) result(status)
+  integer function {{ type_prefix }}_set(nml__obj, errmsg) result(nml__status)
 {% endif %}
 
-    class({{ type_name }}), intent(inout) :: this !< namelist instance
+    class({{ type_name }}), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 {% for decl in required_argument_declarations %}
 {{ decl | indent(4, True) }}
@@ -376,13 +402,8 @@ contains
 {% for decl in optional_argument_declarations %}
 {{ decl | indent(4, True) }}
 {% endfor %}
-{% if flex_bound_vars %}
-    integer :: &
-      {{ flex_bound_vars | join(', &\n      ') }}
-{% endif %}
-
-    status = this%init(errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 
     ! required parameters
 {% for stmt in set_required_assignments %}
@@ -396,54 +417,54 @@ contains
 {% endif %}
 
     ! mark as configured
-    this%is_configured = .true.
-    status = NML_OK
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
   end function {{ type_prefix }}_set
 
   !> \brief Check whether a namelist value was set
-  integer function {{ type_prefix }}_is_set(this, name, idx, errmsg) result(status)
-    class({{ type_name }}), intent(in) :: this !< namelist instance
+  integer function {{ type_prefix }}_is_set(nml__obj, name, idx, errmsg) result(nml__status)
+    class({{ type_name }}), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (.not. this%is_configured) then
-      status = NML_ERR_NOT_SET
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
       if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
-    select case (to_lower(trim(name)))
+    select case (to__lower(trim(name)))
 {% for case in presence_cases %}
     case ("{{ case.name }}")
 {% if case.is_array %}
 {% if case.runtime_array %}
-      if (.not. allocated(this%{{ case.name }})) then
-        status = NML_ERR_NOT_SET
+      if (.not. allocated(nml__obj%data%{{ case.name }})) then
+        nml__status = NML_ERR_NOT_SET
         return
       end if
 {% endif %}
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%{{ case.name }}), ubound(this%{{ case.name }}), &
+        nml__status = idx__check(idx, shape(nml__obj%data%{{ case.name }}), &
           "{{ case.display_name }}", errmsg)
-        if (status /= NML_OK) return
+        if (nml__status /= NML_OK) return
 {% if not case.always_true %}
-        if ({{ case.element_condition }}) status = NML_ERR_NOT_SET
+        if ({{ case.element_condition }}) nml__status = NML_ERR_NOT_SET
 {% endif %}
       else
 {% if not case.always_true %}
-        if ({{ case.sentinel_condition }}) status = NML_ERR_NOT_SET
+        if ({{ case.sentinel_condition }}) nml__status = NML_ERR_NOT_SET
 {% endif %}
       end if
 {% else %}
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for '{{ case.display_name }}'"
         return
       end if
 {% if not case.always_true %}
-      if ({{ case.sentinel_condition }}) status = NML_ERR_NOT_SET
+      if ({{ case.sentinel_condition }}) nml__status = NML_ERR_NOT_SET
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -451,89 +472,80 @@ contains
 {{ block | indent(4, True) }}
 {% endfor %}
     case default
-      status = NML_ERR_INVALID_NAME
+      nml__status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
-    if (status == NML_ERR_NOT_SET .and. present(errmsg)) then
+    if (nml__status == NML_ERR_NOT_SET .and. present(errmsg)) then
       if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function {{ type_prefix }}_is_set
 
 {% if flex_arrays %}
   !> \brief Determine the filled shape along flexible dimensions
-  integer function {{ type_prefix }}_filled_shape(this, name, filled, errmsg) result(status)
-    class({{ type_name }}), intent(in) :: this !< namelist instance
+  integer function {{ type_prefix }}_filled_shape(nml__obj, name, filled, errmsg) result(nml__status)
+    class({{ type_name }}), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: name !< field name
     integer, intent(out) :: filled(:) !< filled shape of the requested field
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: idx
-    integer :: dim
-{% if flex_bound_vars %}
-    integer :: &
-      {{ flex_bound_vars | join(', &\n      ') }}
-{% endif %}
+    integer :: nml__idx
+    integer :: nml__dim
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    select case (to_lower(trim(name)))
+    select case (to__lower(trim(name)))
 {% for flex in flex_arrays %}
     case ("{{ flex.name }}")
       if (size(filled) /= {{ flex.rank }}) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "shape rank mismatch for '{{ flex.display_name }}'"
         return
       end if
 {% if flex.runtime_array %}
-      if (.not. allocated(this%{{ flex.name }})) then
+      if (.not. allocated(nml__obj%data%{{ flex.name }})) then
         filled = 0
         return
       end if
 {% endif %}
-      do dim = 1, {{ flex.rank }}
-        filled(dim) = size(this%{{ flex.name }}, dim)
+      do nml__dim = 1, {{ flex.rank }}
+        filled(nml__dim) = size(nml__obj%data%{{ flex.name }}, nml__dim)
       end do
 {% for dim in flex.flex_dims %}
       filled({{ dim }}) = 0
-      do idx = ubound(this%{{ flex.name }}, {{ dim }}), &
-        lbound(this%{{ flex.name }}, {{ dim }}), -1
+      do nml__idx = size(nml__obj%data%{{ flex.name }}, {{ dim }}), 1, -1
         if (.not. ({{ flex.slice_missing_conditions[loop.index0] }})) then
-          filled({{ dim }}) = idx - lbound(this%{{ flex.name }}, {{ dim }}) + 1
+          filled({{ dim }}) = nml__idx
           exit
         end if
       end do
 {% endfor %}
       if (minval(filled) > 0) then
-{% for bound in flex.bounds %}
-        {{ bound.lb_var }} = lbound(this%{{ flex.name }}, {{ bound.dim }})
-        {{ bound.ub_var }} = {{ bound.lb_var }} + filled({{ bound.dim }}) - 1
-{% endfor %}
         if ({{ flex.prefix_any_missing_condition }}) then
-          status = NML_ERR_PARTLY_SET
+          nml__status = NML_ERR_PARTLY_SET
           if (present(errmsg)) errmsg = "array partly set: {{ flex.display_name }}"
           return
         end if
       end if
 {% endfor %}
     case default
-      status = NML_ERR_INVALID_NAME
+      nml__status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "field is not a flexible array: " // trim(name)
     end select
   end function {{ type_prefix }}_filled_shape
 
 {% endif %}
   !> \brief Validate required values and constraints
-  integer function {{ type_prefix }}_is_valid(this, errmsg) result(status)
-    class({{ type_name }}), intent(in) :: this !< namelist instance
+  integer function {{ type_prefix }}_is_valid(nml__obj, errmsg) result(nml__status)
+    class({{ type_name }}), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: istat
+    integer :: nml__istat
 {% if flex_arrays %}
-    integer, allocatable :: filled(:)
+    integer, allocatable :: nml__filled(:)
 {% endif %}
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (.not. this%is_configured) then
-      status = NML_ERR_NOT_SET
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
       if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
@@ -541,9 +553,9 @@ contains
 {% if required_scalar_validations %}
     ! required parameters
 {% for name in required_scalar_validations %}
-    istat = this%is_set("{{ name }}", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
+    nml__istat = nml__obj%is_set("{{ name }}", errmsg=errmsg)
+    if (nml__istat == NML_ERR_NOT_SET) then
+      nml__status = NML_ERR_REQUIRED
       if (present(errmsg)) then
         if (len_trim(errmsg) == 0) then
           errmsg = "field not set: {{ name }}"
@@ -552,8 +564,8 @@ contains
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
 {% endfor %}
@@ -562,19 +574,19 @@ contains
     ! required arrays
 {% for entry in required_array_validations %}
 {% if entry.runtime_array %}
-    if (.not. allocated(this%{{ entry.attr_name }})) then
-      status = NML_ERR_REQUIRED
+    if (.not. allocated(nml__obj%data%{{ entry.attr_name }})) then
+      nml__status = NML_ERR_REQUIRED
       if (present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
       return
     end if
 {% endif %}
     if ({{ entry.all_missing_condition }}) then
-      status = NML_ERR_REQUIRED
+      nml__status = NML_ERR_REQUIRED
       if (present(errmsg)) errmsg = "required field not set: {{ entry.name }}"
       return
     end if
     if ({{ entry.any_missing_condition }}) then
-      status = NML_ERR_PARTLY_SET
+      nml__status = NML_ERR_PARTLY_SET
       if (present(errmsg)) errmsg = "array partly set: {{ entry.name }}"
       return
     end if
@@ -583,23 +595,24 @@ contains
 {% if flex_arrays %}
     ! flexible arrays
 {% for entry in flex_arrays %}
-    if (allocated(filled)) deallocate(filled)
-    allocate(filled({{ entry.rank }}))
-    istat = this%filled_shape("{{ entry.display_name }}", filled, errmsg=errmsg)
-    if (istat == NML_ERR_PARTLY_SET) then
-      status = istat
+    if (allocated(nml__filled)) deallocate(nml__filled)
+    allocate(nml__filled({{ entry.rank }}))
+    nml__istat = nml__obj%filled_shape( &
+      "{{ entry.display_name }}", nml__filled, errmsg=errmsg)
+    if (nml__istat == NML_ERR_PARTLY_SET) then
+      nml__status = nml__istat
       if (present(errmsg)) then
         if (len_trim(errmsg) == 0) errmsg = "array partly set: {{ entry.display_name }}"
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
 {% if entry.required %}
-    if (minval(filled) == 0) then
-      status = NML_ERR_REQUIRED
+    if (minval(nml__filled) == 0) then
+      nml__status = NML_ERR_REQUIRED
       if (present(errmsg)) errmsg = "required field not set: {{ entry.display_name }}"
       return
     end if
@@ -614,7 +627,7 @@ contains
     if (allocated({{ check.allocation_ref }})) then
 {% endif %}
     if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
-      status = NML_ERR_ENUM
+      nml__status = NML_ERR_ENUM
       if (present(errmsg)) errmsg = "enum constraint failed: {{ check.display_name }}"
       return
     end if
@@ -622,15 +635,15 @@ contains
     end if
 {% endif %}
 {% else %}
-    istat = this%is_set("{{ check.display_name }}", errmsg=errmsg)
-    if (istat == NML_OK) then
+    nml__istat = nml__obj%is_set("{{ check.display_name }}", errmsg=errmsg)
+    if (nml__istat == NML_OK) then
       if (.not. {{ check.func_name }}({{ check.element_ref }})) then
-        status = NML_ERR_ENUM
+        nml__status = NML_ERR_ENUM
         if (present(errmsg)) errmsg = "enum constraint failed: {{ check.display_name }}"
         return
       end if
-    else if (istat /= NML_ERR_NOT_SET) then
-      status = istat
+    else if (nml__istat /= NML_ERR_NOT_SET) then
+      nml__status = nml__istat
       return
     end if
 {% endif %}
@@ -644,7 +657,7 @@ contains
     if (allocated({{ check.allocation_ref }})) then
 {% endif %}
     if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
-      status = NML_ERR_BOUNDS
+      nml__status = NML_ERR_BOUNDS
       if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.display_name }}"
       return
     end if
@@ -652,15 +665,15 @@ contains
     end if
 {% endif %}
 {% else %}
-    istat = this%is_set("{{ check.display_name }}", errmsg=errmsg)
-    if (istat == NML_OK) then
+    nml__istat = nml__obj%is_set("{{ check.display_name }}", errmsg=errmsg)
+    if (nml__istat == NML_OK) then
       if (.not. {{ check.func_name }}({{ check.element_ref }})) then
-        status = NML_ERR_BOUNDS
+        nml__status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.display_name }}"
         return
       end if
-    else if (istat /= NML_ERR_NOT_SET) then
-      status = istat
+    else if (nml__istat /= NML_ERR_NOT_SET) then
+      nml__status = nml__istat
       return
     end if
 {% endif %}

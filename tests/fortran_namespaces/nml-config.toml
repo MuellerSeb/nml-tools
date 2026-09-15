@@ -1,0 +1,24 @@
+[helper]
+path = "out/nml_helper.f90"
+
+[kinds]
+module = "iso_fortran_env"
+integer = ["int32"]
+map = { i4 = "int32" }
+
+[dimensions.status]
+default = 3
+
+[dimensions.set_dims]
+default = 2
+
+[[namelists]]
+name = "namespaces"
+schema = "namespaces.yml"
+mod_path = "out/nml_namespaces.f90"
+
+[[namelists]]
+name = "wrapper_status"
+schema = "wrapper_status.yml"
+mod_path = "out/nml_wrapper_status.f90"
+f2py_path = "out/f2py_wrapper_status.f90"

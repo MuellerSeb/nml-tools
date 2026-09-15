@@ -1,0 +1,251 @@
+!> \file nml_wrapper_status.f90
+!> \copydoc nml_wrapper_status
+
+!> \brief Wrapper status type
+!> \details Wrapper status type
+module nml_wrapper_status
+  use nml_helper, only: &
+    nml_file_t, &
+    nml_line_buffer, &
+    NML_OK, &
+    NML_ERR_FILE_NOT_FOUND, &
+    NML_ERR_OPEN, &
+    NML_ERR_NOT_OPEN, &
+    NML_ERR_NML_NOT_FOUND, &
+    NML_ERR_READ, &
+    NML_ERR_CLOSE, &
+    NML_ERR_REQUIRED, &
+    NML_ERR_ENUM, &
+    NML_ERR_BOUNDS, &
+    NML_ERR_NOT_SET, &
+    NML_ERR_INVALID_NAME, &
+    NML_ERR_INVALID_INDEX, &
+    idx__check, &
+    to__lower, &
+    NML_ERR_INVALID_HANDLE
+  use application_types, only: status
+  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
+
+  implicit none
+
+  private :: nml_wrapper_status_read__from_file
+
+  !> \class nml_wrapper_status_data_t
+  !> \brief Schema-backed values for wrapper_status
+  type, public :: nml_wrapper_status_data_t
+    type(status) :: state !< state
+  end type nml_wrapper_status_data_t
+
+  !> \class nml_wrapper_status_t
+  !> \brief Wrapper status type
+  !> \details Wrapper status type
+  type, public :: nml_wrapper_status_t
+    type(nml_wrapper_status_data_t) :: data !< schema-backed namelist values
+    logical :: is_configured = .false. !< whether the namelist has been configured
+  contains
+    procedure :: init => nml_wrapper_status_init
+    procedure :: init_type => nml_wrapper_status_init_type
+    procedure :: from_file => nml_wrapper_status_from_file
+    procedure :: set => nml_wrapper_status_set
+    procedure :: is_set => nml_wrapper_status_is_set
+    procedure :: is_valid => nml_wrapper_status_is_valid
+  end type nml_wrapper_status_t
+
+contains
+
+  !> \brief Resolve an opaque C pointer handle to a nml_wrapper_status_t pointer
+  subroutine nml_wrapper_status_resolve_handle(handle, nml__obj, nml__status, errmsg)
+    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_wrapper_status_t instance
+    type(nml_wrapper_status_t), pointer :: nml__obj !< resolved namelist pointer
+    integer, intent(out) :: nml__status !< nml-tools status code
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    type(c_ptr) :: ptr
+
+    if (present(errmsg)) errmsg = ""
+    nullify(nml__obj)
+    if (handle == 0_c_intptr_t) then
+      nml__status = NML_ERR_INVALID_HANDLE
+      if (present(errmsg)) errmsg = "zero handle"
+      return
+    end if
+    ptr = transfer(handle, c_null_ptr)
+    call c_f_pointer(ptr, nml__obj)
+    nml__status = NML_OK
+  end subroutine nml_wrapper_status_resolve_handle
+
+  !> \brief Initialize defaults and sentinels for wrapper_status
+  integer function nml_wrapper_status_init(nml__obj, errmsg) result(nml__status)
+    class(nml_wrapper_status_t), intent(inout) :: nml__obj !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    nml__status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    nml__obj%is_configured = .false.
+
+    ! derived values
+    nml__status = nml__obj%init_type( &
+      state=nml__obj%data%state, &
+      errmsg=errmsg)
+    if (nml__status /= NML_OK) return
+  end function nml_wrapper_status_init
+
+  !> \brief Initialize derived values with their field-specific defaults
+  integer function nml_wrapper_status_init_type(nml__obj, &
+    state, &
+    errmsg) result(nml__status)
+    class(nml_wrapper_status_t), intent(in) :: nml__obj !< parent namelist instance
+    type(status), intent(inout), optional :: state !< state
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    nml__status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (present(state)) then
+      state%code = -huge(state%code) ! sentinel for derived component code
+    end if
+  end function nml_wrapper_status_init_type
+
+
+  !> \brief Read wrapper_status namelist from file
+  integer function nml_wrapper_status_from_file(nml__obj, file, errmsg) result(nml__status)
+    class(nml_wrapper_status_t), intent(inout) :: nml__obj !< namelist instance
+    character(len=*), intent(in) :: file !< path to namelist file
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    nml__status = nml_wrapper_status_read__from_file(nml__obj, file, errmsg)
+  end function nml_wrapper_status_from_file
+
+  integer function nml_wrapper_status_read__from_file(nml__obj, nml__file, errmsg) &
+    result(nml__status)
+    class(nml_wrapper_status_t), intent(inout) :: nml__obj
+    character(len=*), intent(in) :: nml__file
+    character(len=*), intent(out), optional :: errmsg
+    ! namelist variables
+    type(status) :: state
+    ! locals
+    type(nml_file_t) :: nml__reader
+    integer :: nml__iostat
+    integer :: nml__close_status
+    character(len=nml_line_buffer) :: nml__iomsg
+
+    namelist /wrapper_status/ &
+      state
+
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
+    state = nml__obj%data%state
+
+    nml__status = nml__reader%open(nml__file, errmsg=errmsg)
+    if (nml__status /= NML_OK) return
+
+    nml__status = nml__reader%find("wrapper_status", errmsg=errmsg)
+    if (nml__status /= NML_OK) then
+      if (nml__status == NML_ERR_NML_NOT_FOUND) then
+        nml__close_status = nml__reader%close(errmsg=errmsg)
+        if (nml__close_status /= NML_OK) then
+          nml__status = nml__close_status
+          return
+        end if
+        nml__obj%is_configured = .true.
+        nml__status = NML_OK
+        return
+      end if
+      nml__close_status = nml__reader%close()
+      return
+    end if
+
+    ! read namelist
+    read(nml__reader%unit, nml=wrapper_status, iostat=nml__iostat, iomsg=nml__iomsg)
+    if (nml__iostat /= 0) then
+      nml__status = NML_ERR_READ
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
+      nml__close_status = nml__reader%close()
+      return
+    end if
+    nml__close_status = nml__reader%close(errmsg=errmsg)
+    if (nml__close_status /= NML_OK) then
+      nml__status = nml__close_status
+      return
+    end if
+
+    ! assign values
+    nml__obj%data%state = state
+
+    ! mark as configured
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
+  end function nml_wrapper_status_read__from_file
+
+  !> \brief Set wrapper_status values
+  integer function nml_wrapper_status_set(nml__obj, &
+    state, &
+    errmsg) result(nml__status)
+
+    class(nml_wrapper_status_t), intent(inout) :: nml__obj !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    type(status), intent(in), optional :: state !< state
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
+
+    ! required parameters
+    ! override with provided values
+    if (present(state)) nml__obj%data%state = state
+
+    ! mark as configured
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
+  end function nml_wrapper_status_set
+
+  !> \brief Check whether a namelist value was set
+  integer function nml_wrapper_status_is_set(nml__obj, name, idx, errmsg) result(nml__status)
+    class(nml_wrapper_status_t), intent(in) :: nml__obj !< namelist instance
+    character(len=*), intent(in) :: name !< field name
+    integer, intent(in), optional :: idx(:) !< optional field index values
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    nml__status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
+    select case (to__lower(trim(name)))
+    case ("state%code")
+      if (present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "index not supported for 'state'"
+        return
+      end if
+      if (nml__obj%data%state%code == -huge(nml__obj%data%state%code)) nml__status = NML_ERR_NOT_SET
+    case ("state")
+      if (present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "index not supported for 'state'"
+        return
+      end if
+    case default
+      nml__status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+    end select
+    if (nml__status == NML_ERR_NOT_SET .and. present(errmsg)) then
+      if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
+    end if
+  end function nml_wrapper_status_is_set
+
+  !> \brief Validate required values and constraints
+  integer function nml_wrapper_status_is_valid(nml__obj, errmsg) result(nml__status)
+    class(nml_wrapper_status_t), intent(in) :: nml__obj !< namelist instance
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    integer :: nml__istat
+
+    nml__status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
+
+  end function nml_wrapper_status_is_valid
+
+end module nml_wrapper_status

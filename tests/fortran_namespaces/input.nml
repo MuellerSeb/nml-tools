@@ -1,0 +1,20 @@
+&namespaces
+  status = 17
+  file = 19
+  nml = 20
+  iostat = 21
+  close_status = 22
+  data = 23
+  dims = 24
+  set = 25
+  set_dims = 29
+  init = 26
+  init_type = 34
+  from_file = 30
+  is_set = 31
+  is_valid = 32
+  filled_shape = 33
+  is_configured = 27
+  values = 3, 4, 5
+  more_values = 6, 7
+/

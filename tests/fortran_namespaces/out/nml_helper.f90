@@ -1,10 +1,7 @@
-! created with nml-tools
-
 !> \file nml_helper.f90
 !> \copydoc nml_helper
 
 !> \brief Helper module for namelist file operations
-!> \version 0.1
 module nml_helper
 
   !> \brief Buffer length for reading lines
@@ -41,8 +38,8 @@ module nml_helper
   integer, parameter, public :: NML_ERR_INVALID_HANDLE = 22
 
   !> \brief Shared constants for generated namelist modules
-  integer, parameter, public :: buf = 256 !< Buffer length for character strings.
-  integer, parameter, public :: max_iter__dim_default = 4 !< Maximum number of iterations.
+  integer, parameter, public :: status__dim_default = 3
+  integer, parameter, public :: set_dims__dim_default = 2
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations

@@ -292,10 +292,11 @@ class {{ cls.class_name }}:
         kwargs: dict[str, Any] = {}
 {% for arg in cls.set_dims_args %}
 {% set py_name = arg.python_name if arg.python_name is not none else arg.name %}
+{% set abi_name = arg.abi_name if arg.abi_name is not none else arg.name %}
         if {{ py_name }} is not None:
-            kwargs["{{ arg.name }}"] = {{ py_name }}
+            kwargs["{{ abi_name }}"] = {{ py_name }}
         else:
-            kwargs["{{ arg.name }}"] = {{ arg.dummy_value }}
+            kwargs["{{ abi_name }}"] = {{ arg.dummy_value }}
 {% if arg.has_flag is not none %}
         kwargs["{{ arg.has_flag }}"] = {{ py_name }} is not None
 {% endif %}
@@ -415,9 +416,10 @@ class {{ cls.class_name }}:
         kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
 {% endif %}
 {% else %}
+{% set abi_name = arg.abi_name if arg.abi_name is not none else arg.name %}
 {% if arg.rank > 0 %}
         if {{ arg.name }} is not None:
-            kwargs["{{ arg.name }}"] = _normalize_array(
+            kwargs["{{ abi_name }}"] = _normalize_array(
                 {{ arg.name }},
                 {{ arg.rank }},
                 "{{ arg.name }}",
@@ -425,7 +427,7 @@ class {{ cls.class_name }}:
                 expected_shape={% if arg.fixed_shape is none %}None{% else %}({{ arg.fixed_shape | join(", ") }}{% if arg.fixed_shape | length == 1 %},{% endif %}){% endif %},
             )
         else:
-            kwargs["{{ arg.name }}"] = _dummy_array(
+            kwargs["{{ abi_name }}"] = _dummy_array(
                 {{ arg.rank }},
                 dtype={% if arg.numpy_dtype is none %}None{% else %}"{{ arg.numpy_dtype }}"{% endif %},
             )
@@ -434,9 +436,9 @@ class {{ cls.class_name }}:
 {% endif %}
 {% else %}
         if {{ arg.name }} is not None:
-            kwargs["{{ arg.name }}"] = {{ arg.name }}
+            kwargs["{{ abi_name }}"] = {{ arg.name }}
         else:
-            kwargs["{{ arg.name }}"] = {{ arg.dummy_value }}
+            kwargs["{{ abi_name }}"] = {{ arg.dummy_value }}
 {% if arg.has_flag is not none %}
         kwargs["{{ arg.has_flag }}"] = {{ arg.name }} is not None
 {% endif %}

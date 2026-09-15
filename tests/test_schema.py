@@ -1123,6 +1123,78 @@ def test_schema_rejects_reserved_double_underscore_identifiers(
         )
 
 
+@pytest.mark.parametrize("name", ["errmsg", "ErrMsg"])
+def test_schema_rejects_reserved_errmsg_properties(name: str) -> None:
+    with pytest.raises(ValueError, match="reserved for the generated Fortran API"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "object",
+                        "x-fortran-type": "period_t",
+                        "properties": {name: {"type": "integer"}},
+                    }
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize("name", ["present", "size"])
+def test_schema_allows_qualified_derived_components_named_after_intrinsics(name: str) -> None:
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "value": {
+                    "type": "object",
+                    "x-fortran-type": "value_t",
+                    "properties": {name: {"type": "integer"}},
+                }
+            },
+        }
+    )
+
+    generated = render_fortran(schema, file_name="nml_run.f90")
+    assert f"integer :: {name}" in render_helper(
+        file_name="nml_helper.f90",
+        local_derived_types=collect_local_derived_types([schema]),
+    )
+    assert f"nml__obj%data%value%{name}" in generated
+
+
+@pytest.mark.parametrize("name", ["present", "SIZE", "NML_OK"])
+def test_schema_rejects_generated_dependency_properties(name: str) -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {name: {"type": "integer"}},
+            }
+        )
+
+
+@pytest.mark.parametrize("type_name", ["present", "NML_FILE_T", "nml_open"])
+def test_schema_rejects_generated_dependency_type_names(type_name: str) -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "object",
+                        "x-fortran-type": type_name,
+                        "properties": {"code": {"type": "integer"}},
+                    }
+                },
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("property_schema", "match"),
     [

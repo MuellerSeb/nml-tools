@@ -1,0 +1,64 @@
+title: Namespace conformance
+x-fortran-namelist: namespaces
+type: object
+properties:
+  status:
+    type: integer
+    default: 0
+  file:
+    type: integer
+    default: 0
+  nml:
+    type: integer
+    default: 0
+  iostat:
+    type: integer
+    default: 0
+  close_status:
+    type: integer
+    default: 0
+  data:
+    type: integer
+    default: 0
+  dims:
+    type: integer
+    default: 0
+  set:
+    type: integer
+    default: 0
+  set_dims:
+    type: integer
+    default: 0
+  init:
+    type: integer
+    default: 0
+  init_type:
+    type: integer
+    default: 0
+  from_file:
+    type: integer
+    default: 0
+  is_set:
+    type: integer
+    default: 0
+  is_valid:
+    type: integer
+    default: 0
+  filled_shape:
+    type: integer
+    default: 0
+  is_configured:
+    type: integer
+    default: 0
+  values:
+    type: array
+    x-fortran-shape: status
+    items:
+      type: integer
+      default: 0
+  more_values:
+    type: array
+    x-fortran-shape: set_dims
+    items:
+      type: integer
+      default: 0

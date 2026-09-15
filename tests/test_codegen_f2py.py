@@ -114,7 +114,7 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     assert "!> \\brief Optimization" in generated
     assert "!> \\brief Set optimization values on the handled instance" in generated
     assert (
-        "integer(c_intptr_t), intent(in) :: handle "
+        "integer(c_intptr_t), intent(in) :: nml__handle "
         "!< opaque handle to a nml_optimization_t instance"
     ) in generated
     assert "integer, intent(in) :: values__n1 !< extent for values" in generated
@@ -123,7 +123,7 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
         "!< values (required)"
     ) in generated
     assert (
-        "character(len=1024), intent(out) :: errmsg "
+        "character(len=1024), intent(out) :: nml__errmsg "
         "!< error message for non-OK status values"
     ) in generated
     assert "use iso_fortran_env, only:" in generated
@@ -141,18 +141,24 @@ def test_generate_f2py_wrappers_respects_kind_map(tmp_path: Path) -> None:
     assert "integer(i4), dimension(:), allocatable :: maybe__weights" in generated
     assert "if (has__seed) then" in generated
     assert "if (has__weights) then" in generated
-    assert "status = this%set(" in generated
+    assert "nml__status = nml__obj%set(" in generated
     assert "seed=maybe__seed" in generated
     assert "weights=maybe__weights" in generated
     assert "optional ::" not in generated
     assert "dimension(:), intent(in)" not in generated
     assert "function optimization_handle" not in generated
     assert "nml_optimization_resolve_handle" in generated
-    assert "call nml_optimization_resolve_handle(handle, this, status, errmsg)" in generated
+    assert (
+        "call nml_optimization_resolve_handle("
+        "nml__handle, nml__obj, nml__status, nml__errmsg)" in generated
+    )
     assert "c_associated" not in generated
     assert "c_f_pointer" not in generated
     assert "status = NML_OK" not in generated
-    assert "type(nml_optimization_t), pointer :: this" in generated
+    assert "type(nml_optimization_t), pointer :: nml__obj" in generated
+    assert "integer(c_intptr_t), intent(in) :: nml__handle" in generated
+    assert "integer, intent(out) :: nml__status" in generated
+    assert "character(len=1024), intent(out) :: nml__errmsg" in generated
     assert "subroutine optimization_set_wrapper" in generated
     assert "subroutine optimization_from_file_wrapper" in generated
     assert "subroutine optimization_is_set_wrapper" in generated
@@ -250,7 +256,7 @@ def test_generate_f2py_wrappers_exposes_set_dims_wrapper(tmp_path: Path) -> None
     )
     assert "integer, allocatable :: maybe__n_weights" in generated
     assert "if (has__n_weights) then" in generated
-    assert "status = this%set_dims(" in generated
+    assert "nml__status = nml__obj%set_dims(" in generated
     assert "n_weights=maybe__n_weights" in generated
 
 
@@ -272,14 +278,17 @@ def test_generate_f2py_wrappers_flattens_derived_values_to_intrinsic_arguments()
     assert "logical, dimension(periods__n1), intent(in) :: has__periods__start_year" in generated
     assert "type(period_t) :: maybe__period" in generated
     assert "type(period_t), dimension(:), allocatable :: maybe__periods" in generated
-    assert "status = this%init_type(period=maybe__period, errmsg=errmsg)" in generated
+    assert (
+        "nml__status = nml__obj%init_type("
+        "period=maybe__period, errmsg=nml__errmsg)" in generated
+    )
     assert "if (periods__n1 > size(maybe__periods, 1)) then" in generated
-    assert 'errmsg = "dimension 1 exceeds bounds for \'periods\'"' in generated
+    assert 'nml__errmsg = "dimension 1 exceeds bounds for \'periods\'"' in generated
     assert "where (has__periods__start_year)" in generated
     assert generated.index("if (periods__n1 > size(maybe__periods, 1)) then") < (
         generated.index("where (has__periods__start_year)")
     )
-    assert "status = this%set(" in generated
+    assert "nml__status = nml__obj%set(" in generated
     assert "period=maybe__period" in generated
     assert "periods=maybe__periods" in generated
 
@@ -388,7 +397,10 @@ def test_f2py_regroups_required_defaults_as_optional_with_presence_flags() -> No
     assert "logical, intent(in) :: has__count" in generated
     assert "logical, intent(in) :: has__setting" in generated
     assert "if (has__setting) then" in generated
-    assert "status = this%init_type(setting=maybe__setting, errmsg=errmsg)" in generated
+    assert (
+        "nml__status = nml__obj%init_type("
+        "setting=maybe__setting, errmsg=nml__errmsg)" in generated
+    )
 
 
 def test_generate_f2cmap_requires_explicit_kind_mappings(tmp_path: Path) -> None:
@@ -739,3 +751,140 @@ def test_generate_python_wrapper_rejects_unknown_docstring_style(tmp_path: Path)
             tmp_path / "config_wrappers.py",
             py_style="google",
         )
+
+
+def test_f2py_mangles_internal_status_names_but_preserves_python_names() -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "status": {"type": "integer"},
+            "values": {
+                "type": "array",
+                "x-fortran-shape": "status",
+                "items": {"type": "integer"},
+            },
+        },
+    }
+
+    spec = codegen.build_f2py_namelist_spec(schema, dimensions={"status": 2})
+    fortran = codegen.render_f2py_wrappers(
+        [schema],
+        file_name="f2py_run.f90",
+        dimensions={"status": 2},
+    )
+    python = codegen.render_python_wrappers([(spec, "f2py_run")])
+
+    assert "status__value" in spec.argument_list
+    assert "status__value" in spec.set_dims_argument_list
+    assert "status=maybe__status" in spec.set_call_arguments
+    assert "integer, intent(in) :: status__value" in fortran
+    assert "status: Any = None" in python
+    assert 'kwargs["status__value"] = status' in python
+
+
+def test_f2py_wrapper_uses_internal_status_for_imported_status_type() -> None:
+    codegen = _import_codegen_f2py()
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "state": {
+                    "type": "object",
+                    "x-fortran-type": "status",
+                    "x-fortran-module": "application_types",
+                    "properties": {"code": {"type": "integer"}},
+                }
+            },
+        }
+    )
+
+    generated = codegen.render_f2py_wrappers([schema], file_name="f2py_run.f90")
+
+    assert "type(status), allocatable :: maybe__state" in generated
+    assert "integer, intent(out) :: nml__status" in generated
+    assert "type(status) :: nml__status" not in generated
+
+
+def test_f2py_derived_leaf_names_avoid_internal_wrapper_state() -> None:
+    codegen = _import_codegen_f2py()
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "nml": {
+                    "type": "object",
+                    "x-fortran-type": "state_t",
+                    "properties": {
+                        "status": {"type": "integer"},
+                        "handle": {"type": "integer"},
+                        "obj": {"type": "integer"},
+                    },
+                }
+            },
+        }
+    )
+
+    generated = codegen.render_f2py_wrappers([schema], file_name="f2py_run.f90")
+
+    assert "integer, intent(in) :: nml__status_1 !< nml%status" in generated
+    assert "integer, intent(in) :: nml__handle_1 !< nml%handle" in generated
+    assert "integer, intent(in) :: nml__obj_1 !< nml%obj" in generated
+    assert "integer, intent(out) :: nml__status !< nml-tools status code" in generated
+
+
+@pytest.mark.parametrize("namelist_name", ["run", "Run"])
+def test_f2py_mangles_schema_arguments_matching_wrapper_procedures(
+    namelist_name: str,
+) -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "x-fortran-namelist": namelist_name,
+        "type": "object",
+        "properties": {"run_set_wrapper": {"type": "integer"}},
+    }
+
+    generated = codegen.render_f2py_wrappers([schema], file_name="f2py_run.f90")
+
+    assert (
+        f"subroutine {namelist_name}_set_wrapper(nml__handle, &\n"
+        "    run_set_wrapper__value,"
+    ) in generated
+    assert "integer, intent(in) :: run_set_wrapper__value" in generated
+
+
+def test_f2py_rejects_kind_import_matching_wrapper_procedure() -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "value": {"type": "integer", "x-fortran-kind": "run_set_wrapper"}
+        },
+    }
+
+    with pytest.raises(ValueError, match="kind import 'run_set_wrapper' conflicts"):
+        codegen.build_f2py_namelist_spec(
+            schema,
+            kind_map={"run_set_wrapper": "int32"},
+            kind_allowlist={"int32"},
+        )
+
+
+@pytest.mark.parametrize("field_name", ["c_intptr_t", "nml_run_resolve_handle"])
+def test_f2py_mangles_schema_arguments_matching_imported_wrapper_symbols(
+    field_name: str,
+) -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {field_name: {"type": "integer"}},
+    }
+
+    generated = codegen.render_f2py_wrappers([schema], file_name="f2py_run.f90")
+
+    assert f"integer, intent(in) :: {field_name}__value" in generated
