@@ -51,7 +51,6 @@ module nml_run
   real(dp), parameter, public :: relaxation__max = 0.5_dp
 
   private :: nml_run_read__from_file
-  private :: nml__ieee_value, nml__ieee_quiet_nan, nml__ieee_is_nan
 
   !> \class nml_run_data_t
   !> \brief Schema-backed values for run

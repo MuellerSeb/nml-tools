@@ -49,7 +49,6 @@ module nml_config
   real(dp), parameter, public :: tolerance__min_excl = 0.0_dp
 
   private :: nml_config_read__from_file
-  private :: nml__ieee_value, nml__ieee_quiet_nan, nml__ieee_is_nan
 
   !> \class nml_config_data_t
   !> \brief Schema-backed values for config

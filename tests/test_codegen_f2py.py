@@ -872,3 +872,19 @@ def test_f2py_rejects_kind_import_matching_wrapper_procedure() -> None:
             kind_map={"run_set_wrapper": "int32"},
             kind_allowlist={"int32"},
         )
+
+
+@pytest.mark.parametrize("field_name", ["c_intptr_t", "nml_run_resolve_handle"])
+def test_f2py_mangles_schema_arguments_matching_imported_wrapper_symbols(
+    field_name: str,
+) -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {field_name: {"type": "integer"}},
+    }
+
+    generated = codegen.render_f2py_wrappers([schema], file_name="f2py_run.f90")
+
+    assert f"integer, intent(in) :: {field_name}__value" in generated

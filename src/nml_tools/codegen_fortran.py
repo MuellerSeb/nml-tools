@@ -1525,6 +1525,11 @@ def _build_context(
             "derived type name conflicts with a root property: "
             + ", ".join(type_name_collisions)
         )
+    if type_name.lower() in property_name_map:
+        raise ValueError(
+            f"property '{property_name_map[type_name.lower()]}' conflicts with "
+            f"generated outer type '{type_name}'"
+        )
     set_name = f"{module_name}_set"
     if set_name.lower() in property_name_map:
         raise ValueError(
@@ -1540,6 +1545,11 @@ def _build_context(
                 f"generated init_type procedure '{init_type_name}'"
             )
     if runtime_dimension_values:
+        if type_name.lower() in runtime_dimension_values:
+            raise ValueError(
+                f"runtime dimension '{type_name}' conflicts with "
+                f"generated outer type '{type_name}'"
+            )
         set_dims_name = f"{module_name}_set_dims"
         if set_dims_name.lower() in runtime_dimension_values:
             raise ValueError(
@@ -1652,8 +1662,17 @@ def _build_context(
         _register_imported_symbol(symbol, helper_module)
     for symbol in resolved_kind_imports:
         _register_imported_symbol(symbol, resolved_kind_module)
+    if f2py_handle_helpers:
+        for symbol in ("c_f_pointer", "c_intptr_t", "c_null_ptr", "c_ptr"):
+            _register_imported_symbol(symbol, "iso_c_binding")
     for entry in derived_type_imports:
         _register_imported_symbol(str(entry["type_name"]), str(entry["module"]))
+    for property_name, display_name in property_name_map.items():
+        if property_name in imported_symbol_owners:
+            raise ValueError(
+                f"property '{display_name}' conflicts with unqualified imported symbol "
+                f"'{display_name}'"
+            )
     generated_module_symbols = [
         type_name,
         data_type_name,

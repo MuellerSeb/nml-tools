@@ -393,6 +393,7 @@ def build_f2py_namelist_spec(
 
     wrapper_reserved_names = {
         "associated",
+        "c_intptr_t",
         "errmsg",
         "handle",
         "len",
@@ -405,6 +406,13 @@ def build_f2py_namelist_spec(
         "this",
     }
     namelist_name = cast("str", context["namelist_name"])
+    module_name = cast("str", context["module_name"])
+    wrapper_reserved_names.update(
+        {
+            cast("str", context["type_name"]).lower(),
+            f"{module_name}_resolve_handle".lower(),
+        }
+    )
     wrapper_procedure_names = {
         f"{namelist_name}_{suffix}".lower()
         for suffix in (

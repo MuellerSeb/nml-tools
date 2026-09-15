@@ -45,7 +45,6 @@ module nml_report
   real(dp), parameter, public :: acceptance_fraction__max = 1.0_dp
 
   private :: nml_report_read__from_file
-  private :: nml__ieee_value, nml__ieee_quiet_nan, nml__ieee_is_nan
 
   !> \class nml_report_data_t
   !> \brief Schema-backed values for report
