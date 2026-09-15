@@ -49,9 +49,6 @@ module {{ module_name }}
 
 {% endif %}
   private :: {{ type_prefix }}_read__from_file
-{% if use_ieee %}
-  private :: nml__ieee_value, nml__ieee_quiet_nan, nml__ieee_is_nan
-{% endif %}
 
   !> \class {{ data_type_name }}
   !> \brief Schema-backed values for {{ namelist_name }}

@@ -1044,6 +1044,96 @@ def test_generate_fortran_rejects_generated_procedure_dummy_collisions() -> None
         )
 
 
+def test_generate_fortran_rejects_outer_type_procedure_scope_collisions() -> None:
+    codegen = _import_codegen_module()
+
+    with pytest.raises(ValueError, match="generated outer type 'nml_run_t'"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {"nml_run_t": {"type": "integer"}},
+            },
+            file_name="nml_run.f90",
+        )
+
+    with pytest.raises(ValueError, match="generated outer type 'nml_run_t'"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "values": {
+                        "type": "array",
+                        "x-fortran-shape": "nml_run_t",
+                        "items": {"type": "integer"},
+                    }
+                },
+            },
+            file_name="nml_run.f90",
+            dimensions={"nml_run_t": 2},
+        )
+
+
+def test_generate_fortran_rejects_property_colliding_with_configured_import() -> None:
+    codegen = _import_codegen_module()
+
+    with pytest.raises(ValueError, match="property 'n' conflicts with unqualified imported symbol"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "n": {"type": "integer"},
+                    "values": {
+                        "type": "array",
+                        "x-fortran-shape": "n",
+                        "items": {"type": "integer"},
+                    },
+                },
+            },
+            file_name="nml_run.f90",
+            constants={"n": 2},
+        )
+
+    with pytest.raises(
+        ValueError, match="property 'i4' conflicts with unqualified imported symbol"
+    ):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {"i4": {"type": "integer", "x-fortran-kind": "i4"}},
+            },
+            file_name="nml_run.f90",
+            kind_map={"i4": "int32"},
+            kind_allowlist={"int32"},
+        )
+
+
+def test_generate_fortran_rejects_iso_c_binding_import_collision() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": "object",
+                "x-fortran-type": "c_ptr",
+                "x-fortran-module": "application_types",
+                "properties": {"code": {"type": "integer"}},
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="imported symbol 'c_ptr' is provided by both"):
+        codegen.render_fortran(
+            schema,
+            file_name="nml_run.f90",
+            f2py_handle_helpers=True,
+        )
+
+
 @pytest.mark.parametrize("name", ["present", "Present", "size", "NML_OK"])
 def test_generate_fortran_rejects_generated_dependency_names(name: str) -> None:
     codegen = _import_codegen_module()
@@ -1075,6 +1165,22 @@ def test_generate_fortran_uses_direct_intrinsics_and_internal_helper_procedures(
     assert "to__lower" in generated
     assert "function to__lower" in helper
     assert "function idx__check" in helper
+
+
+def test_generate_fortran_keeps_renamed_ieee_helpers_out_of_private_list() -> None:
+    codegen = _import_codegen_module()
+    generated = codegen.render_fortran(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "required": ["value"],
+            "properties": {"value": {"type": "number"}},
+        },
+        file_name="nml_run.f90",
+    )
+
+    assert "use ieee_arithmetic, only: nml__ieee_value => ieee_value" in generated
+    assert "private :: nml__ieee_value" not in generated
 
 
 def test_generate_fortran_rejects_derived_type_root_symbol_collision() -> None:
