@@ -874,6 +874,24 @@ def test_f2py_rejects_kind_import_matching_wrapper_procedure() -> None:
         )
 
 
+def test_f2py_rejects_derived_type_matching_wrapper_procedure() -> None:
+    codegen = _import_codegen_f2py()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": "object",
+                "x-fortran-type": "run_set_wrapper",
+                "properties": {"code": {"type": "integer"}},
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="derived type 'run_set_wrapper' conflicts"):
+        codegen.build_f2py_namelist_spec(schema)
+
+
 @pytest.mark.parametrize("field_name", ["c_intptr_t", "nml_run_resolve_handle"])
 def test_f2py_mangles_schema_arguments_matching_imported_wrapper_symbols(
     field_name: str,

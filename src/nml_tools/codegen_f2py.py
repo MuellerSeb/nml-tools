@@ -464,6 +464,11 @@ def build_f2py_namelist_spec(
                     argument_names_in_use.add(generated_dim_name.lower())
                     dim_names.append(generated_dim_name)
             derived_type_name = _derived_type_name(derived)
+            if derived_type_name.lower() in wrapper_procedure_names:
+                raise ValueError(
+                    f"derived type '{derived_type_name}' conflicts with "
+                    "generated f2py wrapper procedure"
+                )
             if derived_type_name.lower() not in {
                 name.lower() for name in derived_type_names
             }:

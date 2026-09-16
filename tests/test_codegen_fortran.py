@@ -183,8 +183,9 @@ def test_generate_fortran_handle_helper_uses_explicit_transfer_mold(tmp_path: Pa
 
     generated = output.read_text()
     assert "use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr" in generated
-    assert "ptr = transfer(handle, c_null_ptr)" in generated
-    assert "ptr = transfer(handle, ptr)" not in generated
+    assert "nml__ptr = transfer(nml__handle, c_null_ptr)" in generated
+    assert "integer(c_intptr_t), intent(in) :: nml__handle" in generated
+    assert "type(c_ptr) :: nml__ptr" in generated
 
 
 def test_generate_fortran_allows_items_default(tmp_path: Path) -> None:
