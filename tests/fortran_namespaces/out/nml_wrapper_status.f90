@@ -54,22 +54,22 @@ module nml_wrapper_status
 contains
 
   !> \brief Resolve an opaque C pointer handle to a nml_wrapper_status_t pointer
-  subroutine nml_wrapper_status_resolve_handle(handle, nml__obj, nml__status, errmsg)
-    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_wrapper_status_t instance
+  subroutine nml_wrapper_status_resolve_handle(nml__handle, nml__obj, nml__status, errmsg)
+    integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_wrapper_status_t instance
     type(nml_wrapper_status_t), pointer :: nml__obj !< resolved namelist pointer
     integer, intent(out) :: nml__status !< nml-tools status code
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    type(c_ptr) :: ptr
+    type(c_ptr) :: nml__ptr
 
     if (present(errmsg)) errmsg = ""
     nullify(nml__obj)
-    if (handle == 0_c_intptr_t) then
+    if (nml__handle == 0_c_intptr_t) then
       nml__status = NML_ERR_INVALID_HANDLE
       if (present(errmsg)) errmsg = "zero handle"
       return
     end if
-    ptr = transfer(handle, c_null_ptr)
-    call c_f_pointer(ptr, nml__obj)
+    nml__ptr = transfer(nml__handle, c_null_ptr)
+    call c_f_pointer(nml__ptr, nml__obj)
     nml__status = NML_OK
   end subroutine nml_wrapper_status_resolve_handle
 
