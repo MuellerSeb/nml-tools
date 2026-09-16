@@ -20,12 +20,12 @@ module nml_run
     NML_ERR_NOT_SET, &
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
-    idx_check, &
-    to_lower, &
+    idx__check, &
+    to__lower, &
     NML_ERR_INVALID_HANDLE, &
     period_t, &
     period_label_len, &
-    n_periods__default, &
+    n_periods__dim_default, &
     station_label_len
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -42,15 +42,29 @@ module nml_run
   integer(i4), parameter, public :: periods__start_year__max = 2200_i4
   integer(i4), parameter, public :: station__code__min = 1_i4
 
+  private :: nml_run_read__from_file
+
+  !> \class nml_run_data_t
+  !> \brief Schema-backed values for run
+  type, public :: nml_run_data_t
+    type(period_t) :: period !< Main simulation period
+    type(period_t), allocatable, dimension(:) :: periods !< Comparison periods
+    type(station_t) :: station !< Selected station
+  end type nml_run_data_t
+
+  !> \class nml_run_dims_t
+  !> \brief Runtime dimensions for run
+  type, public :: nml_run_dims_t
+    integer :: n_periods = n_periods__dim_default !< runtime dimension for n_periods
+  end type nml_run_dims_t
+
   !> \class nml_run_t
   !> \brief Derived-type configuration
   !> \details Demonstrates referenced reusable and inline imported derived types.
   type, public :: nml_run_t
+    type(nml_run_data_t) :: data !< schema-backed namelist values
+    type(nml_run_dims_t) :: dims !< runtime array dimensions
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer :: n_periods = n_periods__default !< runtime dimension for n_periods
-    type(period_t) :: period !< Main simulation period
-    type(period_t), allocatable, dimension(:) :: periods !< Comparison periods
-    type(station_t) :: station !< Selected station
   contains
     procedure :: init => nml_run_init
     procedure :: init_type => nml_run_init_type
@@ -120,56 +134,56 @@ contains
   end function station__code__in_bounds
 
   !> \brief Resolve an opaque C pointer handle to a nml_run_t pointer
-  subroutine nml_run_resolve_handle(handle, this, status, errmsg)
-    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_run_t instance
-    type(nml_run_t), pointer :: this !< resolved namelist pointer
-    integer, intent(out) :: status !< nml-tools status code
+  subroutine nml_run_resolve_handle(nml__handle, nml__obj, nml__status, errmsg)
+    integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_run_t instance
+    type(nml_run_t), pointer :: nml__obj !< resolved namelist pointer
+    integer, intent(out) :: nml__status !< nml-tools status code
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    type(c_ptr) :: ptr
+    type(c_ptr) :: nml__ptr
 
     if (present(errmsg)) errmsg = ""
-    nullify(this)
-    if (handle == 0_c_intptr_t) then
-      status = NML_ERR_INVALID_HANDLE
+    nullify(nml__obj)
+    if (nml__handle == 0_c_intptr_t) then
+      nml__status = NML_ERR_INVALID_HANDLE
       if (present(errmsg)) errmsg = "zero handle"
       return
     end if
-    ptr = transfer(handle, c_null_ptr)
-    call c_f_pointer(ptr, this)
-    status = NML_OK
+    nml__ptr = transfer(nml__handle, c_null_ptr)
+    call c_f_pointer(nml__ptr, nml__obj)
+    nml__status = NML_OK
   end subroutine nml_run_resolve_handle
 
   !> \brief Initialize defaults and sentinels for run
-  integer function nml_run_init(this, errmsg) result(status)
-    class(nml_run_t), intent(inout) :: this !< namelist instance
+  integer function nml_run_init(nml__obj, errmsg) result(nml__status)
+    class(nml_run_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    this%is_configured = .false.
+    nml__obj%is_configured = .false.
 
     ! derived values
-    status = this%init_type( &
-      period=this%period, &
-      periods=this%periods, &
-      station=this%station, &
+    nml__status = nml__obj%init_type( &
+      period=nml__obj%data%period, &
+      periods=nml__obj%data%periods, &
+      station=nml__obj%data%station, &
       errmsg=errmsg)
-    if (status /= NML_OK) return
+    if (nml__status /= NML_OK) return
   end function nml_run_init
 
   !> \brief Initialize derived values with their field-specific defaults
-  integer function nml_run_init_type(this, &
+  integer function nml_run_init_type(nml__obj, &
     period, &
     periods, &
     station, &
-    errmsg) result(status)
-    class(nml_run_t), intent(in) :: this !< parent namelist instance
+    errmsg) result(nml__status)
+    class(nml_run_t), intent(in) :: nml__obj !< parent namelist instance
     type(period_t), intent(inout), optional :: period !< Main simulation period
     type(period_t), dimension(:), allocatable, intent(inout), optional :: periods !< Comparison periods
     type(station_t), intent(inout), optional :: station !< Selected station
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(period)) then
       period%start_year = -huge(period%start_year) ! sentinel for derived component start_year
@@ -179,7 +193,7 @@ contains
     end if
     if (present(periods)) then
       if (allocated(periods)) deallocate(periods)
-      allocate(periods(this%n_periods))
+      allocate(periods(nml__obj%dims%n_periods))
       periods%start_year = -huge(periods%start_year) ! sentinel for derived component start_year
       periods%end_year = -huge(periods%end_year) ! sentinel for derived component end_year
       periods%label = "period"
@@ -189,7 +203,7 @@ contains
     if (present(station)) then
       station%code = -huge(station%code) ! sentinel for derived component code
       if (len(station%label) /= station_label_len) then
-        status = NML_ERR_BOUNDS
+        nml__status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "imported string storage length mismatch: station%label"
         return
       end if
@@ -198,267 +212,271 @@ contains
   end function nml_run_init_type
 
   !> \brief Reset runtime dimensions for run
-  integer function nml_run_set_dims(this, &
+  integer function nml_run_set_dims(nml__obj, &
     n_periods, &
-    errmsg) result(status)
-    class(nml_run_t), intent(inout) :: this !< namelist instance
+    errmsg) result(nml__status)
+    class(nml_run_t), intent(inout) :: nml__obj !< namelist instance
     integer, intent(in), optional :: n_periods !< runtime dimension override for n_periods
     integer :: candidate__n_periods
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(n_periods)) then
       candidate__n_periods = n_periods
     else
-      candidate__n_periods = n_periods__default
+      candidate__n_periods = n_periods__dim_default
     end if
     if (candidate__n_periods <= 0) then
-      status = NML_ERR_INVALID_INDEX
+      nml__status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 'n_periods' must be positive"
       return
     end if
-    this%n_periods = candidate__n_periods
+    nml__obj%dims%n_periods = candidate__n_periods
 
     ! deallocate runtime-sized fields; init/set/from_file allocate them again
-    if (allocated(this%periods)) deallocate(this%periods)
-    this%is_configured = .false.
+    if (allocated(nml__obj%data%periods)) deallocate(nml__obj%data%periods)
+    nml__obj%is_configured = .false.
   end function nml_run_set_dims
 
 
   !> \brief Read run namelist from file
-  integer function nml_run_from_file(this, file, errmsg) result(status)
-    class(nml_run_t), intent(inout) :: this !< namelist instance
+  integer function nml_run_from_file(nml__obj, file, errmsg) result(nml__status)
+    class(nml_run_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    nml__status = nml_run_read__from_file(nml__obj, file, errmsg)
+  end function nml_run_from_file
+
+  integer function nml_run_read__from_file(nml__obj, nml__file, errmsg) &
+    result(nml__status)
+    class(nml_run_t), intent(inout) :: nml__obj
+    character(len=*), intent(in) :: nml__file
+    character(len=*), intent(out), optional :: errmsg
     ! namelist variables
     type(period_t) :: period
     type(period_t), allocatable, dimension(:) :: periods
     type(station_t) :: station
     ! locals
-    type(nml_file_t) :: nml
-    integer :: iostat
-    integer :: close_status
-    character(len=nml_line_buffer) :: iomsg
+    type(nml_file_t) :: nml__reader
+    integer :: nml__iostat
+    integer :: nml__close_status
+    character(len=nml_line_buffer) :: nml__iomsg
 
     namelist /run/ &
       period, &
       periods, &
       station
 
-    status = this%init(errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
     ! allocate local namelist variables matching runtime-sized fields
     if (allocated(periods)) deallocate(periods)
-    allocate(periods(this%n_periods))
-    period = this%period
-    periods = this%periods
-    station = this%station
+    allocate(periods(nml__obj%dims%n_periods))
+    period = nml__obj%data%period
+    periods = nml__obj%data%periods
+    station = nml__obj%data%station
 
-    status = nml%open(file, errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__reader%open(nml__file, errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 
-    status = nml%find("run", errmsg=errmsg)
-    if (status /= NML_OK) then
-      close_status = nml%close()
+    nml__status = nml__reader%find("run", errmsg=errmsg)
+    if (nml__status /= NML_OK) then
+      nml__close_status = nml__reader%close()
       return
     end if
 
     ! read namelist
-    read(nml%unit, nml=run, iostat=iostat, iomsg=iomsg)
-    if (iostat /= 0) then
-      status = NML_ERR_READ
-      if (present(errmsg)) errmsg = trim(iomsg)
-      close_status = nml%close()
+    read(nml__reader%unit, nml=run, iostat=nml__iostat, iomsg=nml__iomsg)
+    if (nml__iostat /= 0) then
+      nml__status = NML_ERR_READ
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
+      nml__close_status = nml__reader%close()
       return
     end if
-    close_status = nml%close(errmsg=errmsg)
-    if (close_status /= NML_OK) then
-      status = close_status
+    nml__close_status = nml__reader%close(errmsg=errmsg)
+    if (nml__close_status /= NML_OK) then
+      nml__status = nml__close_status
       return
     end if
 
     ! assign values
-    this%period = period
-    this%periods = periods
-    this%station = station
+    nml__obj%data%period = period
+    nml__obj%data%periods = periods
+    nml__obj%data%station = station
 
     ! mark as configured
-    this%is_configured = .true.
-    status = NML_OK
-  end function nml_run_from_file
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
+  end function nml_run_read__from_file
 
   !> \brief Set run values
-  integer function nml_run_set(this, &
+  integer function nml_run_set(nml__obj, &
     period, &
     periods, &
     station, &
-    errmsg) result(status)
+    errmsg) result(nml__status)
 
-    class(nml_run_t), intent(inout) :: this !< namelist instance
+    class(nml_run_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     type(period_t), intent(in) :: period !< Main simulation period
     type(station_t), intent(in) :: station !< Selected station
     type(period_t), dimension(:), intent(in), optional :: periods !< Comparison periods
-    integer :: &
-      lb__1, &
-      ub__1
-
-    status = this%init(errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 
     ! required parameters
-    this%period = period
-    this%station = station
+    nml__obj%data%period = period
+    nml__obj%data%station = station
     ! override with provided values
     if (present(periods)) then
-      if (size(periods, 1) > size(this%periods, 1)) then
-        status = NML_ERR_INVALID_INDEX
+      if (size(periods, 1) > size(nml__obj%data%periods, 1)) then
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'periods'"
         return
       end if
-      lb__1 = lbound(this%periods, 1)
-      ub__1 = lb__1 + size(periods, 1) - 1
-      this%periods(lb__1:ub__1) = periods
+      nml__obj%data%periods( &
+        1:size(periods, 1)) = periods
     end if
 
     ! mark as configured
-    this%is_configured = .true.
-    status = NML_OK
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
   end function nml_run_set
 
   !> \brief Check whether a namelist value was set
-  integer function nml_run_is_set(this, name, idx, errmsg) result(status)
-    class(nml_run_t), intent(in) :: this !< namelist instance
+  integer function nml_run_is_set(nml__obj, name, idx, errmsg) result(nml__status)
+    class(nml_run_t), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (.not. this%is_configured) then
-      status = NML_ERR_NOT_SET
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
       if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
-    select case (to_lower(trim(name)))
+    select case (to__lower(trim(name)))
     case ("period%start_year")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'period'"
         return
       end if
     case ("period%end_year")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'period'"
         return
       end if
-      if (this%period%end_year == -huge(this%period%end_year)) status = NML_ERR_NOT_SET
+      if (nml__obj%data%period%end_year == -huge(nml__obj%data%period%end_year)) nml__status = NML_ERR_NOT_SET
     case ("period%label")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'period'"
         return
       end if
     case ("period")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'period'"
         return
       end if
-      if (this%period%end_year == -huge(this%period%end_year)) then
-        status = NML_ERR_NOT_SET
+      if (nml__obj%data%period%end_year == -huge(nml__obj%data%period%end_year)) then
+        nml__status = NML_ERR_NOT_SET
       end if
     case ("periods%start_year")
-      if (.not. allocated(this%periods)) then
-        status = NML_ERR_NOT_SET
+      if (.not. allocated(nml__obj%data%periods)) then
+        nml__status = NML_ERR_NOT_SET
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%periods), ubound(this%periods), &
+        nml__status = idx__check(idx, shape(nml__obj%data%periods), &
           "periods", errmsg)
-        if (status /= NML_OK) return
+        if (nml__status /= NML_OK) return
       end if
     case ("periods%end_year")
-      if (.not. allocated(this%periods)) then
-        status = NML_ERR_NOT_SET
+      if (.not. allocated(nml__obj%data%periods)) then
+        nml__status = NML_ERR_NOT_SET
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%periods), ubound(this%periods), &
+        nml__status = idx__check(idx, shape(nml__obj%data%periods), &
           "periods", errmsg)
-        if (status /= NML_OK) return
+        if (nml__status /= NML_OK) return
       end if
     case ("periods%label")
-      if (.not. allocated(this%periods)) then
-        status = NML_ERR_NOT_SET
+      if (.not. allocated(nml__obj%data%periods)) then
+        nml__status = NML_ERR_NOT_SET
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%periods), ubound(this%periods), &
+        nml__status = idx__check(idx, shape(nml__obj%data%periods), &
           "periods", errmsg)
-        if (status /= NML_OK) return
+        if (nml__status /= NML_OK) return
       end if
     case ("periods")
-      if (.not. allocated(this%periods)) then
-        status = NML_ERR_NOT_SET
+      if (.not. allocated(nml__obj%data%periods)) then
+        nml__status = NML_ERR_NOT_SET
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%periods), ubound(this%periods), &
+        nml__status = idx__check(idx, shape(nml__obj%data%periods), &
           "periods", errmsg)
-        if (status /= NML_OK) return
+        if (nml__status /= NML_OK) return
       end if
     case ("station%code")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'station'"
         return
       end if
-      if (this%station%code == -huge(this%station%code)) status = NML_ERR_NOT_SET
+      if (nml__obj%data%station%code == -huge(nml__obj%data%station%code)) nml__status = NML_ERR_NOT_SET
     case ("station%label")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'station'"
         return
       end if
     case ("station")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'station'"
         return
       end if
-      if (this%station%code == -huge(this%station%code)) then
-        status = NML_ERR_NOT_SET
+      if (nml__obj%data%station%code == -huge(nml__obj%data%station%code)) then
+        nml__status = NML_ERR_NOT_SET
       end if
     case default
-      status = NML_ERR_INVALID_NAME
+      nml__status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
-    if (status == NML_ERR_NOT_SET .and. present(errmsg)) then
+    if (nml__status == NML_ERR_NOT_SET .and. present(errmsg)) then
       if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function nml_run_is_set
 
   !> \brief Validate required values and constraints
-  integer function nml_run_is_valid(this, errmsg) result(status)
-    class(nml_run_t), intent(in) :: this !< namelist instance
+  integer function nml_run_is_valid(nml__obj, errmsg) result(nml__status)
+    class(nml_run_t), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: istat
+    integer :: nml__istat
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (.not. this%is_configured) then
-      status = NML_ERR_NOT_SET
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
       if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
 
     ! required parameters
-    istat = this%is_set("period", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
+    nml__istat = nml__obj%is_set("period", errmsg=errmsg)
+    if (nml__istat == NML_ERR_NOT_SET) then
+      nml__status = NML_ERR_REQUIRED
       if (present(errmsg)) then
         if (len_trim(errmsg) == 0) then
           errmsg = "field not set: period"
@@ -467,13 +485,13 @@ contains
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
-    istat = this%is_set("station", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
+    nml__istat = nml__obj%is_set("station", errmsg=errmsg)
+    if (nml__istat == NML_ERR_NOT_SET) then
+      nml__status = NML_ERR_REQUIRED
       if (present(errmsg)) then
         if (len_trim(errmsg) == 0) then
           errmsg = "field not set: station"
@@ -482,38 +500,38 @@ contains
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
     ! bounds constraints
-    istat = this%is_set("period%start_year", errmsg=errmsg)
-    if (istat == NML_OK) then
-      if (.not. period__start_year__in_bounds(this%period%start_year)) then
-        status = NML_ERR_BOUNDS
+    nml__istat = nml__obj%is_set("period%start_year", errmsg=errmsg)
+    if (nml__istat == NML_OK) then
+      if (.not. period__start_year__in_bounds(nml__obj%data%period%start_year)) then
+        nml__status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: period%start_year"
         return
       end if
-    else if (istat /= NML_ERR_NOT_SET) then
-      status = istat
+    else if (nml__istat /= NML_ERR_NOT_SET) then
+      nml__status = nml__istat
       return
     end if
-    if (allocated(this%periods)) then
-    if (.not. all(periods__start_year__in_bounds(this%periods%start_year, allow_missing=.true.))) then
-      status = NML_ERR_BOUNDS
+    if (allocated(nml__obj%data%periods)) then
+    if (.not. all(periods__start_year__in_bounds(nml__obj%data%periods%start_year, allow_missing=.true.))) then
+      nml__status = NML_ERR_BOUNDS
       if (present(errmsg)) errmsg = "bounds constraint failed: periods%start_year"
       return
     end if
     end if
-    istat = this%is_set("station%code", errmsg=errmsg)
-    if (istat == NML_OK) then
-      if (.not. station__code__in_bounds(this%station%code)) then
-        status = NML_ERR_BOUNDS
+    nml__istat = nml__obj%is_set("station%code", errmsg=errmsg)
+    if (nml__istat == NML_OK) then
+      if (.not. station__code__in_bounds(nml__obj%data%station%code)) then
+        nml__status = NML_ERR_BOUNDS
         if (present(errmsg)) errmsg = "bounds constraint failed: station%code"
         return
       end if
-    else if (istat /= NML_ERR_NOT_SET) then
-      status = istat
+    else if (nml__istat /= NML_ERR_NOT_SET) then
+      nml__status = nml__istat
       return
     end if
   end function nml_run_is_valid

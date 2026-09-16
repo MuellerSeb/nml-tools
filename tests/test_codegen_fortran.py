@@ -183,8 +183,9 @@ def test_generate_fortran_handle_helper_uses_explicit_transfer_mold(tmp_path: Pa
 
     generated = output.read_text()
     assert "use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr" in generated
-    assert "ptr = transfer(handle, c_null_ptr)" in generated
-    assert "ptr = transfer(handle, ptr)" not in generated
+    assert "nml__ptr = transfer(nml__handle, c_null_ptr)" in generated
+    assert "integer(c_intptr_t), intent(in) :: nml__handle" in generated
+    assert "type(c_ptr) :: nml__ptr" in generated
 
 
 def test_generate_fortran_allows_items_default(tmp_path: Path) -> None:
@@ -207,7 +208,7 @@ def test_generate_fortran_allows_items_default(tmp_path: Path) -> None:
 
     generated = output.read_text()
     assert "integer(i4), parameter, public :: values__default = 2_i4" in generated
-    assert "this%values = values__default" in generated
+    assert "nml__obj%data%values = values__default" in generated
 
 
 def test_generate_fortran_accepts_static_shape_constants(tmp_path: Path) -> None:
@@ -237,11 +238,11 @@ def test_generate_fortran_accepts_static_shape_constants(tmp_path: Path) -> None
     assert "integer :: dim__max_layers" not in generated
     assert "integer(i4), dimension(max_layers) :: values" in generated
     assert "procedure :: set_dims" not in generated
-    assert "allocate(this%values" not in generated
+    assert "allocate(nml__obj%data%values" not in generated
     assert "use nml_helper, only:" in generated
     assert "max_layers" in generated
     assert "integer(i4), parameter, public :: values__default = 1_i4" in generated
-    assert "this%values = values__default" in generated
+    assert "nml__obj%data%values = values__default" in generated
 
 
 def test_generate_fortran_matches_constants_case_insensitively(tmp_path: Path) -> None:
@@ -324,16 +325,39 @@ def test_generate_fortran_accepts_runtime_dimensions(tmp_path: Path) -> None:
     )
 
     generated = output.read_text()
-    assert "integer :: max_layers = max_layers__default" in generated
+    assert "type, public :: nml_test_nml_data_t" in generated
+    assert "type, public :: nml_test_nml_dims_t" in generated
+    assert "type(nml_test_nml_data_t) :: data" in generated
+    assert "type(nml_test_nml_dims_t) :: dims" in generated
+    assert "integer :: max_layers = max_layers__dim_default" in generated
     assert "integer(i4), allocatable, dimension(:) :: values" in generated
     assert "procedure :: set_dims => nml_test_nml_set_dims" in generated
-    assert "allocate(this%values(this%max_layers))" in generated
+    assert "allocate(nml__obj%data%values(nml__obj%dims%max_layers))" in generated
     assert "use nml_helper, only:" in generated
     helper_symbols = _extract_use_only_symbols(generated, "nml_helper")
-    assert "max_layers__default" in helper_symbols
-    assert "max_layers__default=>" not in generated
+    assert "max_layers__dim_default" in helper_symbols
+    assert "max_layers__dim_default=>" not in generated
     assert "integer(i4), parameter, public :: values__default = 1_i4" in generated
-    assert "this%values = values__default" in generated
+    assert "nml__obj%data%values = values__default" in generated
+
+
+def test_generate_fortran_omits_dimensions_companion_without_runtime_dimensions() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {"data": {"type": "integer"}, "dims": {"type": "integer"}},
+    }
+
+    generated = codegen.render_fortran(schema, file_name="nml_run.f90")
+
+    assert "type, public :: nml_run_data_t" in generated
+    assert "type(nml_run_data_t) :: data" in generated
+    assert "nml_run_dims_t" not in generated
+    assert "integer :: data" in generated
+    assert "integer :: dims" in generated
+    assert "nml__obj%data%data" in generated
+    assert "nml__obj%data%dims" in generated
 
 
 def test_generate_fortran_normalizes_runtime_dimension_names(tmp_path: Path) -> None:
@@ -360,13 +384,13 @@ def test_generate_fortran_normalizes_runtime_dimension_names(tmp_path: Path) -> 
     )
 
     generated = output.read_text()
-    assert "integer :: max_layers = max_layers__default" in generated
+    assert "integer :: max_layers = max_layers__dim_default" in generated
     helper_symbols = _extract_use_only_symbols(generated, "nml_helper")
-    assert "max_layers__default" in helper_symbols
-    assert "max_layers__default=>" not in generated
+    assert "max_layers__dim_default" in helper_symbols
+    assert "max_layers__dim_default=>" not in generated
 
 
-def test_generate_fortran_rejects_runtime_dimension_property_collisions(
+def test_generate_fortran_allows_runtime_dimension_property_collisions(
     tmp_path: Path,
 ) -> None:
     schema = {
@@ -385,13 +409,17 @@ def test_generate_fortran_rejects_runtime_dimension_property_collisions(
 
     output = tmp_path / "nml_test.f90"
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match="runtime dimension 'max_layers' conflicts"):
-        generate_fortran(
-            schema,
-            output,
-            kind_module="mo_kind",
-            dimensions={"max_layers": 3},
-        )
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"max_layers": 3},
+    )
+    generated = output.read_text()
+    assert "integer(i4) :: max_layers" in generated
+    assert "integer :: max_layers = max_layers__dim_default" in generated
+    assert "nml__obj%data%max_layers" in generated
+    assert "nml__obj%dims%max_layers" in generated
 
 
 def test_generate_fortran_rejects_runtime_dimension_default_constant_collisions(
@@ -404,7 +432,7 @@ def test_generate_fortran_rejects_runtime_dimension_default_constant_collisions(
         "properties": {
             "name": {
                 "type": "string",
-                "x-fortran-len": "max_layers__default",
+                "x-fortran-len": "max_layers__dim_default",
             },
             "values": {
                 "type": "array",
@@ -416,17 +444,17 @@ def test_generate_fortran_rejects_runtime_dimension_default_constant_collisions(
 
     output = tmp_path / "nml_test.f90"
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match="constant 'max_layers__default' must not contain"):
+    with pytest.raises(ValueError, match="constant 'max_layers__dim_default' must not contain"):
         generate_fortran(
             schema,
             output,
             kind_module="mo_kind",
-            constants={"max_layers__default": 32},
+            constants={"max_layers__dim_default": 32},
             dimensions={"max_layers": 3},
         )
 
 
-def test_generate_fortran_rejects_runtime_dimension_name_when_property_default_exists(
+def test_generate_fortran_allows_runtime_dimension_name_when_property_default_exists(
     tmp_path: Path,
 ) -> None:
     schema = {
@@ -449,13 +477,15 @@ def test_generate_fortran_rejects_runtime_dimension_name_when_property_default_e
 
     output = tmp_path / "nml_test.f90"
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match="runtime dimension 'max_layers' conflicts"):
-        generate_fortran(
-            schema,
-            output,
-            kind_module="mo_kind",
-            dimensions={"max_layers": 3},
-        )
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={"max_layers": 3},
+    )
+    generated = output.read_text()
+    assert "nml__obj%data%max_layers = max_layers__default" in generated
+    assert "nml__obj%dims%max_layers" in generated
 
 
 def test_generate_fortran_does_not_alias_runtime_dimension_names_in_type_specs(
@@ -668,7 +698,10 @@ def test_generate_fortran_emits_bounds_helpers(tmp_path: Path) -> None:
     assert "integer(i4), parameter, public :: counts__min = 1_i4" in generated
     assert "elemental logical function tolerance__in_bounds" in generated
     assert "elemental logical function counts__in_bounds" in generated
-    assert "all(counts__in_bounds(this%counts, allow_missing=.true.))" in generated
+    assert (
+        "all(counts__in_bounds(nml__obj%data%counts, allow_missing=.true.))"
+        in generated
+    )
 
 
 def test_generate_fortran_rejects_flex_dim_boolean_array(tmp_path: Path) -> None:
@@ -730,8 +763,21 @@ def test_generate_fortran_rejects_case_insensitive_duplicates(tmp_path: Path) ->
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
-@pytest.mark.parametrize("name", ["is_configured", "init", "set", "from_file", "is_valid"])
-def test_generate_fortran_rejects_property_names_conflicting_with_type_members(
+@pytest.mark.parametrize(
+    "name",
+    [
+        "is_configured",
+        "init",
+        "init_type",
+        "set",
+        "set_dims",
+        "from_file",
+        "is_set",
+        "is_valid",
+        "filled_shape",
+    ],
+)
+def test_generate_fortran_allows_property_names_matching_type_members(
     tmp_path: Path,
     name: str,
 ) -> None:
@@ -745,12 +791,13 @@ def test_generate_fortran_rejects_property_names_conflicting_with_type_members(
     }
 
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match="conflicts with generated namelist type member"):
-        generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
+    output = tmp_path / "nml_test.f90"
+    generate_fortran(schema, output, kind_module="mo_kind")
+    assert f"integer :: {name}" in output.read_text()
 
 
 @pytest.mark.parametrize("name", ["is_configured", "init", "set_dims", "filled_shape"])
-def test_generate_fortran_rejects_runtime_dimensions_conflicting_with_type_members(
+def test_generate_fortran_allows_runtime_dimensions_matching_type_members(
     tmp_path: Path,
     name: str,
 ) -> None:
@@ -768,13 +815,392 @@ def test_generate_fortran_rejects_runtime_dimensions_conflicting_with_type_membe
     }
 
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match="conflicts with generated namelist type member"):
-        generate_fortran(
+    output = tmp_path / "nml_test.f90"
+    generate_fortran(
+        schema,
+        output,
+        kind_module="mo_kind",
+        dimensions={name: 2},
+    )
+    assert f"integer :: {name} = {name}__dim_default" in output.read_text()
+
+
+@pytest.mark.parametrize("name", ["errmsg", "ErrMsg"])
+def test_generate_fortran_rejects_reserved_errmsg_property(name: str) -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {name: {"type": "integer"}},
+    }
+
+    with pytest.raises(ValueError, match="reserved for the generated Fortran API"):
+        codegen.render_fortran(schema, file_name="nml_run.f90")
+
+
+def test_generate_fortran_rejects_reserved_errmsg_dimension() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "values": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "x-fortran-shape": "errmsg",
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="reserved for the generated Fortran API"):
+        codegen.render_fortran(
             schema,
-            tmp_path / "nml_test.f90",
-            kind_module="mo_kind",
-            dimensions={name: 2},
+            file_name="nml_run.f90",
+            dimensions={"ErrMsg": 2},
         )
+
+
+@pytest.mark.parametrize("type_name", ["nml_run_t", "nml_run_data_t", "nml_run_set"])
+def test_generate_fortran_rejects_generated_module_symbol_import_collision(type_name: str) -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": "object",
+                "x-fortran-type": type_name,
+                "x-fortran-module": "application_types",
+                "properties": {"count": {"type": "integer"}},
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match=f"generated module symbol '{type_name}'"):
+        codegen.render_fortran(schema, file_name="nml_run.f90")
+
+
+def test_generate_fortran_rejects_f2py_handle_helper_import_collision() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": "object",
+                "x-fortran-type": "nml_run_resolve_handle",
+                "x-fortran-module": "application_types",
+                "properties": {"count": {"type": "integer"}},
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="generated module symbol 'nml_run_resolve_handle'"):
+        codegen.render_fortran(
+            schema,
+            file_name="nml_run.f90",
+            f2py_handle_helpers=True,
+        )
+
+
+def test_generate_fortran_rejects_ambiguous_imported_type_names() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "first": {
+                "type": "object",
+                "x-fortran-type": "status",
+                "x-fortran-module": "application_a",
+                "properties": {"code": {"type": "integer"}},
+            },
+            "second": {
+                "type": "object",
+                "x-fortran-type": "status",
+                "x-fortran-module": "application_b",
+                "properties": {"code": {"type": "integer"}},
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="imported symbol 'status' is provided by both"):
+        codegen.render_fortran(schema, file_name="nml_run.f90")
+
+
+def test_generate_fortran_rejects_local_and_imported_type_name_collision() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "local": {
+                "type": "object",
+                "x-fortran-type": "status",
+                "properties": {"code": {"type": "integer"}},
+            },
+            "imported": {
+                "type": "object",
+                "x-fortran-type": "status",
+                "x-fortran-module": "application_types",
+                "properties": {"code": {"type": "integer"}},
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="imported symbol 'status' is provided by both"):
+        codegen.render_fortran(schema, file_name="nml_run.f90")
+
+
+@pytest.mark.parametrize(
+    ("schema", "kwargs"),
+    [
+        (
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {"value": {"type": "string", "x-fortran-len": "errmsg"}},
+            },
+            {"constants": {"errmsg": 8}},
+        ),
+        (
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "value": {"type": "integer", "x-fortran-kind": "errmsg"}
+                },
+            },
+            {"kind_map": {"errmsg": "int32"}, "kind_allowlist": {"int32"}},
+        ),
+        (
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "object",
+                        "x-fortran-type": "errmsg",
+                        "properties": {"code": {"type": "integer"}},
+                    }
+                },
+            },
+            {},
+        ),
+    ],
+)
+def test_generate_fortran_rejects_errmsg_in_generated_scope(
+    schema: dict[str, object], kwargs: dict[str, object]
+) -> None:
+    codegen = _import_codegen_module()
+
+    with pytest.raises(ValueError, match="reserved for the generated Fortran API"):
+        codegen.render_fortran(schema, file_name="nml_run.f90", **kwargs)
+
+
+def test_generate_fortran_rejects_generated_procedure_dummy_collisions() -> None:
+    codegen = _import_codegen_module()
+
+    with pytest.raises(ValueError, match="generated set procedure 'nml_run_set'"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {"nml_run_set": {"type": "integer"}},
+            },
+            file_name="nml_run.f90",
+        )
+
+    with pytest.raises(ValueError, match="generated init_type procedure 'nml_run_init_type'"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "nml_run_init_type": {
+                        "type": "object",
+                        "x-fortran-type": "period_t",
+                        "properties": {"year": {"type": "integer"}},
+                    }
+                },
+            },
+            file_name="nml_run.f90",
+        )
+
+    with pytest.raises(ValueError, match="generated set_dims procedure 'nml_run_set_dims'"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "values": {
+                        "type": "array",
+                        "x-fortran-shape": "nml_run_set_dims",
+                        "items": {"type": "integer"},
+                    }
+                },
+            },
+            file_name="nml_run.f90",
+            dimensions={"nml_run_set_dims": 2},
+        )
+
+
+def test_generate_fortran_rejects_outer_type_procedure_scope_collisions() -> None:
+    codegen = _import_codegen_module()
+
+    with pytest.raises(ValueError, match="generated outer type 'nml_run_t'"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {"nml_run_t": {"type": "integer"}},
+            },
+            file_name="nml_run.f90",
+        )
+
+    with pytest.raises(ValueError, match="generated outer type 'nml_run_t'"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "values": {
+                        "type": "array",
+                        "x-fortran-shape": "nml_run_t",
+                        "items": {"type": "integer"},
+                    }
+                },
+            },
+            file_name="nml_run.f90",
+            dimensions={"nml_run_t": 2},
+        )
+
+
+def test_generate_fortran_rejects_property_colliding_with_configured_import() -> None:
+    codegen = _import_codegen_module()
+
+    with pytest.raises(ValueError, match="property 'n' conflicts with unqualified imported symbol"):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "n": {"type": "integer"},
+                    "values": {
+                        "type": "array",
+                        "x-fortran-shape": "n",
+                        "items": {"type": "integer"},
+                    },
+                },
+            },
+            file_name="nml_run.f90",
+            constants={"n": 2},
+        )
+
+    with pytest.raises(
+        ValueError, match="property 'i4' conflicts with unqualified imported symbol"
+    ):
+        codegen.render_fortran(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {"i4": {"type": "integer", "x-fortran-kind": "i4"}},
+            },
+            file_name="nml_run.f90",
+            kind_map={"i4": "int32"},
+            kind_allowlist={"int32"},
+        )
+
+
+def test_generate_fortran_rejects_iso_c_binding_import_collision() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "value": {
+                "type": "object",
+                "x-fortran-type": "c_ptr",
+                "x-fortran-module": "application_types",
+                "properties": {"code": {"type": "integer"}},
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="imported symbol 'c_ptr' is provided by both"):
+        codegen.render_fortran(
+            schema,
+            file_name="nml_run.f90",
+            f2py_handle_helpers=True,
+        )
+
+
+@pytest.mark.parametrize("name", ["present", "Present", "size", "NML_OK"])
+def test_generate_fortran_rejects_generated_dependency_names(name: str) -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {name: {"type": "integer"}},
+    }
+
+    with pytest.raises(ValueError, match="reserved"):
+        codegen.render_fortran(schema, file_name="nml_run.f90")
+
+
+def test_generate_fortran_uses_direct_intrinsics_and_internal_helper_procedures() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {"value": {"type": "integer"}},
+    }
+
+    generated = codegen.render_fortran(schema, file_name="nml_run.f90")
+    helper = codegen.render_helper(file_name="nml_helper.f90")
+
+    assert "nml_helper_intrinsics" not in generated
+    assert "nml_helper_intrinsics" not in helper
+    assert "if (present(errmsg))" in generated
+    assert "idx__check" in generated
+    assert "to__lower" in generated
+    assert "function to__lower" in helper
+    assert "function idx__check" in helper
+
+
+def test_generate_fortran_keeps_renamed_ieee_helpers_out_of_private_list() -> None:
+    codegen = _import_codegen_module()
+    generated = codegen.render_fortran(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "required": ["value"],
+            "properties": {"value": {"type": "number"}},
+        },
+        file_name="nml_run.f90",
+    )
+
+    assert "use ieee_arithmetic, only: nml__ieee_value => ieee_value" in generated
+    assert "private :: nml__ieee_value" not in generated
+
+
+def test_generate_fortran_rejects_derived_type_root_symbol_collision() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "period": {"type": "integer"},
+            "value": {
+                "type": "object",
+                "x-fortran-type": "period",
+                "properties": {"year": {"type": "integer"}},
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match="derived type name conflicts"):
+        codegen.render_fortran(schema, file_name="nml_run.f90")
 
 
 def test_generate_fortran_accepts_required_case_insensitive(tmp_path: Path) -> None:
@@ -830,7 +1256,7 @@ def test_generate_fortran_emits_filled_shape_for_flex_arrays(tmp_path: Path) -> 
 
     generated = output.read_text()
     assert "procedure :: filled_shape" in generated
-    assert "_filled_shape(this, name, filled, errmsg)" in generated
+    assert "_filled_shape(nml__obj, name, filled, errmsg)" in generated
     assert "NML_ERR_PARTLY_SET" in generated
 
 
@@ -943,11 +1369,11 @@ def test_generate_fortran_set_dims_validates_before_assignment(tmp_path: Path) -
 
     is_set_idx = generated.index("integer function nml_test_nml_is_set")
     is_valid_idx = generated.index("integer function nml_test_nml_is_valid")
-    generated.index("if (.not. this%is_configured) then", is_set_idx)
-    generated.index("if (.not. this%is_configured) then", is_valid_idx)
+    generated.index("if (.not. nml__obj%is_configured) then", is_set_idx)
+    generated.index("if (.not. nml__obj%is_configured) then", is_valid_idx)
 
     validate_idx = generated.index("if (candidate__max_layers <= 0) then")
-    assign_idx = generated.index("this%max_layers = candidate__max_layers")
+    assign_idx = generated.index("nml__obj%dims%max_layers = candidate__max_layers")
     assert assign_idx > validate_idx
 
 
@@ -976,9 +1402,49 @@ def test_generate_fortran_runtime_sized_array_with_default_uses_partial_set(tmp_
     )
 
     generated = output.read_text()
-    assert "if (size(values, 1) > size(this%values, 1)) then" in generated
-    assert "this%values(lb__1:ub__1) = values" in generated
+    assert (
+        "if (size(values, 1) > size(nml__obj%data%values, 1)) then"
+        in generated
+    )
+    assert "nml__obj%data%values( &\n        1:size(values, 1)) = values" in generated
+    assert "lbound(" not in generated
+    assert "ubound(" not in generated
     assert "dimension 1 mismatch for 'values'" not in generated
+
+
+def test_generate_fortran_orders_used_runtime_dimensions_by_configuration() -> None:
+    codegen = _import_codegen_module()
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {
+            "first": {
+                "type": "array",
+                "x-fortran-shape": "a",
+                "items": {"type": "integer"},
+            },
+            "second": {
+                "type": "array",
+                "x-fortran-shape": "b",
+                "items": {"type": "integer"},
+            },
+        },
+    }
+
+    generated = codegen.render_fortran(
+        schema,
+        file_name="nml_run.f90",
+        dimensions={"b": 3, "a": 2},
+    )
+
+    dims_type = generated.index("type, public :: nml_run_dims_t")
+    b_component = generated.index("integer :: b = b__dim_default", dims_type)
+    a_component = generated.index("integer :: a = a__dim_default", dims_type)
+    set_dims = generated.index("integer function nml_run_set_dims")
+    b_argument = generated.index("    b, &", set_dims)
+    a_argument = generated.index("    a, &", set_dims)
+    assert b_component < a_component
+    assert b_argument < a_argument
 
 
 def test_generate_fortran_required_defaults_make_setter_arguments_optional() -> None:
@@ -997,15 +1463,15 @@ def test_generate_fortran_required_defaults_make_setter_arguments_optional() -> 
     generated = codegen.render_fortran(schema, file_name="nml_run.f90")
 
     assert (
-        "integer function nml_run_set(this, &\n    count, &\n    mode, &\n    flag, &"
+        "integer function nml_run_set(nml__obj, &\n    count, &\n    mode, &\n    flag, &"
         in generated
     )
     assert "character(len=*), intent(in) :: mode" in generated
     assert "integer, intent(in), optional :: count" in generated
     assert "logical, intent(in), optional :: flag" in generated
-    assert 'istat = this%is_set("mode", errmsg=errmsg)' in generated
-    assert 'istat = this%is_set("count", errmsg=errmsg)' not in generated
-    assert 'istat = this%is_set("flag", errmsg=errmsg)' not in generated
+    assert 'nml__istat = nml__obj%is_set("mode", errmsg=errmsg)' in generated
+    assert 'nml__istat = nml__obj%is_set("count", errmsg=errmsg)' not in generated
+    assert 'nml__istat = nml__obj%is_set("flag", errmsg=errmsg)' not in generated
 
 
 def test_generate_fortran_allows_missing_group_without_input_required_fields() -> None:
@@ -1022,18 +1488,18 @@ def test_generate_fortran_allows_missing_group_without_input_required_fields() -
 
     generated = codegen.render_fortran(schema, file_name="nml_run.f90")
 
-    missing_group_branch = """    if (status /= NML_OK) then
-      if (status == NML_ERR_NML_NOT_FOUND) then
-        close_status = nml%close(errmsg=errmsg)
-        if (close_status /= NML_OK) then
-          status = close_status
+    missing_group_branch = """    if (nml__status /= NML_OK) then
+      if (nml__status == NML_ERR_NML_NOT_FOUND) then
+        nml__close_status = nml__reader%close(errmsg=errmsg)
+        if (nml__close_status /= NML_OK) then
+          nml__status = nml__close_status
           return
         end if
-        this%is_configured = .true.
-        status = NML_OK
+        nml__obj%is_configured = .true.
+        nml__status = NML_OK
         return
       end if
-      close_status = nml%close()
+      nml__close_status = nml__reader%close()
       return
     end if"""
     assert missing_group_branch in generated
@@ -1050,11 +1516,13 @@ def test_generate_fortran_rejects_missing_group_with_input_required_fields() -> 
 
     generated = codegen.render_fortran(schema, file_name="nml_run.f90")
 
-    find_start = generated.index('status = nml%find("run", errmsg=errmsg)')
+    find_start = generated.index(
+        'nml__status = nml__reader%find("run", errmsg=errmsg)'
+    )
     find_end = generated.index("    ! read namelist")
     find_block = generated[find_start:find_end]
-    assert "close_status = nml%close(errmsg=errmsg)" not in find_block
-    assert "this%is_configured = .true." not in find_block
+    assert "nml__close_status = nml__reader%close(errmsg=errmsg)" not in find_block
+    assert "nml__obj%is_configured = .true." not in find_block
 
 
 def test_generate_fortran_runtime_repeat_and_item_defaults_use_extent_policy() -> None:
@@ -1174,8 +1642,11 @@ def test_generate_fortran_fixed_array_setters_use_assumed_shape(
 
     generated = output.read_text()
     assert "integer(i4), dimension(:), intent(in), optional :: values" in generated
-    assert "if (size(values, 1) > size(this%values, 1)) then" in generated
-    assert "this%values(lb__1:ub__1) = values" in generated
+    assert (
+        "if (size(values, 1) > size(nml__obj%data%values, 1)) then"
+        in generated
+    )
+    assert "nml__obj%data%values( &\n        1:size(values, 1)) = values" in generated
     assert "dimension(3), intent(in), optional :: values" not in generated
 
 
@@ -1207,9 +1678,12 @@ def test_generate_fortran_runtime_sized_string_array_uses_static_length(
 
     generated = output.read_text()
     assert "character(len=name_len), allocatable, dimension(:) :: names" in generated
-    assert "allocate(character(len=name_len) :: this%names(this%max_names))" in generated
+    assert (
+        "allocate(character(len=name_len) :: "
+        "nml__obj%data%names(nml__obj%dims%max_names))" in generated
+    )
     assert "character(len=:), allocatable" not in generated
-    assert "this%names = names" in generated
+    assert "nml__obj%data%names = names" in generated
 
 
 def test_generate_fortran_multidimensional_string_array_sentinels(
@@ -1238,8 +1712,8 @@ def test_generate_fortran_multidimensional_string_array_sentinels(
     )
 
     generated = output.read_text()
-    assert "this%names = achar(0)" in generated
-    assert "all(this%names == achar(0))" in generated
+    assert "nml__obj%data%names = achar(0)" in generated
+    assert "all(nml__obj%data%names == achar(0))" in generated
 
 
 def test_generate_fortran_array_default_pad_order(tmp_path: Path) -> None:
@@ -1365,29 +1839,29 @@ def test_generate_fortran_emits_local_derived_types_and_typed_fields() -> None:
     assert "type(period_t) :: period" in generated
     assert "type(period_t), allocatable, dimension(:) :: periods" in generated
     assert "procedure :: init_type => nml_run_init_type" in generated
-    assert "status = this%init_type( &" in generated
-    assert "period=this%period" in generated
-    assert "periods=this%periods" in generated
+    assert "nml__status = nml__obj%init_type( &" in generated
+    assert "period=nml__obj%data%period" in generated
+    assert "periods=nml__obj%data%periods" in generated
     assert "init_type requires exactly one" not in generated
     assert "init_type requires at least one" not in generated
     assert "integer :: selected" not in generated
     assert "selected = selected + 1" not in generated
-    assert "this%period%start_year" in generated
+    assert "nml__obj%data%period%start_year" in generated
     assert 'case ("period%start_year")' in generated
     assert 'case ("periods%start_year")' in generated
     assert "! required parameters" in generated
     assert "! required derived values" not in generated
-    assert 'istat = this%is_set("period", errmsg=errmsg)' in generated
-    assert 'istat = this%is_set("periods", errmsg=errmsg)' in generated
-    assert generated.count('istat = this%is_set("period", errmsg=errmsg)') == 1
-    assert generated.count('istat = this%is_set("periods", errmsg=errmsg)') == 1
+    assert 'nml__istat = nml__obj%is_set("period", errmsg=errmsg)' in generated
+    assert 'nml__istat = nml__obj%is_set("periods", errmsg=errmsg)' in generated
+    assert generated.count('nml__istat = nml__obj%is_set("period", errmsg=errmsg)') == 1
+    assert generated.count('nml__istat = nml__obj%is_set("periods", errmsg=errmsg)') == 1
     assert " .and. &" in generated
     assert " .or. &" in generated
     assert "integer(i4), parameter, public :: period__start_year__min = 1900_i4" in generated
     assert "elemental logical function period__start_year__in_bounds" in generated
-    assert "period__label__in_enum(this%period%label)" in generated
-    assert "periods__start_year__in_bounds(this%periods%start_year" in generated
-    assert "if (allocated(this%periods)) then" in generated
+    assert "period__label__in_enum(nml__obj%data%period%label)" in generated
+    assert "periods__start_year__in_bounds(nml__obj%data%periods%start_year" in generated
+    assert "if (allocated(nml__obj%data%periods)) then" in generated
 
 
 def test_generate_fortran_init_type_accepts_fixed_derived_arrays() -> None:
@@ -1422,7 +1896,7 @@ def test_generate_fortran_init_type_accepts_fixed_derived_arrays() -> None:
     assert "type(period_t), dimension(2) :: periods" in generated
     assert "type(period_t), dimension(:), intent(inout), optional :: periods" in generated
     assert "allocatable, intent(inout), optional :: periods" not in generated
-    assert "periods=this%periods" in generated
+    assert "periods=nml__obj%data%periods" in generated
     assert "periods%year = 2001" in generated
 
 
@@ -1474,8 +1948,8 @@ def test_generate_fortran_imports_application_owned_derived_type() -> None:
     assert "type(location_t) :: location" in generated
     assert "type(location_t), intent(in), optional :: location" in generated
     assert "type(location_t), dimension(:), intent(in), optional :: locations" in generated
-    assert 'istat = this%is_set("location", errmsg=errmsg)' not in generated
-    assert 'istat = this%is_set("locations", errmsg=errmsg)' not in generated
+    assert 'nml__istat = nml__obj%is_set("location", errmsg=errmsg)' not in generated
+    assert 'nml__istat = nml__obj%is_set("locations", errmsg=errmsg)' not in generated
     assert "if (len(location%name) /= 8) then" in generated
     assert "if (len(locations%name) /= 8) then" in generated
     assert "imported string storage length mismatch: location%name" in generated

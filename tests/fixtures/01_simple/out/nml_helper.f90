@@ -42,7 +42,7 @@ module nml_helper
 
   !> \brief Shared constants for generated namelist modules
   integer, parameter, public :: buf = 256 !< Buffer length for character strings.
-  integer, parameter, public :: max_iter__default = 4 !< Maximum number of iterations.
+  integer, parameter, public :: max_iter__dim_default = 4 !< Maximum number of iterations.
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations
@@ -111,7 +111,7 @@ contains
         if (present(errmsg)) errmsg = trim(iomsg)
         return
       end if
-      if (index(to_lower(line), '&' // to_lower(trim(nml))) /= 0) then
+      if (index(to__lower(line), '&' // to__lower(trim(nml))) /= 0) then
         status = NML_OK
         backspace(this%unit)
         return
@@ -140,7 +140,7 @@ contains
   end function nml_close
 
   !> \brief Convert string to lower case
-  pure function to_lower(string) result(lower_string)
+  pure function to__lower(string) result(lower_string)
     character(len=*), intent(in) :: string
     character(len=len(string)) :: lower_string
     integer, parameter :: shift=iachar('a')-iachar('A'), upA=iachar('A'), upZ=iachar('Z')
@@ -150,25 +150,24 @@ contains
       if (k>=upA .and. k<=upZ) k = k + shift
       lower_string(i:i) = char(k)
     end do
-  end function to_lower
+  end function to__lower
 
   !> \brief Validate index bounds for array access
-  integer function idx_check(idx, lower, upper, field, errmsg) result(status)
+  integer function idx__check(idx, extents, field, errmsg) result(status)
     integer, intent(in) :: idx(:)
-    integer, intent(in) :: lower(:)
-    integer, intent(in) :: upper(:)
+    integer, intent(in) :: extents(:)
     character(len=*), intent(in) :: field
     character(len=*), intent(out), optional :: errmsg
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (size(idx) /= size(lower)) then
+    if (size(idx) /= size(extents)) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "index rank mismatch for '" // trim(field) // "'"
-    else if (any(idx < lower) .or. any(idx > upper)) then
+    else if (any(idx < 1) .or. any(idx > extents)) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "index out of bounds for '" // trim(field) // "'"
     end if
-  end function idx_check
+  end function idx__check
 
 end module nml_helper

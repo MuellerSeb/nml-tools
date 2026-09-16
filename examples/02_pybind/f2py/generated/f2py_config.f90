@@ -18,22 +18,22 @@ module f2py_config
 contains
 
   !> \brief Read the config namelist from a file
-  subroutine config_from_file_wrapper(handle, file, status, errmsg)
-    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
+  subroutine config_from_file_wrapper(nml__handle, file, nml__status, nml__errmsg)
+    integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_config_t instance
     character(len=*), intent(in) :: file !< namelist file path
-    integer, intent(out) :: status !< nml-tools status code
-    character(len=512), intent(out) :: errmsg !< error message for non-OK status values
-    type(nml_config_t), pointer :: this
+    integer, intent(out) :: nml__status !< nml-tools status code
+    character(len=512), intent(out) :: nml__errmsg !< error message for non-OK status values
+    type(nml_config_t), pointer :: nml__obj
 
-    call nml_config_resolve_handle(handle, this, status, errmsg)
-    if (.not. associated(this)) then
+    call nml_config_resolve_handle(nml__handle, nml__obj, nml__status, nml__errmsg)
+    if (.not. associated(nml__obj)) then
       return
     end if
-    status = this%from_file(file, errmsg=errmsg)
+    nml__status = nml__obj%from_file(file, errmsg=nml__errmsg)
   end subroutine config_from_file_wrapper
 
   !> \brief Set config values on the handled instance
-  subroutine config_set_wrapper(handle, &
+  subroutine config_set_wrapper(nml__handle, &
     name, &
     has__name, &
     iterations, &
@@ -43,8 +43,8 @@ contains
     weights__n1, &
     weights, &
     has__weights, &
-    status, errmsg)
-    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
+    nml__status, nml__errmsg)
+    integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_config_t instance
     character(len=*), intent(in) :: name !< Config name (optional)
     logical, intent(in) :: has__name !< whether name was provided
     integer(i4), intent(in) :: iterations !< Iterations (required)
@@ -54,15 +54,15 @@ contains
     integer, intent(in) :: weights__n1 !< extent for weights
     real(dp), dimension(weights__n1), intent(in) :: weights !< Weights (optional)
     logical, intent(in) :: has__weights !< whether weights was provided
-    integer, intent(out) :: status !< nml-tools status code
-    character(len=512), intent(out) :: errmsg !< error message for non-OK status values
-    type(nml_config_t), pointer :: this
+    integer, intent(out) :: nml__status !< nml-tools status code
+    character(len=512), intent(out) :: nml__errmsg !< error message for non-OK status values
+    type(nml_config_t), pointer :: nml__obj
     character(len=:), allocatable :: maybe__name
     logical, allocatable :: maybe__enabled
     real(dp), dimension(:), allocatable :: maybe__weights
 
-    call nml_config_resolve_handle(handle, this, status, errmsg)
-    if (.not. associated(this)) then
+    call nml_config_resolve_handle(nml__handle, nml__obj, nml__status, nml__errmsg)
+    if (.not. associated(nml__obj)) then
       return
     end if
     if (has__name) then
@@ -76,77 +76,77 @@ contains
       allocate(maybe__weights(weights__n1))
       maybe__weights = weights
     end if
-    status = this%set( &
+    nml__status = nml__obj%set( &
       name=maybe__name, &
       iterations=iterations, &
       tolerance=tolerance, &
       enabled=maybe__enabled, &
       weights=maybe__weights, &
-      errmsg=errmsg)
+      errmsg=nml__errmsg)
   end subroutine config_set_wrapper
 
   !> \brief Set runtime dimensions on the handled config instance
-  subroutine config_set_dims_wrapper(handle, &
+  subroutine config_set_dims_wrapper(nml__handle, &
     n_weights, &
     has__n_weights, &
-    status, errmsg)
-    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
+    nml__status, nml__errmsg)
+    integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_config_t instance
     integer, intent(in) :: n_weights !< runtime dimension override for n_weights
     logical, intent(in) :: has__n_weights !< whether n_weights was provided
-    integer, intent(out) :: status !< nml-tools status code
-    character(len=512), intent(out) :: errmsg !< error message for non-OK status values
-    type(nml_config_t), pointer :: this
+    integer, intent(out) :: nml__status !< nml-tools status code
+    character(len=512), intent(out) :: nml__errmsg !< error message for non-OK status values
+    type(nml_config_t), pointer :: nml__obj
     integer, allocatable :: maybe__n_weights
 
-    call nml_config_resolve_handle(handle, this, status, errmsg)
-    if (.not. associated(this)) then
+    call nml_config_resolve_handle(nml__handle, nml__obj, nml__status, nml__errmsg)
+    if (.not. associated(nml__obj)) then
       return
     end if
     if (has__n_weights) then
       allocate(maybe__n_weights)
       maybe__n_weights = n_weights
     end if
-    status = this%set_dims( &
+    nml__status = nml__obj%set_dims( &
       n_weights=maybe__n_weights, &
-      errmsg=errmsg)
+      errmsg=nml__errmsg)
   end subroutine config_set_dims_wrapper
 
 
   !> \brief Check whether a config field is set
-  subroutine config_is_set_wrapper(handle, name, idx__n1, idx, has__idx, status, errmsg)
-    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
+  subroutine config_is_set_wrapper(nml__handle, name, idx__n1, idx, has__idx, nml__status, nml__errmsg)
+    integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_config_t instance
     character(len=*), intent(in) :: name !< field name
     integer, intent(in) :: idx__n1 !< extent for idx
     integer, dimension(idx__n1), intent(in) :: idx !< optional field index values
     logical, intent(in) :: has__idx !< whether idx was provided
-    integer, intent(out) :: status !< nml-tools status code
-    character(len=512), intent(out) :: errmsg !< error message for non-OK status values
-    type(nml_config_t), pointer :: this
+    integer, intent(out) :: nml__status !< nml-tools status code
+    character(len=512), intent(out) :: nml__errmsg !< error message for non-OK status values
+    type(nml_config_t), pointer :: nml__obj
     integer, dimension(:), allocatable :: maybe__idx
 
-    call nml_config_resolve_handle(handle, this, status, errmsg)
-    if (.not. associated(this)) then
+    call nml_config_resolve_handle(nml__handle, nml__obj, nml__status, nml__errmsg)
+    if (.not. associated(nml__obj)) then
       return
     end if
     if (has__idx) then
       allocate(maybe__idx(idx__n1))
       maybe__idx = idx
     end if
-    status = this%is_set(name, idx=maybe__idx, errmsg=errmsg)
+    nml__status = nml__obj%is_set(name, idx=maybe__idx, errmsg=nml__errmsg)
   end subroutine config_is_set_wrapper
 
   !> \brief Validate the handled config instance
-  subroutine config_is_valid_wrapper(handle, status, errmsg)
-    integer(c_intptr_t), intent(in) :: handle !< opaque handle to a nml_config_t instance
-    integer, intent(out) :: status !< nml-tools status code
-    character(len=512), intent(out) :: errmsg !< error message for non-OK status values
-    type(nml_config_t), pointer :: this
+  subroutine config_is_valid_wrapper(nml__handle, nml__status, nml__errmsg)
+    integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_config_t instance
+    integer, intent(out) :: nml__status !< nml-tools status code
+    character(len=512), intent(out) :: nml__errmsg !< error message for non-OK status values
+    type(nml_config_t), pointer :: nml__obj
 
-    call nml_config_resolve_handle(handle, this, status, errmsg)
-    if (.not. associated(this)) then
+    call nml_config_resolve_handle(nml__handle, nml__obj, nml__status, nml__errmsg)
+    if (.not. associated(nml__obj)) then
       return
     end if
-    status = this%is_valid(errmsg=errmsg)
+    nml__status = nml__obj%is_valid(errmsg=nml__errmsg)
   end subroutine config_is_valid_wrapper
 
 end module f2py_config
