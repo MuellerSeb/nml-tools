@@ -32,6 +32,14 @@ from .arrays import initial_array, resolve_shape
 MISSING = object()
 
 
+class InputArray(list):
+    """Dense editor values with the indices selected for namelist output."""
+
+    def __init__(self, values: list[Any], assigned: set[tuple[int, ...]]):
+        super().__init__(values)
+        self.assigned = assigned
+
+
 def suggestion(schema: Mapping[str, Any], sizes: Mapping[str, int]) -> Any:
     """Return the deterministic editable value used for an unset schema field."""
     examples = schema.get("examples")
@@ -352,7 +360,7 @@ def _evaluated_array(
             target[index] = value
         elif component in components:
             target[index][components[component]] = value
-    return result
+    return InputArray(result, {coordinates for coordinates, _, _ in states})
 
 
 def _component_names(schema: Mapping[str, Any]) -> dict[str, str]:
@@ -439,6 +447,7 @@ def _normalize_value(
         items = schema.get("items")
         if not isinstance(items, Mapping):
             raise ValueError(f"array '{path}' must define object items")
+        assigned = value.assigned if isinstance(value, InputArray) else None
         value = initial_array(schema, sizes, value, suggestion(items, sizes), strict=True)
 
         def normalize_items(node: Any, indices: tuple[int, ...] = ()) -> Any:
@@ -447,10 +456,13 @@ def _normalize_value(
                     normalize_items(item, (*indices, index))
                     for index, item in enumerate(node, start=1)
                 ]
+            if assigned is not None and indices not in assigned:
+                return node
             suffix = "".join(f"[{index}]" for index in indices)
             return _normalize_value(node, items, sizes, f"{path}{suffix}")
 
-        return normalize_items(value)
+        normalized = normalize_items(value)
+        return InputArray(normalized, assigned) if assigned is not None else normalized
     if kind == "object":
         if not isinstance(value, Mapping):
             raise ValueError(f"'{path}' must be an object")
@@ -672,12 +684,15 @@ def import_profile(
 
 def _assignments(name: str, value: Any, schema: Mapping[str, Any]) -> Iterable[str]:
     if schema["type"] == "array":
+        assigned = value.assigned if isinstance(value, InputArray) else None
 
         def elements(node: Any, indices: tuple[int, ...] = ()) -> Iterable[str]:
             if isinstance(node, list):
                 for index, child in enumerate(node, 1):
                     yield from elements(child, (*indices, index))
             else:
+                if assigned is not None and indices not in assigned:
+                    return
                 suffix = ",".join(map(str, indices))
                 yield from _assignments(f"{name}({suffix})", node, schema["items"])
 
@@ -686,6 +701,8 @@ def _assignments(name: str, value: Any, schema: Mapping[str, Any]) -> Iterable[s
         for component, child in value.items():
             yield from _assignments(f"{name}%{component}", child, schema["properties"][component])
     else:
+        if schema["type"] == "string" and schema.get("format") == "file-path" and value == "":
+            return
         category = "real" if schema["type"] == "number" else schema["type"]
         yield f"  {name} = {_format_scalar_default(value, None, category)}"
 
