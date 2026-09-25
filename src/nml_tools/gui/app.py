@@ -89,6 +89,7 @@ class ProfileTab(QWidget):
                 values.get(page.name),
                 sizes,
                 fit_arrays=fit_arrays,
+                output_root=project.output_root,
             )
             scroll = QScrollArea(self)
             scroll.setWidgetResizable(True)

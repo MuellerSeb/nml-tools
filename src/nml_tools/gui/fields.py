@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import copy
 import math
+import os
 from collections.abc import Mapping
 from itertools import product
+from pathlib import Path
 from typing import Any, cast
 
+from qtpy.QtCore import QDateTime
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDateTimeEdit,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -60,6 +65,85 @@ def _derived_array_editor(editor_type: type[Any], parent: QWidget) -> Any:
             super().accept()
 
     return DerivedArrayEditor(parent)
+
+
+def _output_root(widget: QWidget) -> Path:
+    current: QWidget | None = widget
+    while current is not None:
+        root = getattr(current, "output_root", None)
+        if isinstance(root, Path):
+            return root
+        current = current.parentWidget()
+    return Path.cwd()
+
+
+def _relative_path(path: str, widget: QWidget) -> str:
+    return Path(os.path.relpath(path, _output_root(widget))).as_posix()
+
+
+def _parse_date_time(value: Any) -> QDateTime:
+    text = str(value)
+    for pattern in (
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd HH:mm",
+        "yyyy-MM-dd HH",
+        "yyyy-MM-dd",
+        "yyyy-MM-ddTHH:mm:ss",
+        "yyyy-MM-ddTHH:mm",
+    ):
+        result = QDateTime.fromString(text, pattern)
+        if result.isValid():
+            return result
+    if not text:
+        return QDateTime.fromString("2000-01-01 00:00", "yyyy-MM-dd HH:mm")
+    raise ValueError(f"'{text}' is not a valid date-time")
+
+
+def _add_path_array_controls(editor: Any, owner: QWidget) -> tuple[Any, Any, Any]:
+    line = QLineEdit(editor)
+    browse = QPushButton("...", editor)
+    update = QPushButton("Update selected", editor)
+    controls = QHBoxLayout()
+    controls.addWidget(line, 1)
+    controls.addWidget(browse)
+    controls.addWidget(update)
+    editor.arraywidget.layout().addLayout(controls)
+
+    def choose() -> None:
+        path, _ = QFileDialog.getOpenFileName(editor, "Select file", str(_output_root(owner)))
+        if path:
+            line.setText(_relative_path(path, owner))
+
+    def apply() -> None:
+        model = editor.arraywidget.model
+        for index in editor.arraywidget.view.selectedIndexes():
+            model.setData(index, line.text())
+
+    browse.clicked.connect(choose)
+    update.clicked.connect(apply)
+    return line, browse, update
+
+
+def _install_date_time_delegate(editor: Any) -> None:
+    from guidata.widgets.arrayeditor.editorwidget import (  # type: ignore[import-untyped]
+        ArrayDelegate,
+    )
+
+    class DateTimeDelegate(ArrayDelegate):  # type: ignore[misc]
+        def createEditor(self, parent: QWidget, option: Any, index: Any) -> QDateTimeEdit:
+            control = QDateTimeEdit(parent)
+            control.setCalendarPopup(True)
+            control.setDisplayFormat("yyyy-MM-dd HH:mm")
+            return control
+
+        def setEditorData(self, control: QDateTimeEdit, index: Any) -> None:
+            control.setDateTime(_parse_date_time(index.model().data(index)))
+
+        def setModelData(self, control: QDateTimeEdit, model: Any, index: Any) -> None:
+            model.setData(index, control.dateTime().toString("yyyy-MM-dd HH:mm"))
+
+    view = editor.arraywidget.view
+    view.setItemDelegate(DateTimeDelegate(view.model().get_array().dtype, view))
 
 
 def _seeded(schema: Mapping[str, Any]) -> bool:
@@ -134,6 +218,44 @@ class ScalarField(QWidget):
     def reset(self, sizes: Mapping[str, int]) -> None:
         self.set_value(suggestion(self.schema, sizes))
         self.modified = False
+
+
+class PathField(ScalarField):
+    def __init__(self, schema: Mapping[str, Any], value: Any, parent: QWidget | None = None):
+        super().__init__(schema, value, parent)
+        self.browse = QPushButton("...", self)
+        self.layout().addWidget(self.browse)
+        self.browse.clicked.connect(self._browse)
+
+    def _browse(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Select file", str(_output_root(self)))
+        if path:
+            self.set_value(_relative_path(path, self))
+
+
+class DateTimeField(ScalarField):
+    def __init__(self, schema: Mapping[str, Any], value: Any, parent: QWidget | None = None):
+        QWidget.__init__(self, parent)
+        self.schema = schema
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.control = QDateTimeEdit(self)
+        self.control.setCalendarPopup(True)
+        self.control.setDisplayFormat("yyyy-MM-dd HH:mm")
+        layout.addWidget(self.control)
+        self.set_value(value)
+        self.modified = False
+        self.control.dateTimeChanged.connect(lambda *_: setattr(self, "modified", True))
+
+    def set_value(self, value: Any) -> None:
+        self._original = str(value)
+        self.control.setDateTime(_parse_date_time(value))
+        self.modified = True
+
+    def value(self) -> str:
+        if not self.modified:
+            return self._original
+        return self.control.dateTime().toString("yyyy-MM-dd HH:mm")
 
 
 class ObjectField(QGroupBox):
@@ -299,6 +421,10 @@ class ArrayField(QWidget):
                 variable_size=deferred,
             ):
                 return
+            if self.items.get("format") == "file-path" and not derived:
+                _add_path_array_controls(editor, self)
+            if self.items.get("format") == "date-time" and not derived:
+                _install_date_time_delegate(editor)
             if _exec(editor) != _accepted(editor):
                 return
             edited = editor.get_value()
@@ -654,10 +780,12 @@ class NamelistForm(QWidget):
         parent: QWidget | None = None,
         *,
         fit_arrays: bool = False,
+        output_root: Path | None = None,
     ):
         super().__init__(parent)
         self.schema = schema
         self.sizes = sizes
+        self.output_root = (output_root or Path.cwd()).resolve()
         properties = schema.get("properties")
         if not isinstance(properties, Mapping):
             raise ValueError("namelist schema must define object 'properties'")
@@ -749,6 +877,10 @@ def _field_widget(
         return ArrayField(name, schema, value, sizes, parent, fit_existing=fit_arrays)
     if kind == "object":
         return ObjectField(schema, value, sizes, parent, fit_arrays=fit_arrays)
+    if kind == "string" and schema.get("format") == "file-path":
+        return PathField(schema, value, parent)
+    if kind == "string" and schema.get("format") == "date-time":
+        return DateTimeField(schema, value, parent)
     return ScalarField(schema, value, parent)
 
 

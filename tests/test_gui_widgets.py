@@ -85,6 +85,50 @@ def test_derived_singletons_use_inline_object_fields(application, project):
     assert scalar.value() == {"year": 2021}
 
 
+def test_path_and_date_time_fields(application, tmp_path, monkeypatch):
+    from qtpy.QtCore import QDateTime
+
+    from nml_tools.gui import fields
+    from nml_tools.gui.fields import DateTimeField, PathField
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "format": "file-path"},
+            "paths": {
+                "type": "array",
+                "x-fortran-shape": "n",
+                "items": {"type": "string", "format": "file-path"},
+            },
+            "when": {"type": "string", "format": "date-time"},
+        },
+    }
+    form = NamelistForm(
+        schema,
+        {"path": "old.nc", "paths": ["one.nc"], "when": "2025-01-01"},
+        {"n": 1},
+        output_root=tmp_path,
+    )
+    path = form.rows["path"].field
+    assert isinstance(path, PathField)
+    assert isinstance(form.rows["paths"].field.inline, PathField)
+    monkeypatch.setattr(
+        fields.QFileDialog,
+        "getOpenFileName",
+        lambda *args: (str(tmp_path / "data" / "input.nc"), ""),
+    )
+    path.browse.click()
+    assert path.value() == "data/input.nc"
+
+    date_time = form.rows["when"].field
+    assert isinstance(date_time, DateTimeField)
+    assert date_time.value() == "2025-01-01"
+    date_time.control.setDateTime(
+        QDateTime.fromString("2026-02-03 04:05", "yyyy-MM-dd HH:mm")
+    )
+    assert date_time.value() == "2026-02-03 04:05"
+
+
 def test_dialog_load_overlay_save_reload_and_dimension_changes(application, project, monkeypatch):
     errors = []
     monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))
@@ -155,6 +199,39 @@ def test_guidata_derived_edits_commit(application):
         editor._data.current_changes[("year", 0, 0)] = 2025
         editor.accept()
         assert data["year"][0, 0] == 2025
+    finally:
+        editor.close()
+
+
+def test_guidata_path_update_and_date_time_editor(application):
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("guidata")
+    from guidata.widgets.arrayeditor import ArrayEditor
+    from qtpy.QtCore import QDateTime
+    from qtpy.QtWidgets import QDateTimeEdit
+
+    from nml_tools.gui.fields import _add_path_array_controls, _install_date_time_delegate
+
+    data = np.array([["a.nc", "b.nc"]], dtype="U1024")
+    editor = ArrayEditor(None)
+    try:
+        assert editor.setup_and_check(data)
+        line, _, update = _add_path_array_controls(editor, editor)
+        editor.arraywidget.view.selectAll()
+        line.setText("data/input.nc")
+        update.click()
+        model = editor.arraywidget.model
+        assert model.get_value((0, 0)) == model.get_value((0, 1)) == "data/input.nc"
+
+        _install_date_time_delegate(editor)
+        view = editor.arraywidget.view
+        index = view.model().index(0, 0)
+        delegate = view.itemDelegate()
+        control = delegate.createEditor(view, None, index)
+        assert isinstance(control, QDateTimeEdit)
+        control.setDateTime(QDateTime.fromString("2026-02-03 04:05", "yyyy-MM-dd HH:mm"))
+        delegate.setModelData(control, view.model(), index)
+        assert model.get_value((0, 0)) == "2026-02-03 04:05"
     finally:
         editor.close()
 
