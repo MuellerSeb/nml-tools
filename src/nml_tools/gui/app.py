@@ -511,6 +511,8 @@ class ConfigurationDialog(QDialog):
                 prepared.append(editor)
             for editor in prepared:
                 self._put_editor(editor)
+            if prepared:
+                self.tabs.setCurrentWidget(prepared[0])
             self.dimensions = dimensions
             if config.builder or config.source_path is not None:
                 self._remove_tab(config)
