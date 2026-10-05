@@ -24,6 +24,7 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QWidget,
@@ -165,7 +166,7 @@ class ScalarField(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         enum = schema.get("enum")
         kind = schema.get("type")
-        control: QComboBox | QCheckBox | QLineEdit
+        control: QComboBox | QCheckBox | QSpinBox | QLineEdit
         if isinstance(enum, list) and enum:
             combo = QComboBox(self)
             for item in enum:
@@ -173,6 +174,17 @@ class ScalarField(QWidget):
             control = combo
         elif kind == "boolean":
             control = QCheckBox(self)
+        elif kind == "integer":
+            lower = int(schema.get("minimum", schema.get("exclusiveMinimum", -2_147_483_648)))
+            upper = int(schema.get("maximum", schema.get("exclusiveMaximum", 2_147_483_647)))
+            lower += "exclusiveMinimum" in schema
+            upper -= "exclusiveMaximum" in schema
+            if -2_147_483_648 <= lower <= int(value) <= upper <= 2_147_483_647:
+                spin = QSpinBox(self)
+                spin.setRange(lower, upper)
+                control = spin
+            else:
+                control = QLineEdit(self)
         else:
             control = QLineEdit(self)
         self.control = control
@@ -182,6 +194,7 @@ class ScalarField(QWidget):
         signal = (
             control.textEdited if isinstance(control, QLineEdit)
             else control.toggled if isinstance(control, QCheckBox)
+            else control.valueChanged if isinstance(control, QSpinBox)
             else control.currentIndexChanged
         )
         signal.connect(lambda *_: setattr(self, "modified", True))
@@ -192,6 +205,8 @@ class ScalarField(QWidget):
             self.control.setCurrentIndex(max(index, 0))
         elif isinstance(self.control, QCheckBox):
             self.control.setChecked(bool(value))
+        elif isinstance(self.control, QSpinBox):
+            self.control.setValue(value)
         else:
             self.control.setText(str(value))
         self.modified = True
@@ -201,6 +216,8 @@ class ScalarField(QWidget):
             return self.control.currentData()
         if isinstance(self.control, QCheckBox):
             return self.control.isChecked()
+        if isinstance(self.control, QSpinBox):
+            return self.control.value()
         text = self.control.text()
         kind = self.schema.get("type")
         try:

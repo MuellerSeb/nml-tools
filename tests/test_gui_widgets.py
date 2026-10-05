@@ -73,6 +73,28 @@ def test_singletons_keep_array_values_and_restore_schema_defaults(application):
     assert not deferred.field.button.isHidden()
 
 
+def test_numeric_fields_use_appropriate_controls(application):
+    from qtpy.QtWidgets import QLineEdit, QSpinBox
+
+    integer = ScalarField({"type": "integer", "minimum": -3, "maximum": 9}, 4)
+    assert isinstance(integer.control, QSpinBox)
+    assert (integer.control.minimum(), integer.control.maximum(), integer.value()) == (-3, 9, 4)
+    singleton = FieldRow(
+        "values", {"type": "array", "x-fortran-shape": 1, "items": {"type": "integer"}}, [2], {}
+    )
+    assert isinstance(singleton.field.inline.control, QSpinBox)
+
+    number = ScalarField({"type": "number", "minimum": 0.0, "maximum": 1.0}, 0.25)
+    assert isinstance(number.control, QLineEdit)
+    assert number.value() == 0.25
+    number.control.setText("not-a-number")
+    with pytest.raises(ValueError, match="not a valid number"):
+        number.value()
+
+    wide = ScalarField({"type": "integer", "maximum": 2**40}, 4)
+    assert isinstance(wide.control, QLineEdit)
+
+
 def test_derived_singletons_use_inline_object_fields(application, project):
     schema = project.namelists[0].schema["properties"]["periods"]
     row = FieldRow("periods", schema, [{"year": 2020}], {"n": 1})
