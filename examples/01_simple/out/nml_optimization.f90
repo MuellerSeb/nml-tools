@@ -98,123 +98,123 @@ module nml_optimization
 contains
 
   !> \brief Check whether a value is part of an enum
-  elemental logical function method__in_enum(val, allow_missing) result(in_enum)
-    character(len=*), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function method__in_enum(nml__val, nml__allow_missing) result(nml__in_enum)
+    character(len=*), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (val == achar(0)) then
-          in_enum = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__val == achar(0)) then
+          nml__in_enum = .true.
           return
         end if
       end if
     end if
-    in_enum = any(trim(val) == method__enum_values)
+    nml__in_enum = any(trim(nml__val) == method__enum_values)
   end function method__in_enum
 
   !> \brief Check whether a value is part of an enum
-  elemental logical function try_methods__in_enum(val, allow_missing) result(in_enum)
-    character(len=*), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function try_methods__in_enum(nml__val, nml__allow_missing) result(nml__in_enum)
+    character(len=*), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (val == achar(0)) then
-          in_enum = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__val == achar(0)) then
+          nml__in_enum = .true.
           return
         end if
       end if
     end if
-    in_enum = any(trim(val) == try_methods__enum_values)
+    nml__in_enum = any(trim(nml__val) == try_methods__enum_values)
   end function try_methods__in_enum
 
   !> \brief Check whether a value is part of an enum
-  elemental logical function complex_sizes__in_enum(val, allow_missing) result(in_enum)
-    integer(i4), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function complex_sizes__in_enum(nml__val, nml__allow_missing) result(nml__in_enum)
+    integer(i4), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (val == -huge(val)) then
-          in_enum = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__val == -huge(nml__val)) then
+          nml__in_enum = .true.
           return
         end if
       end if
     end if
-    in_enum = any(val == complex_sizes__enum_values)
+    nml__in_enum = any(nml__val == complex_sizes__enum_values)
   end function complex_sizes__in_enum
 
   !> \brief Check whether a value is within bounds
-  elemental logical function niterations__in_bounds(val, allow_missing) result(in_bounds)
-    integer(i4), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function niterations__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    integer(i4), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (val == -huge(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__val == -huge(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val < niterations__min) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val < niterations__min) nml__in_bounds = .false.
   end function niterations__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function tolerance__in_bounds(val, allow_missing) result(in_bounds)
-    real(dp), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function tolerance__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    real(dp), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (nml__ieee_is_nan(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__ieee_is_nan(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val <= tolerance__min_excl) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val <= tolerance__min_excl) nml__in_bounds = .false.
   end function tolerance__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function dds_r__in_bounds(val, allow_missing) result(in_bounds)
-    real(dp), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function dds_r__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    real(dp), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (nml__ieee_is_nan(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__ieee_is_nan(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val <= dds_r__min_excl) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val <= dds_r__min_excl) nml__in_bounds = .false.
   end function dds_r__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function mcmc_error_params__in_bounds(val, allow_missing) result(in_bounds)
-    real(dp), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function mcmc_error_params__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    real(dp), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (nml__ieee_is_nan(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__ieee_is_nan(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val < mcmc_error_params__min) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val < mcmc_error_params__min) nml__in_bounds = .false.
   end function mcmc_error_params__in_bounds
 
   !> \brief Initialize defaults and sentinels for optimization
@@ -723,12 +723,12 @@ contains
       nml__status = nml__istat
       return
     end if
-    if (.not. all(try_methods__in_enum(nml__obj%data%try_methods, allow_missing=.true.))) then
+    if (.not. all(try_methods__in_enum(nml__obj%data%try_methods, nml__allow_missing=.true.))) then
       nml__status = NML_ERR_ENUM
       if (present(errmsg)) errmsg = "enum constraint failed: try_methods"
       return
     end if
-    if (.not. all(complex_sizes__in_enum(nml__obj%data%complex_sizes, allow_missing=.true.))) then
+    if (.not. all(complex_sizes__in_enum(nml__obj%data%complex_sizes, nml__allow_missing=.true.))) then
       nml__status = NML_ERR_ENUM
       if (present(errmsg)) errmsg = "enum constraint failed: complex_sizes"
       return
@@ -768,7 +768,7 @@ contains
       return
     end if
     if (allocated(nml__obj%data%mcmc_error_params)) then
-    if (.not. all(mcmc_error_params__in_bounds(nml__obj%data%mcmc_error_params, allow_missing=.true.))) then
+    if (.not. all(mcmc_error_params__in_bounds(nml__obj%data%mcmc_error_params, nml__allow_missing=.true.))) then
       nml__status = NML_ERR_BOUNDS
       if (present(errmsg)) errmsg = "bounds constraint failed: mcmc_error_params"
       return

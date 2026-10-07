@@ -78,59 +78,59 @@ module nml_run
 contains
 
   !> \brief Check whether a value is within bounds
-  elemental logical function period__start_year__in_bounds(val, allow_missing) result(in_bounds)
-    integer(i4), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function period__start_year__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    integer(i4), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (val == -huge(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__val == -huge(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val < period__start_year__min) in_bounds = .false.
-    if (val > period__start_year__max) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val < period__start_year__min) nml__in_bounds = .false.
+    if (nml__val > period__start_year__max) nml__in_bounds = .false.
   end function period__start_year__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function periods__start_year__in_bounds(val, allow_missing) result(in_bounds)
-    integer(i4), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function periods__start_year__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    integer(i4), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (val == -huge(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__val == -huge(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val < periods__start_year__min) in_bounds = .false.
-    if (val > periods__start_year__max) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val < periods__start_year__min) nml__in_bounds = .false.
+    if (nml__val > periods__start_year__max) nml__in_bounds = .false.
   end function periods__start_year__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function station__code__in_bounds(val, allow_missing) result(in_bounds)
-    integer(i4), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function station__code__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    integer(i4), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (val == -huge(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__val == -huge(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val < station__code__min) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val < station__code__min) nml__in_bounds = .false.
   end function station__code__in_bounds
 
   !> \brief Resolve an opaque C pointer handle to a nml_run_t pointer
@@ -517,7 +517,7 @@ contains
       return
     end if
     if (allocated(nml__obj%data%periods)) then
-    if (.not. all(periods__start_year__in_bounds(nml__obj%data%periods%start_year, allow_missing=.true.))) then
+    if (.not. all(periods__start_year__in_bounds(nml__obj%data%periods%start_year, nml__allow_missing=.true.))) then
       nml__status = NML_ERR_BOUNDS
       if (present(errmsg)) errmsg = "bounds constraint failed: periods%start_year"
       return

@@ -68,61 +68,61 @@ module nml_helper
 contains
 
   !> \brief Open a namelist file
-  integer function nml_open(this, file, errmsg) result(status)
+  integer function nml_open(this, file, errmsg) result(nml__status)
     class(nml_file_t), intent(inout) :: this
     character(len=*), intent(in) :: file
     character(len=*), intent(out), optional :: errmsg
-    integer :: iostat
-    logical :: exists
-    character(len=nml_line_buffer) :: iomsg
+    integer :: nml__iostat
+    logical :: nml__exists
+    character(len=nml_line_buffer) :: nml__iomsg
     if (present(errmsg)) errmsg = ""
-    status = this%close()
-    inquire(file=file, exist=exists)
-    if (.not. exists) then
+    nml__status = this%close()
+    inquire(file=file, exist=nml__exists)
+    if (.not. nml__exists) then
       this%is_open = .false.
       this%unit = 0
-      status = NML_ERR_FILE_NOT_FOUND
+      nml__status = NML_ERR_FILE_NOT_FOUND
       if (present(errmsg)) errmsg = "file not found: " // trim(file)
       return
     end if
     open(newunit=this%unit, file=file, status='old', action='read', &
-      iostat=iostat, iomsg=iomsg)
-    this%is_open = (iostat == 0)
+      iostat=nml__iostat, iomsg=nml__iomsg)
+    this%is_open = (nml__iostat == 0)
     if (.not. this%is_open) then
       this%unit = 0
-      status = NML_ERR_OPEN
-      if (present(errmsg)) errmsg = trim(iomsg)
+      nml__status = NML_ERR_OPEN
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
       return
     end if
-    status = NML_OK
+    nml__status = NML_OK
   end function nml_open
 
   !> \brief Find a namelist in the opened file
-  integer function nml_find(this, nml, errmsg) result(status)
+  integer function nml_find(this, nml, errmsg) result(nml__status)
     class(nml_file_t), intent(inout) :: this
     character(len=*), intent(in) :: nml
     character(len=*), intent(out), optional :: errmsg
-    integer :: iostat
-    character(len=nml_line_buffer) :: line
-    character(len=nml_line_buffer) :: iomsg
+    integer :: nml__iostat
+    character(len=nml_line_buffer) :: nml__line
+    character(len=nml_line_buffer) :: nml__iomsg
     if (present(errmsg)) errmsg = ""
-    status = NML_ERR_NML_NOT_FOUND
+    nml__status = NML_ERR_NML_NOT_FOUND
     if (.not. this%is_open) then
-      status = NML_ERR_NOT_OPEN
+      nml__status = NML_ERR_NOT_OPEN
       if (present(errmsg)) errmsg = "file not open"
       return
     end if
     rewind(unit=this%unit)
     do
-      read(this%unit, '(A)', iostat=iostat, iomsg=iomsg) line
-      if (iostat < 0) exit
-      if (iostat > 0) then
-        status = NML_ERR_READ
-        if (present(errmsg)) errmsg = trim(iomsg)
+      read(this%unit, '(A)', iostat=nml__iostat, iomsg=nml__iomsg) nml__line
+      if (nml__iostat < 0) exit
+      if (nml__iostat > 0) then
+        nml__status = NML_ERR_READ
+        if (present(errmsg)) errmsg = trim(nml__iomsg)
         return
       end if
-      if (index(to__lower(line), '&' // to__lower(trim(nml))) /= 0) then
-        status = NML_OK
+      if (index(to__lower(nml__line), '&' // to__lower(trim(nml))) /= 0) then
+        nml__status = NML_OK
         backspace(this%unit)
         return
       end if
@@ -131,18 +131,18 @@ contains
   end function nml_find
 
   !> \brief Close the namelist file
-  integer function nml_close(this, errmsg) result(status)
+  integer function nml_close(this, errmsg) result(nml__status)
     class(nml_file_t), intent(inout) :: this
     character(len=*), intent(out), optional :: errmsg
-    integer :: iostat
-    character(len=nml_line_buffer) :: iomsg
+    integer :: nml__iostat
+    character(len=nml_line_buffer) :: nml__iomsg
     if (present(errmsg)) errmsg = ""
-    status = NML_OK
+    nml__status = NML_OK
     if (this%is_open) then
-      close(unit=this%unit, iostat=iostat, iomsg=iomsg)
-      if (iostat /= 0) then
-        status = NML_ERR_CLOSE
-        if (present(errmsg)) errmsg = trim(iomsg)
+      close(unit=this%unit, iostat=nml__iostat, iomsg=nml__iomsg)
+      if (nml__iostat /= 0) then
+        nml__status = NML_ERR_CLOSE
+        if (present(errmsg)) errmsg = trim(nml__iomsg)
       end if
     end if
     this%is_open = .false.
@@ -150,33 +150,33 @@ contains
   end function nml_close
 
   !> \brief Convert string to lower case
-  pure function to__lower(string) result(lower_string)
-    character(len=*), intent(in) :: string
-    character(len=len(string)) :: lower_string
-    integer, parameter :: shift=iachar('a')-iachar('A'), upA=iachar('A'), upZ=iachar('Z')
-    integer :: k, i
-    do i = 1, len(string)
-      k = ichar(string(i:i))
-      if (k>=upA .and. k<=upZ) k = k + shift
-      lower_string(i:i) = char(k)
+  pure function to__lower(nml__string) result(nml__lower_string)
+    character(len=*), intent(in) :: nml__string
+    character(len=len(nml__string)) :: nml__lower_string
+    integer, parameter :: nml__shift=iachar('a')-iachar('A'), nml__upA=iachar('A'), nml__upZ=iachar('Z')
+    integer :: nml__k, nml__i
+    do nml__i = 1, len(nml__string)
+      nml__k = ichar(nml__string(nml__i:nml__i))
+      if (nml__k>=nml__upA .and. nml__k<=nml__upZ) nml__k = nml__k + nml__shift
+      nml__lower_string(nml__i:nml__i) = char(nml__k)
     end do
   end function to__lower
 
   !> \brief Validate index bounds for array access
-  integer function idx__check(idx, extents, field, errmsg) result(status)
-    integer, intent(in) :: idx(:)
-    integer, intent(in) :: extents(:)
-    character(len=*), intent(in) :: field
+  integer function idx__check(nml__idx, nml__extents, nml__field, errmsg) result(nml__status)
+    integer, intent(in) :: nml__idx(:)
+    integer, intent(in) :: nml__extents(:)
+    character(len=*), intent(in) :: nml__field
     character(len=*), intent(out), optional :: errmsg
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (size(idx) /= size(extents)) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "index rank mismatch for '" // trim(field) // "'"
-    else if (any(idx < 1) .or. any(idx > extents)) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "index out of bounds for '" // trim(field) // "'"
+    if (size(nml__idx) /= size(nml__extents)) then
+      nml__status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "index rank mismatch for '" // trim(nml__field) // "'"
+    else if (any(nml__idx < 1) .or. any(nml__idx > nml__extents)) then
+      nml__status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "index out of bounds for '" // trim(nml__field) // "'"
     end if
   end function idx__check
 

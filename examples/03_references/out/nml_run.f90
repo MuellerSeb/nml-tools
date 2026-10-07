@@ -87,75 +87,75 @@ module nml_run
 contains
 
   !> \brief Check whether a value is part of an enum
-  elemental logical function method__in_enum(val, allow_missing) result(in_enum)
-    character(len=*), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function method__in_enum(nml__val, nml__allow_missing) result(nml__in_enum)
+    character(len=*), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (val == achar(0)) then
-          in_enum = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__val == achar(0)) then
+          nml__in_enum = .true.
           return
         end if
       end if
     end if
-    in_enum = any(trim(val) == method__enum_values)
+    nml__in_enum = any(trim(nml__val) == method__enum_values)
   end function method__in_enum
 
   !> \brief Check whether a value is within bounds
-  elemental logical function steps__in_bounds(val, allow_missing) result(in_bounds)
-    integer(i4), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function steps__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    integer(i4), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (val == -huge(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__val == -huge(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val < steps__min) in_bounds = .false.
-    if (val > steps__max) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val < steps__min) nml__in_bounds = .false.
+    if (nml__val > steps__max) nml__in_bounds = .false.
   end function steps__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function station_weights__in_bounds(val, allow_missing) result(in_bounds)
-    real(dp), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function station_weights__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    real(dp), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (nml__ieee_is_nan(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__ieee_is_nan(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val < station_weights__min) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val < station_weights__min) nml__in_bounds = .false.
   end function station_weights__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function relaxation__in_bounds(val, allow_missing) result(in_bounds)
-    real(dp), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function relaxation__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    real(dp), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (nml__ieee_is_nan(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__ieee_is_nan(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val <= relaxation__min_excl) in_bounds = .false.
-    if (val > relaxation__max) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val <= relaxation__min_excl) nml__in_bounds = .false.
+    if (nml__val > relaxation__max) nml__in_bounds = .false.
   end function relaxation__in_bounds
 
   !> \brief Initialize defaults and sentinels for run
@@ -451,7 +451,7 @@ contains
       return
     end if
     if (allocated(nml__obj%data%station_weights)) then
-    if (.not. all(station_weights__in_bounds(nml__obj%data%station_weights, allow_missing=.true.))) then
+    if (.not. all(station_weights__in_bounds(nml__obj%data%station_weights, nml__allow_missing=.true.))) then
       nml__status = NML_ERR_BOUNDS
       if (present(errmsg)) errmsg = "bounds constraint failed: station_weights"
       return

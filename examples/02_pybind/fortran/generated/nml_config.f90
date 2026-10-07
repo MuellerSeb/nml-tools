@@ -89,39 +89,39 @@ module nml_config
 contains
 
   !> \brief Check whether a value is within bounds
-  elemental logical function iterations__in_bounds(val, allow_missing) result(in_bounds)
-    integer(i4), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function iterations__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    integer(i4), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (val == -huge(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__val == -huge(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val < iterations__min) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val < iterations__min) nml__in_bounds = .false.
   end function iterations__in_bounds
 
   !> \brief Check whether a value is within bounds
-  elemental logical function tolerance__in_bounds(val, allow_missing) result(in_bounds)
-    real(dp), intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function tolerance__in_bounds(nml__val, nml__allow_missing) result(nml__in_bounds)
+    real(dp), intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
-        if (nml__ieee_is_nan(val)) then
-          in_bounds = .true.
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
+        if (nml__ieee_is_nan(nml__val)) then
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
-    if (val <= tolerance__min_excl) in_bounds = .false.
+    nml__in_bounds = .true.
+    if (nml__val <= tolerance__min_excl) nml__in_bounds = .false.
   end function tolerance__in_bounds
 
   !> \brief Resolve an opaque C pointer handle to a nml_config_t pointer

@@ -6,6 +6,11 @@
 
 Generate Fortran namelist modules, Markdown docs, and template namelists from a small JSON Schema-like specification with Fortran-focused extensions.
 
+The aim is schema-guided generation and validation for a defined Fortran
+namelist subset, with matching documentation and templates. This is not a
+general JSON Schema engine or a Fortran compiler/name resolver. Optional f2py
+and editor integrations use the same supported subset; they do not broaden it.
+
 ## Features
 
 - Schema input in YAML or JSON.
@@ -57,7 +62,8 @@ identifiers and must not contain `__`. Double underscores are reserved for
 generated support names such as `seed__default`, `method__enum_values`, and
 `period__start_year__min`.
 
-Schema property/component and runtime dimension names must not be `errmsg`
+Schema properties/components, runtime dimensions, constants, kind aliases,
+and derived-type names must not be `errmsg`
 (case-insensitively), because `errmsg=` is reserved as the stable error-output
 keyword on generated procedures. Properties and dimensions may otherwise
 match generated member names such as `set`, `is_valid`, or `is_configured`;
@@ -69,10 +75,31 @@ case-insensitively wherever they are emitted unqualified: root properties,
 runtime dimensions, constants, kind aliases, and derived-type names:
 `present`, `size`, `shape`, `allocated`, `associated`, `trim`, `len`, `any`,
 `all`, `huge`, `reshape`, `achar`, `char`, `iachar`, `ichar`, `index`,
-`len_trim`, and `minval`. The generated helper API also reserves `NML_OK`, all
-`NML_ERR_*` names, `nml_file_t`, and `nml_line_buffer` in those scopes.
-An imported or generated derived-type name also cannot duplicate a root
-property name used in the same generated procedure scope.
+`len_trim`, and `minval`. Fortran developers should avoid intrinsic names in
+these roles; the generator checks this explicit dependency list, not every
+Fortran intrinsic. Qualified derived components such as `%size` and `%present`
+are allowed, but still follow the identifier, `__`, and `errmsg` rules.
+
+The generated helper API also reserves `NML_OK`, its `NML_ERR_*` status
+constants, `nml_file_t`, `nml_line_buffer`, `nml_open`, `nml_find`, and
+`nml_close` in unqualified scopes. Additional conflicts depend on the schema
+and configuration and are checked case-insensitively before rendering:
+
+- A schema-spelled root property cannot equal its namelist group name.
+- Native setter/reader arguments cannot shadow imported constants, kind
+  aliases, or derived types needed in their scope, the outer object type,
+  or their own generated procedure name.
+- Helper constants, local derived types, and kind imports must have distinct
+  local names; imports from different modules or of different remote entities
+  cannot claim the same local name.
+- Generated module types/procedures cannot conflict with imported symbols.
+  f2py arguments are deterministically mangled where needed, but conflicting
+  imported types/kinds and wrapper procedures are rejected.
+
+Diagnostics name the conflicting sources and generated scope. There is no
+blanket ban on `nml_*` schema properties or dimensions. These rules also apply
+to schemas used for documentation/templates: such schemas describe the same
+Fortran-generatable subset.
 
 ### x-fortran-namelist
 
@@ -972,6 +999,14 @@ The generated module declares public `nml_run_data_t`, optional
 state and type-bound procedures remain on `config`. Namelist files stay flat:
 they continue to use `iterations` rather than `data%iterations`.
 
+This separates storage responsibilities; it does not encapsulate them. Both
+containers remain public. Use `set_dims` to change dimensions: direct assignment
+to `%dims` does not resize dependent storage or update lifecycle state. Direct
+mutation of `%data` likewise does not maintain allocation/configuration
+invariants; callers are responsible for keeping the documented layout valid.
+Only failed `set_dims` updates promise to leave both containers unchanged, not
+arbitrary failed reads or setters.
+
 This replaced the earlier flat native layout. Existing Fortran callers must
 change `%field` to `%data%field` and `%dimension` to `%dims%dimension`. Python
 wrappers retain their existing field and dimension names.
@@ -1009,6 +1044,9 @@ Status codes (defined in the helper module):
 Notes:
 
 - `errmsg`, when present, is filled with a short message (including `iomsg` on read errors).
+- The caller owns the character buffer; messages may be truncated to its length.
+  Capture the integer code and message together before another operation reuses
+  that buffer. Reader cleanup preserves the original read/find failure message.
 - When every field has an effective default or is otherwise optional, a readable
   file may omit that namelist group. `from_file` then succeeds with the same
   initialized defaults and optional-value sentinels as an empty group. A missing
@@ -1017,6 +1055,24 @@ Notes:
   `NML_ERR_INVALID_NAME`/`NML_ERR_INVALID_INDEX` on misuse.
 - `NML_ERR_INVALID_HANDLE` only reports zero f2py handles. Non-zero invalid
   handles are outside the generated wrapper contract.
+
+For example, handle or save the failure before making another generated call:
+
+```fortran
+integer :: code, saved_code
+character(len=1024) :: errmsg
+character(len=:), allocatable :: saved_message
+
+code = config%from_file("run.nml", errmsg=errmsg)
+if (code /= NML_OK) then
+  saved_code = code
+  saved_message = trim(errmsg)
+  ! saved_code and saved_message now remain available after another call.
+end if
+```
+
+A status type owning both `code` and `msg` is a separate future API decision;
+this layout change retains integer results and `errmsg=`.
 
 ## Documentation format
 
