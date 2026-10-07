@@ -924,7 +924,9 @@ def test_generate_fortran_rejects_ambiguous_imported_type_names() -> None:
         },
     }
 
-    with pytest.raises(ValueError, match="imported symbol 'status' is provided by both"):
+    with pytest.raises(
+        ValueError, match="application_b.*conflicts.*application_a.*scope 'nml_run'"
+    ):
         codegen.render_fortran(schema, file_name="nml_run.f90")
 
 
@@ -948,7 +950,7 @@ def test_generate_fortran_rejects_local_and_imported_type_name_collision() -> No
         },
     }
 
-    with pytest.raises(ValueError, match="imported symbol 'status' is provided by both"):
+    with pytest.raises(ValueError, match="application_types.*conflicts.*nml_helper"):
         codegen.render_fortran(schema, file_name="nml_run.f90")
 
 
@@ -1079,7 +1081,7 @@ def test_generate_fortran_rejects_outer_type_procedure_scope_collisions() -> Non
 def test_generate_fortran_rejects_property_colliding_with_configured_import() -> None:
     codegen = _import_codegen_module()
 
-    with pytest.raises(ValueError, match="property 'n' conflicts with unqualified imported symbol"):
+    with pytest.raises(ValueError, match="property 'n' conflicts with imported symbol"):
         codegen.render_fortran(
             {
                 "x-fortran-namelist": "run",
@@ -1098,7 +1100,7 @@ def test_generate_fortran_rejects_property_colliding_with_configured_import() ->
         )
 
     with pytest.raises(
-        ValueError, match="property 'i4' conflicts with unqualified imported symbol"
+        ValueError, match="property 'i4' conflicts with imported symbol"
     ):
         codegen.render_fortran(
             {
@@ -1127,7 +1129,7 @@ def test_generate_fortran_rejects_iso_c_binding_import_collision() -> None:
         },
     }
 
-    with pytest.raises(ValueError, match="imported symbol 'c_ptr' is provided by both"):
+    with pytest.raises(ValueError, match="application_types.*conflicts.*iso_c_binding"):
         codegen.render_fortran(
             schema,
             file_name="nml_run.f90",
@@ -1199,7 +1201,9 @@ def test_generate_fortran_rejects_derived_type_root_symbol_collision() -> None:
         },
     }
 
-    with pytest.raises(ValueError, match="derived type name conflicts"):
+    with pytest.raises(
+        ValueError, match="property 'period' conflicts with imported symbol 'period'"
+    ):
         codegen.render_fortran(schema, file_name="nml_run.f90")
 
 

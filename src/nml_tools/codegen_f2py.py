@@ -11,6 +11,7 @@ from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from ._fortran_scope import FortranScope
 from ._utils import (
     normalize_constant_values,
     normalize_runtime_dimensions,
@@ -391,28 +392,24 @@ def build_f2py_namelist_spec(
     array_dimensions: list[F2pyArrayDimensionSpec] = []
     derived_type_names: list[str] = []
 
-    wrapper_reserved_names = {
-        "associated",
-        "c_intptr_t",
-        "errmsg",
-        "handle",
-        "len",
-        "nml__errmsg",
-        "nml__handle",
-        "nml__obj",
-        "nml__status",
-        "size",
-        "status",
-        "this",
-    }
     namelist_name = cast("str", context["namelist_name"])
     module_name = cast("str", context["module_name"])
-    wrapper_reserved_names.update(
-        {
-            cast("str", context["type_name"]).lower(),
-            f"{module_name}_resolve_handle".lower(),
-        }
-    )
+    wrapper_scope = FortranScope(f"f2py_{namelist_name}")
+    wrapper_scope.import_symbol("c_intptr_t", "iso_c_binding")
+    for symbol in (cast("str", context["type_name"]), f"{module_name}_resolve_handle"):
+        wrapper_scope.import_symbol(symbol, module_name)
+    for kind_import in cast("list[str]", context["kind_imports"]):
+        wrapper_scope.import_symbol(kind_import, cast("str", context["kind_module"]))
+    for field in fields:
+        derived = _derived_schema(_normalized_properties(schema)[field.name])
+        if derived is not None:
+            type_name = _derived_type_name(derived)
+            if type_name.lower() not in {name.lower() for name in derived_type_names}:
+                derived_type_names.append(type_name)
+            wrapper_scope.import_symbol(type_name, module_name)
+    if derived_type_names:
+        for symbol in ("NML_OK", "NML_ERR_INVALID_INDEX"):
+            wrapper_scope.import_symbol(symbol, helper_module)
     wrapper_procedure_names = {
         f"{namelist_name}_{suffix}".lower()
         for suffix in (
@@ -423,13 +420,20 @@ def build_f2py_namelist_spec(
             "is_valid_wrapper",
         )
     }
-    wrapper_reserved_names.update(wrapper_procedure_names)
-    for kind_import in cast("list[str]", context["kind_imports"]):
-        kind_name = kind_import.split("=>", maxsplit=1)[0].strip().lower()
-        if kind_name in wrapper_procedure_names:
-            raise ValueError(
-                f"kind import '{kind_name}' conflicts with generated f2py wrapper procedure"
-            )
+    for procedure in wrapper_procedure_names:
+        if procedure.endswith("set_dims_wrapper") and not context["runtime_dimensions"]:
+            continue
+        wrapper_scope.declare(
+            procedure, category="procedure", identity=("procedure", procedure),
+            source=f"generated f2py wrapper procedure '{procedure}'",
+        )
+    procedure_scope = wrapper_scope.child(f"{namelist_name}_wrapper arguments")
+    for symbol in ("nml__errmsg", "nml__handle", "nml__obj", "nml__status"):
+        procedure_scope.declare(symbol, category="state", identity=("state", symbol),
+                                source=f"generated wrapper state '{symbol}'")
+    wrapper_reserved_names = procedure_scope.names | {
+        "associated", "errmsg", "handle", "len", "size", "status", "this",
+    }
     field_abi_names: dict[str, str] = {}
     field_names_in_use = set(wrapper_reserved_names)
     for field in fields:
@@ -464,15 +468,6 @@ def build_f2py_namelist_spec(
                     argument_names_in_use.add(generated_dim_name.lower())
                     dim_names.append(generated_dim_name)
             derived_type_name = _derived_type_name(derived)
-            if derived_type_name.lower() in wrapper_procedure_names:
-                raise ValueError(
-                    f"derived type '{derived_type_name}' conflicts with "
-                    "generated f2py wrapper procedure"
-                )
-            if derived_type_name.lower() not in {
-                name.lower() for name in derived_type_names
-            }:
-                derived_type_names.append(derived_type_name)
             leaves = _f2py_derived_leaves(
                 field.name,
                 derived,

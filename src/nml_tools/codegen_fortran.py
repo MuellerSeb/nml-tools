@@ -9,8 +9,10 @@ from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from ._fortran_scope import FortranScope
 from ._utils import (
     FORTRAN_IDENTIFIER,
+    GENERATED_HELPER_IDENTIFIERS,
     normalize_constant_values,
     normalize_runtime_dimensions,
     reject_constant_dimension_overlap,
@@ -227,19 +229,38 @@ def render_helper(
     helper_kind_ids = [
         kind_id for type_spec in local_types for kind_id in type_spec.kind_ids
     ]
+    kind_imports = _resolve_kind_imports(
+        helper_kind_ids, kind_map=kind_map, kind_allowlist=kind_allowlist
+    )
+    scope = FortranScope(module_name)
+    scope.declare(module_name, category="module", identity=("module", module_name.lower()),
+                  source=f"helper module '{module_name}'")
+    for name in (*sorted(GENERATED_HELPER_IDENTIFIERS), "to__lower", "idx__check"):
+        scope.declare(name, category="helper", identity=("helper", name),
+                      source=f"generated helper symbol '{name}'")
+    for symbol in kind_imports:
+        scope.import_symbol(symbol, kind_module or "iso_fortran_env", category="kind")
+    for constant in constants or []:
+        validate_generated_fortran_identifier(constant.name, label=f"constant '{constant.name}'")
+        scope.declare(constant.name, category="constant",
+                      identity=("constant", constant.name.lower(),
+                                constant.type_spec, constant.value),
+                      source=f"helper constant '{constant.name}'")
+    for derived in local_types:
+        validate_generated_fortran_identifier(derived.type_name, label="'x-fortran-type'")
+        scope.declare(derived.type_name, category="type", identity=derived.identity,
+                      source=f"local derived type '{derived.type_name}'")
     return _TEMPLATE_ENV.get_template("nml_helper.f90.j2").render(
         {
             "file_name": file_name,
             "module_name": module_name,
             "len_buf": len_buf,
-            "constants": constants or [],
-            "local_derived_types": local_types,
+            "constants": list({entry.name.lower(): entry for entry in constants or []}.values()),
+            "local_derived_types": list({
+                entry.type_name.lower(): entry for entry in local_types
+            }.values()),
             "kind_module": kind_module or "iso_fortran_env",
-            "kind_imports": _resolve_kind_imports(
-                helper_kind_ids,
-                kind_map=kind_map,
-                kind_allowlist=kind_allowlist,
-            ),
+            "kind_imports": kind_imports,
             "module_doc": module_doc,
             "helper_header": helper_header,
         }
@@ -397,7 +418,6 @@ def _build_context(
     bounds_functions: list[dict[str, Any]] = []
     bounds_checks: list[dict[str, Any]] = []
     derived_type_imports: list[dict[str, str]] = []
-    derived_type_scope_names: set[str] = set()
     derived_init_type_fields: list[dict[str, Any]] = []
     derived_presence_blocks: list[str] = []
     static_constants = normalize_constant_values(constants)
@@ -598,7 +618,6 @@ def _build_context(
             requires_input = requirement.requires_input
             if derived is not None:
                 derived_type_name = _derived_type_name(derived)
-                derived_type_scope_names.add(derived_type_name.lower())
                 module = derived.get("x-fortran-module")
                 if module is None:
                     _add_helper_import(derived_type_name)
@@ -1518,44 +1537,6 @@ def _build_context(
     runtime_dimensions.sort(
         key=lambda entry: runtime_dimension_order[str(entry["name"])]
     )
-    root_scope_names = set(property_name_map)
-    type_name_collisions = sorted(derived_type_scope_names & root_scope_names)
-    if type_name_collisions:
-        raise ValueError(
-            "derived type name conflicts with a root property: "
-            + ", ".join(type_name_collisions)
-        )
-    if type_name.lower() in property_name_map:
-        raise ValueError(
-            f"property '{property_name_map[type_name.lower()]}' conflicts with "
-            f"generated outer type '{type_name}'"
-        )
-    set_name = f"{module_name}_set"
-    if set_name.lower() in property_name_map:
-        raise ValueError(
-            f"property '{property_name_map[set_name.lower()]}' conflicts with "
-            f"generated set procedure '{set_name}'"
-        )
-    if derived_init_type_fields:
-        init_type_name = f"{module_name}_init_type"
-        derived_field_names = {entry["name"].lower() for entry in derived_init_type_fields}
-        if init_type_name.lower() in derived_field_names:
-            raise ValueError(
-                f"property '{property_name_map[init_type_name.lower()]}' conflicts with "
-                f"generated init_type procedure '{init_type_name}'"
-            )
-    if runtime_dimension_values:
-        if type_name.lower() in runtime_dimension_values:
-            raise ValueError(
-                f"runtime dimension '{type_name}' conflicts with "
-                f"generated outer type '{type_name}'"
-            )
-        set_dims_name = f"{module_name}_set_dims"
-        if set_dims_name.lower() in runtime_dimension_values:
-            raise ValueError(
-                f"runtime dimension '{set_dims_name}' conflicts with "
-                f"generated set_dims procedure '{set_dims_name}'"
-            )
     required_flex_names = {entry["name"] for entry in flex_arrays if entry["required"]}
     required_input_names = [field.name for field in fields if field.requires_input]
     required_scalar_validations: list[str] = []
@@ -1644,35 +1625,22 @@ def _build_context(
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
     )
-    imported_symbol_owners: dict[str, str] = {}
-
-    def _register_imported_symbol(symbol: str, module: str) -> None:
-        local_name = symbol.split("=>", maxsplit=1)[0].strip()
-        canonical_name = local_name.lower()
-        canonical_module = module.lower()
-        existing_module = imported_symbol_owners.get(canonical_name)
-        if existing_module is not None and existing_module != canonical_module:
-            raise ValueError(
-                f"imported symbol '{local_name}' is provided by both "
-                f"'{existing_module}' and '{canonical_module}'"
-            )
-        imported_symbol_owners[canonical_name] = canonical_module
-
+    module_scope = FortranScope(module_name)
     for symbol in helper_imports:
-        _register_imported_symbol(symbol, helper_module)
+        module_scope.import_symbol(symbol, helper_module)
     for symbol in resolved_kind_imports:
-        _register_imported_symbol(symbol, resolved_kind_module)
+        module_scope.import_symbol(symbol, resolved_kind_module)
     if f2py_handle_helpers:
         for symbol in ("c_f_pointer", "c_intptr_t", "c_null_ptr", "c_ptr"):
-            _register_imported_symbol(symbol, "iso_c_binding")
+            module_scope.import_symbol(symbol, "iso_c_binding")
+    if requires_ieee:
+        for symbol in ("ieee_value", "ieee_quiet_nan", "ieee_is_nan"):
+            module_scope.import_symbol(f"nml__{symbol} => {symbol}", "ieee_arithmetic")
     for entry in derived_type_imports:
-        _register_imported_symbol(str(entry["type_name"]), str(entry["module"]))
-    for property_name, display_name in property_name_map.items():
-        if property_name in imported_symbol_owners:
-            raise ValueError(
-                f"property '{display_name}' conflicts with unqualified imported symbol "
-                f"'{display_name}'"
-            )
+        module_scope.import_symbol(str(entry["type_name"]), str(entry["module"]))
+    dependencies = module_scope.child(module_name)
+    module_scope.declare(module_name, category="module", identity=("module", module_name.lower()),
+                         source=f"generated module '{module_name}'")
     generated_module_symbols = [
         type_name,
         data_type_name,
@@ -1681,6 +1649,7 @@ def _build_context(
         f"{module_name}_set",
         f"{module_name}_is_set",
         f"{module_name}_is_valid",
+        f"{module_name}_read__from_file",
     ]
     if runtime_dimensions:
         generated_module_symbols.extend([dims_type_name, f"{module_name}_set_dims"])
@@ -1691,10 +1660,66 @@ def _build_context(
     if f2py_handle_helpers:
         generated_module_symbols.append(f"{module_name}_resolve_handle")
     for symbol_name in generated_module_symbols:
-        if symbol_name.lower() in imported_symbol_owners:
-            raise ValueError(
-                f"generated module symbol '{symbol_name}' conflicts with an imported symbol"
-            )
+        module_scope.declare(
+            symbol_name, category="generated", identity=("generated", symbol_name),
+            source=f"generated module symbol '{symbol_name}'",
+        )
+    for constraint in enum_functions + bounds_functions:
+        symbol_name = str(constraint["func_name"])
+        module_scope.declare(
+            symbol_name, category="procedure", identity=("constraint", symbol_name),
+            source=f"generated constraint procedure '{symbol_name}'",
+        )
+    for declaration in default_parameters + enum_parameters + bounds_parameters:
+        # These declarations are produced by this generator, not parsed user source.
+        symbol_name = declaration.split("::", maxsplit=1)[1].strip().split("=", 1)[0]
+        symbol_name = symbol_name.split("(", 1)[0].strip()
+        module_scope.declare(
+            symbol_name, category="parameter", identity=("parameter", symbol_name),
+            source=f"generated parameter '{symbol_name}'",
+        )
+
+    # A procedure may shadow unrelated host procedures, but not the imports/type
+    # its declarations use or its own name. Schema-spelled reader locals also
+    # share a scope with the flat namelist group.
+    dependencies.declare(type_name, category="type", identity=("generated", type_name),
+                         source=f"generated outer type '{type_name}'")
+
+    def validate_procedure(
+        suffix: str, arguments: list[tuple[str, str]], *, reader: bool = False
+    ) -> None:
+        procedure = f"{module_name}_{suffix}"
+        scope = dependencies.child(procedure, names=(
+            {type_name.lower()} | {symbol.lower() for symbol in helper_imports}
+            if suffix == "set_dims" else None
+        ))
+        scope.declare(procedure, category="procedure", identity=("procedure", procedure),
+                      source=f"generated {suffix} procedure '{procedure}'")
+        if reader:
+            scope.declare(str(namelist_name), category="namelist",
+                          identity=("group", str(namelist_name)),
+                          source=f"namelist group '{namelist_name}'")
+        for name, source in arguments:
+            scope.declare(name, category="argument", identity=("argument", name.lower()),
+                          source=source)
+
+    properties_in_scope = [
+        (name, f"property '{display_name}'") for name, display_name in property_name_map.items()
+    ]
+    validate_procedure("set", properties_in_scope)
+    validate_procedure("read__from_file", properties_in_scope, reader=True)
+    validate_procedure("from_file", [("file", "public dummy 'file'")])
+    validate_procedure("is_set", [("name", "public dummy 'name'"), ("idx", "public dummy 'idx'")])
+    if flex_arrays:
+        validate_procedure("filled_shape", [(name, f"public dummy '{name}'")
+                                           for name in ("name", "filled")])
+    if derived_init_type_fields:
+        validate_procedure("init_type", [(entry["name"], f"property '{entry['name']}'")
+                                         for entry in derived_init_type_fields])
+    if runtime_dimensions:
+        validate_procedure("set_dims", [(str(entry["name"]),
+                                         f"runtime dimension '{entry['name']}'")
+                                        for entry in runtime_dimensions])
 
     context = {
         "module_name": module_name,

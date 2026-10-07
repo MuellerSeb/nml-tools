@@ -866,7 +866,7 @@ def test_f2py_rejects_kind_import_matching_wrapper_procedure() -> None:
         },
     }
 
-    with pytest.raises(ValueError, match="kind import 'run_set_wrapper' conflicts"):
+    with pytest.raises(ValueError, match="wrapper procedure 'run_set_wrapper' conflicts.*int32"):
         codegen.build_f2py_namelist_spec(
             schema,
             kind_map={"run_set_wrapper": "int32"},
@@ -888,7 +888,7 @@ def test_f2py_rejects_derived_type_matching_wrapper_procedure() -> None:
         },
     }
 
-    with pytest.raises(ValueError, match="derived type 'run_set_wrapper' conflicts"):
+    with pytest.raises(ValueError, match="wrapper procedure 'run_set_wrapper' conflicts.*nml_run"):
         codegen.build_f2py_namelist_spec(schema)
 
 
