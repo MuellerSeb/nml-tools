@@ -139,7 +139,7 @@ def infer_runtime_dimensions(
                 f"dimension '{name}' source '{resolved.namelist}%{resolved.property}' "
                 "must be positive",
                 source=parsed.source,
-                span=state.source_span or group.span,
+                span=state.value_source_span or group.span,
             )
         dimensions[name] = state.value
     return dimensions

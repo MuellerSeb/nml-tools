@@ -81,6 +81,19 @@ def test_invalid_sources_report_locations(assignment: str) -> None:
         infer(f"&settings {assignment} /")
 
 
+@pytest.mark.parametrize(
+    ("body", "value_line"),
+    [
+        ("count=-1\ncount=,", 2),
+        ("count=0\ncount=1*", 2),
+        ("count=-2\ncount=-1\ncount=,", 3),
+    ],
+)
+def test_retained_invalid_source_reports_last_explicit_value(body: str, value_line: int) -> None:
+    with pytest.raises(ValueError, match=rf"settings\.nml:{value_line}:7:.*must be positive"):
+        infer(f"&settings\n{body}\n/")
+
+
 def test_overrides_skip_source_extraction_and_ambiguity() -> None:
     assert infer("&settings count=0 / &settings count='bad' /", overrides={"N_VALUES": 4}) == {
         "n_values": 4
