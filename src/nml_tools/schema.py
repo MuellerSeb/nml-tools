@@ -242,6 +242,9 @@ class SchemaResolver:
                 "define 'x-fortran-type' inline or use '$ref'"
             )
         _validate_effective_node(result, position=position)
+        if position == "root":
+            # Root references can supply the group and properties separately.
+            _validate_user_identifiers(result, document, pointer)
         return result
 
     def _resolve_plain(
@@ -512,6 +515,11 @@ def _validate_user_identifiers(raw: Any, document: _Document, pointer: str) -> N
                     try:
                         if namelist_name is not None:
                             validate_namelist_identifier(name, label=f"property '{name}'")
+                            if name.lower() == namelist_name.lower():
+                                raise ValueError(
+                                    f"property '{name}' conflicts with "
+                                    f"namelist group '{namelist_name}'"
+                                )
                         else:
                             validate_derived_component_identifier(
                                 name, label=f"property '{name}'"

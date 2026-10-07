@@ -85,7 +85,9 @@ constants, `nml_file_t`, `nml_line_buffer`, `nml_open`, `nml_find`, and
 `nml_close` in unqualified scopes. Additional conflicts depend on the schema
 and configuration and are checked case-insensitively before rendering:
 
-- A schema-spelled root property cannot equal its namelist group name.
+- A schema-spelled root property cannot equal its namelist group name. Schema
+  loading enforces this for every output mode, including documentation/templates,
+  and after root `$ref` composition. Qualified components may match the group.
 - Native setter/reader arguments cannot shadow imported constants, kind
   aliases, or derived types needed in their scope, the outer object type,
   or their own generated procedure name.

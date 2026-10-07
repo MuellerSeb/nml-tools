@@ -1464,6 +1464,42 @@ def test_load_kind_settings_rejects_generated_dependency_alias() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("command", "output_kind"),
+    [
+        ("generate", "docs"),
+        ("gen-markdown", "docs"),
+        ("check", "docs"),
+        ("generate", "templates"),
+        ("gen-template", "templates"),
+        ("check", "templates"),
+    ],
+)
+def test_helper_free_outputs_reject_property_matching_namelist_group(
+    tmp_path: Path, command: str, output_kind: str
+) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            "x-fortran-namelist: Run\ntype: object\nproperties:\n  rUN:\n    type: integer\n",
+            encoding="utf-8",
+        )
+        outputs = (
+            "doc_path = 'out/run.md'\n"
+            if output_kind == "docs"
+            else "\n[[templates]]\npath = 'out/run.nml'\nnamelists = ['Run']\n"
+        )
+        Path("nml-config.toml").write_text(
+            "[kinds]\nmodule = 'iso_fortran_env'\n\n[[namelists]]\n"
+            "schema = 'schema.yml'\n" + outputs,
+            encoding="utf-8",
+        )
+        result = runner.invoke(cli_module.cli, [command])
+        assert result.exit_code != 0
+        assert "property 'rUN' conflicts with namelist group 'Run'" in result.output
+        assert not Path("out").exists()
+
+
 def test_generate_command_resolves_definitions_for_all_outputs(tmp_path: Path) -> None:
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path):

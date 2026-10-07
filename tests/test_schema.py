@@ -975,6 +975,54 @@ def test_schema_rejects_invalid_fortran_namelist_names(
         )
 
 
+@pytest.mark.parametrize("property_name", ["Run", "rUN"])
+def test_schema_rejects_root_property_matching_group(property_name: str) -> None:
+    with pytest.raises(ValueError, match=f"property '{property_name}'.*namelist group 'Run'"):
+        resolve_schema(
+            {
+                "type": "object",
+                "x-fortran-namelist": "Run",
+                "properties": {property_name: {"type": "integer"}},
+            }
+        )
+
+
+@pytest.mark.parametrize("inherited", ["property", "group"])
+def test_schema_rejects_group_property_collision_after_root_reference(
+    tmp_path: Path, inherited: str
+) -> None:
+    base = {"type": "object"}
+    schema = {"$ref": "base.json"}
+    if inherited == "property":
+        base["properties"] = {"rUN": {"type": "integer"}}
+        schema["x-fortran-namelist"] = "Run"
+    else:
+        base["x-fortran-namelist"] = "Run"
+        schema["properties"] = {"rUN": {"type": "integer"}}
+    (tmp_path / "base.json").write_text(json.dumps(base), encoding="utf-8")
+    source = tmp_path / "schema.json"
+    source.write_text(json.dumps(schema), encoding="utf-8")
+    with pytest.raises(ValueError, match="property 'rUN'.*namelist group 'Run'"):
+        load_schema(source)
+
+
+def test_schema_allows_qualified_component_matching_group() -> None:
+    schema = resolve_schema(
+        {
+            "type": "object",
+            "x-fortran-namelist": "Run",
+            "properties": {
+                "value": {
+                    "type": "object",
+                    "x-fortran-type": "value_t",
+                    "properties": {"rUN": {"type": "integer"}},
+                }
+            },
+        }
+    )
+    assert "%run" in render_fortran(schema, file_name="run.f90")
+
+
 @pytest.mark.parametrize(
     ("property_schema", "match"),
     [
