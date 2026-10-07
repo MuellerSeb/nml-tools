@@ -1,0 +1,10 @@
+title: Data values
+x-fortran-namelist: data
+type: object
+properties:
+  values:
+    type: array
+    items:
+      type: integer
+    x-fortran-shape: [n_values]
+required: [values]

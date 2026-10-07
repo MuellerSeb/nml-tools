@@ -497,6 +497,11 @@ doc = "String buffer length."
 Named runtime array dimension defaults.
 
 - Each entry is a table with positive integer `default` and optional `doc`.
+- Optional `source = { namelist = "...", property = "..." }` identifies the
+  intrinsic integer scalar supplying the dimension during Python/CLI loading.
+  `property` defaults to the dimension name. References are resolved against
+  configured schemas case-insensitively; component paths and array elements
+  are unsupported.
 - Names must be unique across `[constants]` and `[dimensions]`.
 - Names must not contain `__`; nml-tools reserves double underscores for
   generated helper identifiers.
@@ -519,6 +524,27 @@ Example:
 default = 4
 doc = "Maximum number of iterations."
 ```
+
+With a source property:
+
+```toml
+[dimensions.n_values]
+default = 2
+source = { namelist = "settings", property = "count" }
+```
+
+Loading resolves an explicit caller or `--dimensions` override first, then an
+explicit source assignment, then the dimension default. A schema default for
+the source property does not supply a dimension. Missing or null-only source
+assignments use the dimension default; nulls after an explicit assignment retain
+that assignment. Inferred values must be positive and satisfy the source
+property's schema constraints. For dimensions without overrides, repeated
+source namelist groups are ambiguous even if they supply equal values.
+
+Sources are inferred before full schema evaluation so runtime-sized arrays use
+the actual extents. This metadata does not change generated Fortran readers,
+Python wrappers, or generated outputs; generation still uses configured
+dimension defaults.
 
 ### [kinds]
 
@@ -673,6 +699,36 @@ default_file = "run.nml"
 namelists = ["run", "physics"]
 required = ["run"]
 ```
+
+### project_profiles (array)
+
+Optional named sets of file profiles required for a project setup.
+
+- `name` (string): unique, non-empty project profile name.
+- `file_profiles` (non-empty list of strings): existing file profile names.
+- `title` / `description` (string, optional): display and documentation metadata.
+
+Names and references are matched case-insensitively. Unknown references,
+duplicate members, and duplicate project names are rejected. Omission or
+`project_profiles = []` defines no project profiles. File profiles can be shared
+across project profiles, and their `default_file` values remain filename hints.
+
+```toml
+[[project_profiles]]
+name = "standard"
+title = "Standard simulation"
+file_profiles = ["main", "outputs"]
+
+[[project_profiles]]
+name = "minimal"
+file_profiles = ["main"]
+```
+
+All members describe files needed for the selected project setup, each subject
+to its existing file-profile validation rules. These profiles are metadata for
+future tooling: defining them does not select a project, validate files
+together, or change generated outputs. Project profiles impose no dimension
+source uniqueness restriction and are independent of dimension source wiring.
 
 ### templates (array)
 
@@ -845,6 +901,26 @@ nml-tools validate --schema demo.yml \
 array shapes. `--dimensions` supplies runtime array dimensions. Names are
 matched case-insensitively, normalized to lowercase, and must stay unique across
 both sets.
+
+Configured dimension sources are read from the target namelist file. Use one
+optional `--dim-file PATH` to supply additional sources from another namelist
+file:
+
+```bash
+nml-tools validate --config nml-config.toml --profile main \
+  --dim-file settings.nml run.nml
+```
+
+Only the target file undergoes full validation. The dimension file is parsed
+completely, but only configured source entries are evaluated; unrelated groups
+and missing required properties are not fully validated. Sources are resolved
+against all configured schemas, including namelists outside the selected file
+profile. Supplying the target itself as `--dim-file` reads it once.
+
+`--dim-file` requires config, either discovered during config-driven validation
+or supplied explicitly with `--config` alongside `--schema`. It accepts one file;
+use explicit `--dimensions NAME=INT` values when further sources are needed.
+See [the dimension sources example](examples/06_dimension_sources/README.md).
 
 Array assignments use one-based schema bounds and Fortran element order, with
 the first subscript varying fastest. Scalar subscripts and sections are

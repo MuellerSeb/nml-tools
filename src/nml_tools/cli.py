@@ -14,8 +14,9 @@ from click.exceptions import Exit
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
+from ._dimensions import DimensionSource, infer_runtime_dimensions, resolve_dimension_source
 from ._namelist_eval import evaluate_group
-from ._namelist_parser import NamelistSyntaxError, ParsedGroup, parse_namelist
+from ._namelist_parser import NamelistSyntaxError, ParsedFile, ParsedGroup, parse_namelist
 from ._utils import constant_dimension_overlap, validate_user_fortran_identifier
 from ._version import __version__
 from .codegen_f2py import (
@@ -127,6 +128,24 @@ class FileProfile:
     required: list[str]
     title: str | None = None
     description: str | None = None
+
+
+@dataclass(frozen=True)
+class ProjectProfile:
+    """Named set of file profiles required for a project setup."""
+
+    name: str
+    key: str
+    file_profiles: list[str]
+    title: str | None = None
+    description: str | None = None
+
+
+@dataclass(frozen=True)
+class _ConfigMetadata:
+    dimension_sources: dict[str, DimensionSource]
+    file_profiles: dict[str, FileProfile]
+    project_profiles: dict[str, ProjectProfile]
 
 
 def _configure_logging(verbose: int, quiet: int) -> None:
@@ -852,6 +871,93 @@ def _iter_file_profiles(
     return profiles
 
 
+def _iter_project_profiles(
+    config: dict[str, Any],
+    file_profiles: dict[str, FileProfile],
+) -> dict[str, ProjectProfile]:
+    raw_entries = config.get("project_profiles", [])
+    if not isinstance(raw_entries, list):
+        raise click.ClickException("config 'project_profiles' must be a list")
+    profiles: dict[str, ProjectProfile] = {}
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            raise click.ClickException("each project_profiles entry must be a table")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise click.ClickException("project_profiles entry must define non-empty string 'name'")
+        key = name.lower()
+        label = f"project profile '{name}'"
+        if key in profiles:
+            raise click.ClickException(f"{label} duplicates another profile")
+        raw_members = entry.get("file_profiles")
+        if not isinstance(raw_members, list) or not raw_members:
+            raise click.ClickException(f"{label} must define non-empty 'file_profiles'")
+        members: list[str] = []
+        seen: set[str] = set()
+        for member in raw_members:
+            if not isinstance(member, str) or not member.strip():
+                raise click.ClickException(f"{label} 'file_profiles' entries must be strings")
+            member_key = member.lower()
+            if member_key in seen:
+                raise click.ClickException(
+                    f"{label} file profile '{member}' duplicates another name"
+                )
+            if member_key not in file_profiles:
+                raise click.ClickException(f"{label} references unknown file profile '{member}'")
+            seen.add(member_key)
+            members.append(member_key)
+        profiles[key] = ProjectProfile(
+            name=name,
+            key=key,
+            file_profiles=members,
+            title=_optional_string(entry, "title", label=label),
+            description=_optional_string(entry, "description", label=label),
+        )
+    return profiles
+
+
+def _load_dimension_sources(
+    config: dict[str, Any],
+    registry: dict[str, LoadedNamelist],
+) -> dict[str, DimensionSource]:
+    """Retain source metadata separately from generated dimension defaults."""
+    sources: dict[str, DimensionSource] = {}
+    schemas = {key: loaded.schema for key, loaded in registry.items()}
+    for name, entry in (config.get("dimensions") or {}).items():
+        if "source" not in entry:
+            continue
+        raw_source = entry["source"]
+        label = f"config dimension '{name}' source"
+        if not isinstance(raw_source, dict):
+            raise click.ClickException(f"{label} must be a table")
+        namelist = raw_source.get("namelist")
+        prop = raw_source.get("property", name.strip())
+        if not isinstance(namelist, str) or not namelist.strip():
+            raise click.ClickException(f"{label} must define non-empty string 'namelist'")
+        if not isinstance(prop, str) or not prop.strip():
+            raise click.ClickException(f"{label} 'property' must be a non-empty string")
+        try:
+            sources[name.strip().lower()] = resolve_dimension_source(
+                DimensionSource(namelist, prop), schemas
+            )
+        except ValueError as exc:
+            raise click.ClickException(f"{label}: {exc}") from exc
+    return sources
+
+
+def _load_config_metadata(
+    config: dict[str, Any],
+    registry: dict[str, LoadedNamelist],
+) -> _ConfigMetadata:
+    """Validate independent metadata sections after defaults and schemas load."""
+    file_profiles = _iter_file_profiles(config, registry)
+    return _ConfigMetadata(
+        dimension_sources=_load_dimension_sources(config, registry),
+        file_profiles=file_profiles,
+        project_profiles=_iter_project_profiles(config, file_profiles),
+    )
+
+
 def _iter_templates(
     config: dict[str, Any],
     base_dir: Path,
@@ -975,7 +1081,7 @@ def _collect_generated_outputs(
 
     loaded_namelists = _load_namelist_registry(config, base_dir, resolver)
     loaded_by_key = _namelist_registry_by_key(loaded_namelists)
-    profiles = _iter_file_profiles(config, loaded_by_key)
+    profiles = _load_config_metadata(config, loaded_by_key).file_profiles
     logger.debug("Found %d schema entries", len(loaded_namelists))
     loaded_entries: list[dict[str, Any]] = [
         {"entry": loaded.entry, "schema": loaded.schema} for loaded in loaded_namelists
@@ -1346,18 +1452,12 @@ def gen_fortran(config_path: Path | None) -> None:
     kind_module, kind_map, kind_allowlist = _load_kind_settings(config)
     f2cmap_path, f2py_c_types = _load_f2py_settings(config, base_dir)
     resolver = SchemaResolver()
-    entries = _iter_namelists(config, base_dir)
-    logger.info("Found %d schema entries", len(entries))
+    loaded_namelists = _load_namelist_registry(config, base_dir, resolver)
+    _load_config_metadata(config, _namelist_registry_by_key(loaded_namelists))
+    logger.info("Found %d schema entries", len(loaded_namelists))
     loaded_entries: list[dict[str, Any]] = []
-    for entry in entries:
-        schema_path = entry["schema"]
-        if schema_path is None:
-            raise click.ClickException("namelists entry missing schema path")
-        try:
-            logger.info("Loading schema %s", schema_path)
-            schema = load_schema(schema_path, resolver=resolver)
-        except (FileNotFoundError, ValueError) as exc:
-            raise click.ClickException(str(exc)) from exc
+    for loaded in loaded_namelists:
+        entry, schema = loaded.entry, loaded.schema
         loaded_entries.append({"entry": entry, "schema": schema})
         mod_path = entry["mod_path"]
         if mod_path is None:
@@ -1419,6 +1519,18 @@ def gen_fortran(config_path: Path | None) -> None:
     )
 
 
+def _read_namelist(path: Path) -> ParsedFile:
+    try:
+        logger.info("Reading namelist %s", path)
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise click.ClickException(f"failed to read namelist: {exc}") from exc
+    try:
+        return parse_namelist(text, source=str(path))
+    except NamelistSyntaxError as exc:
+        raise click.ClickException(f"failed to parse namelist: {exc}") from exc
+
+
 @cli.command("validate", context_settings=_CONTEXT_SETTINGS)
 @click.option(
     "--config",
@@ -1436,6 +1548,11 @@ def gen_fortran(config_path: Path | None) -> None:
     "--input",
     "input_option",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--dim-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Additional namelist file supplying configured dimension sources.",
 )
 @click.option(
     "--profile",
@@ -1471,6 +1588,7 @@ def validate(
     constant_args: tuple[tuple[str, int], ...],
     dimension_args: tuple[tuple[str, int], ...],
     input_path: Path | None,
+    dim_file: Path | None = None,
 ) -> None:
     """Validate a namelist file against schema definitions."""
     if input_option is not None and input_path is not None:
@@ -1478,10 +1596,14 @@ def validate(
     input_path = input_option or input_path
     if input_path is None:
         raise click.ClickException("input path is required")
+    if dim_file is not None and schema_paths and config_path is None:
+        raise click.ClickException("--dim-file requires config with dimension source metadata")
     constants = _parse_cli_constants(constant_args)
     dimension_overrides = _parse_cli_dimensions(dimension_args)
     dimensions: dict[str, int] = {}
     schemas: list[dict[str, Any]] = []
+    source_schemas: dict[str, dict[str, Any]] = {}
+    metadata = _ConfigMetadata({}, {}, {})
     required_namelist_keys: set[str] | None
     resolver = SchemaResolver()
 
@@ -1494,9 +1616,13 @@ def validate(
             cfg_constants, _ = _load_constants(config)
             dimensions, _ = _load_dimensions(config, cfg_constants)
             constants = {**cfg_constants, **constants}
-            dimensions = {**dimensions, **dimension_overrides}
-        else:
-            dimensions = dimension_overrides
+            loaded_by_key = (
+                _namelist_registry_by_key(
+                    _load_namelist_registry(config, config_path.parent, resolver)
+                ) if "namelists" in config else {}
+            )
+            metadata = _load_config_metadata(config, loaded_by_key)
+            source_schemas = {key: loaded.schema for key, loaded in loaded_by_key.items()}
         for schema_file in schema_paths:
             try:
                 logger.info("Loading schema %s", schema_file)
@@ -1507,16 +1633,15 @@ def validate(
     else:
         config, config_path = _load_config_checked(config_path)
         logger.info("Loading config from %s", config_path)
-        base_dir = config_path.parent
         cfg_constants, _ = _load_constants(config)
         dimensions, _ = _load_dimensions(config, cfg_constants)
         constants = {**cfg_constants, **constants}
-        dimensions = {**dimensions, **dimension_overrides}
-        loaded_namelists = _load_namelist_registry(config, base_dir, resolver)
+        loaded_namelists = _load_namelist_registry(config, config_path.parent, resolver)
         loaded_by_key = _namelist_registry_by_key(loaded_namelists)
+        metadata = _load_config_metadata(config, loaded_by_key)
+        source_schemas = {key: loaded.schema for key, loaded in loaded_by_key.items()}
         if profile_name is not None:
-            profiles = _iter_file_profiles(config, loaded_by_key)
-            profile = profiles.get(profile_name.lower())
+            profile = metadata.file_profiles.get(profile_name.lower())
             if profile is None:
                 raise click.ClickException(f"unknown file profile '{profile_name}'")
             loaded_namelists = [loaded_by_key[key] for key in profile.namelists]
@@ -1528,17 +1653,23 @@ def validate(
 
     if not schemas:
         raise click.ClickException("no schemas provided for validation")
-    _reject_constant_dimension_overlap(constants, dimensions)
+    _reject_constant_dimension_overlap(constants, {**dimensions, **dimension_overrides})
 
+    parsed_file = _read_namelist(input_path)
+    parsed_inputs = [parsed_file]
+    if dim_file is not None and dim_file.resolve() != input_path.resolve():
+        parsed_inputs.append(_read_namelist(dim_file))
     try:
-        logger.info("Reading namelist %s", input_path)
-        namelist_text = input_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError) as exc:
-        raise click.ClickException(f"failed to read namelist: {exc}") from exc
-    try:
-        parsed_file = parse_namelist(namelist_text, source=str(input_path))
-    except NamelistSyntaxError as exc:
-        raise click.ClickException(f"failed to parse namelist: {exc}") from exc
+        dimensions = infer_runtime_dimensions(
+            parsed_inputs,
+            sources=metadata.dimension_sources,
+            schemas=source_schemas,
+            defaults=dimensions,
+            overrides=dimension_overrides,
+            constants=constants,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     file_entries: dict[str, tuple[str, ParsedGroup]] = {}
     for group in parsed_file.groups:
@@ -1601,18 +1732,12 @@ def gen_markdown(config_path: Path | None) -> None:
     _, md_doxygen_id_from_name, md_add_toc_statement, _ = _load_documentation_settings(
         config
     )
-    entries = _iter_namelists(config, base_dir)
     resolver = SchemaResolver()
-    logger.info("Found %d schema entries", len(entries))
-    for entry in entries:
-        schema_path = entry["schema"]
-        if schema_path is None:
-            raise click.ClickException("namelists entry missing schema path")
-        try:
-            logger.info("Loading schema %s", schema_path)
-            schema = load_schema(schema_path, resolver=resolver)
-        except (FileNotFoundError, ValueError) as exc:
-            raise click.ClickException(str(exc)) from exc
+    loaded_namelists = _load_namelist_registry(config, base_dir, resolver)
+    _load_config_metadata(config, _namelist_registry_by_key(loaded_namelists))
+    logger.info("Found %d schema entries", len(loaded_namelists))
+    for loaded in loaded_namelists:
+        entry, schema = loaded.entry, loaded.schema
         doc_path = entry["doc_path"]
         if doc_path is None:
             continue
@@ -1649,7 +1774,7 @@ def gen_template(config_path: Path | None) -> None:
     resolver = SchemaResolver()
     loaded_namelists = _load_namelist_registry(config, base_dir, resolver)
     loaded_by_key = _namelist_registry_by_key(loaded_namelists)
-    profiles = _iter_file_profiles(config, loaded_by_key)
+    profiles = _load_config_metadata(config, loaded_by_key).file_profiles
     templates = _iter_templates(config, base_dir, loaded_by_key, profiles)
     if not templates:
         raise click.ClickException("config must define non-empty 'templates'")
