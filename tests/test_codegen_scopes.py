@@ -121,7 +121,9 @@ def test_helper_state_uses_reserved_internal_names() -> None:
 
 
 def test_reader_group_cannot_shadow_public_error_dummy() -> None:
-    with pytest.raises(ValueError, match="namelist group 'ErrMsg'.*procedure state 'errmsg'"):
+    with pytest.raises(
+        ValueError, match="'x-fortran-namelist'.*reserved for the generated Fortran API"
+    ):
         render_fortran(
             {
                 "type": "object",
@@ -130,3 +132,44 @@ def test_reader_group_cannot_shadow_public_error_dummy() -> None:
             },
             file_name="errmsg.f90",
         )
+
+
+@pytest.mark.parametrize("name", ["present", "PrEsEnT", "size", "transfer", "TrAnSfEr"])
+def test_native_generation_rejects_intrinsic_namelist_group_names(name: str) -> None:
+    with pytest.raises(ValueError, match="'x-fortran-namelist'.*reserved as a Fortran intrinsic"):
+        render_fortran(
+            {
+                "type": "object",
+                "x-fortran-namelist": name,
+                "properties": {"value": {"type": "integer"}},
+            },
+            file_name="group.f90",
+        )
+
+
+@pytest.mark.parametrize("name", ["transfer", "TrAnSfEr"])
+@pytest.mark.parametrize("source", ["kind", "derived_type"])
+def test_handle_resolver_rejects_transfer_imports(name: str, source: str) -> None:
+    if source == "kind":
+        schema = {
+            "type": "object",
+            "x-fortran-namelist": "run",
+            "properties": {"value": {"type": "integer", "x-fortran-kind": name}},
+        }
+        options = {"kind_map": {name: "int32"}, "kind_allowlist": {"int32"}}
+    else:
+        schema = {
+            "type": "object",
+            "x-fortran-namelist": "run",
+            "properties": {
+                "value": {
+                    "type": "object",
+                    "x-fortran-type": name,
+                    "x-fortran-module": "application_types",
+                    "properties": {"code": {"type": "integer"}},
+                }
+            },
+        }
+        options = {}
+    with pytest.raises(ValueError, match="reserved as a Fortran intrinsic"):
+        render_fortran(schema, file_name="run.f90", f2py_handle_helpers=True, **options)

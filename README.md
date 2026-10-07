@@ -62,8 +62,8 @@ identifiers and must not contain `__`. Double underscores are reserved for
 generated support names such as `seed__default`, `method__enum_values`, and
 `period__start_year__min`.
 
-Schema properties/components, runtime dimensions, constants, kind aliases,
-and derived-type names must not be `errmsg`
+Namelist group names, schema properties/components, runtime dimensions,
+constants, kind aliases, and derived-type names must not be `errmsg`
 (case-insensitively), because `errmsg=` is reserved as the stable error-output
 keyword on generated procedures. Properties and dimensions may otherwise
 match generated member names such as `set`, `is_valid`, or `is_configured`;
@@ -71,12 +71,12 @@ they occupy separate generated containers.
 
 Generated Fortran calls a small, documented set of intrinsics directly. To
 avoid scope-dependent shadowing, the following names are unavailable
-case-insensitively wherever they are emitted unqualified: root properties,
-runtime dimensions, constants, kind aliases, and derived-type names:
+case-insensitively wherever they are emitted unqualified: namelist group names,
+root properties, runtime dimensions, constants, kind aliases, and derived-type names:
 `present`, `size`, `shape`, `allocated`, `associated`, `trim`, `len`, `any`,
 `all`, `huge`, `reshape`, `achar`, `char`, `iachar`, `ichar`, `index`,
-`len_trim`, and `minval`. Fortran developers should avoid intrinsic names in
-these roles; the generator checks this explicit dependency list, not every
+`len_trim`, `minval`, and `transfer`. Fortran developers should avoid intrinsic
+names in these roles; the generator checks this explicit dependency list, not every
 Fortran intrinsic. Qualified derived components such as `%size` and `%present`
 are allowed, but still follow the identifier, `__`, and `errmsg` rules.
 
@@ -702,7 +702,8 @@ Schema entries to generate per-namelist outputs.
   When present, it must match the schema's `x-fortran-namelist`
   case-insensitively; the schema remains canonical for generated namelist names.
   The schema's `x-fortran-namelist` must be a valid user Fortran identifier, and
-  `__` is reserved for generated internal names.
+  follow the documented intrinsic/helper identifier reservations. `__` is
+  reserved for generated internal names.
 - `schema` (string): schema file path.
 - `mod_path` (string, optional): Fortran module output path.
 - `doc_path` (string, optional): Markdown output path.

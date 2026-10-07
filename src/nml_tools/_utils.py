@@ -27,6 +27,7 @@ GENERATED_INTRINSIC_IDENTIFIERS = frozenset(
         "reshape",
         "shape",
         "size",
+        "transfer",
         "trim",
     }
 )
@@ -73,7 +74,7 @@ def validate_user_fortran_identifier(name: str, *, label: str) -> None:
 
 
 def validate_namelist_identifier(name: str, *, label: str) -> None:
-    """Validate an identifier used for a namelist property or runtime dimension."""
+    """Validate a namelist group, root property, or runtime dimension identifier."""
     validate_user_fortran_identifier(name, label=label)
     validate_generated_fortran_identifier(name, label=label)
 

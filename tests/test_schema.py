@@ -955,6 +955,11 @@ def test_referenced_derived_types_reject_unsupported_v1_layouts(
         ("1run", "valid Fortran identifier"),
         ("run__config", "must not contain '__'"),
         (" run", "valid Fortran identifier"),
+        ("present", "reserved as a Fortran intrinsic"),
+        ("PrEsEnT", "reserved as a Fortran intrinsic"),
+        ("size", "reserved as a Fortran intrinsic"),
+        ("transfer", "reserved as a Fortran intrinsic"),
+        ("TrAnSfEr", "reserved as a Fortran intrinsic"),
     ],
 )
 def test_schema_rejects_invalid_fortran_namelist_names(
@@ -1141,7 +1146,7 @@ def test_schema_rejects_reserved_errmsg_properties(name: str) -> None:
         )
 
 
-@pytest.mark.parametrize("name", ["present", "size"])
+@pytest.mark.parametrize("name", ["present", "size", "transfer"])
 def test_schema_allows_qualified_derived_components_named_after_intrinsics(name: str) -> None:
     schema = resolve_schema(
         {
@@ -1165,7 +1170,7 @@ def test_schema_allows_qualified_derived_components_named_after_intrinsics(name:
     assert f"nml__obj%data%value%{name}" in generated
 
 
-@pytest.mark.parametrize("name", ["present", "SIZE", "NML_OK"])
+@pytest.mark.parametrize("name", ["present", "SIZE", "NML_OK", "transfer", "TrAnSfEr"])
 def test_schema_rejects_generated_dependency_properties(name: str) -> None:
     with pytest.raises(ValueError, match="reserved"):
         resolve_schema(
@@ -1177,7 +1182,7 @@ def test_schema_rejects_generated_dependency_properties(name: str) -> None:
         )
 
 
-@pytest.mark.parametrize("type_name", ["present", "NML_FILE_T", "nml_open"])
+@pytest.mark.parametrize("type_name", ["present", "NML_FILE_T", "nml_open", "transfer", "TrAnSfEr"])
 def test_schema_rejects_generated_dependency_type_names(type_name: str) -> None:
     with pytest.raises(ValueError, match="reserved"):
         resolve_schema(
