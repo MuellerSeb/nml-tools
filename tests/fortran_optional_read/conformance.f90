@@ -28,12 +28,14 @@ program conformance
 
   status = required%from_file(join_path(root, "other.nml"), errmsg)
   call expect_status(status, NML_ERR_NML_NOT_FOUND, "required missing group")
+  if (index(errmsg, "namelist not found:") == 0) error stop "cleanup lost missing-group message"
 
   status = optional%from_file(join_path(root, "does-not-exist.nml"), errmsg)
   call expect_status(status, NML_ERR_FILE_NOT_FOUND, "missing file")
 
   status = optional%from_file(join_path(root, "malformed.nml"), errmsg)
   call expect_status(status, NML_ERR_READ, "malformed group")
+  if (len_trim(errmsg) == 0) error stop "cleanup lost read error message"
 
 contains
 

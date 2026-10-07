@@ -699,7 +699,7 @@ def test_generate_fortran_emits_bounds_helpers(tmp_path: Path) -> None:
     assert "elemental logical function tolerance__in_bounds" in generated
     assert "elemental logical function counts__in_bounds" in generated
     assert (
-        "all(counts__in_bounds(nml__obj%data%counts, allow_missing=.true.))"
+        "all(counts__in_bounds(nml__obj%data%counts, nml__allow_missing=.true.))"
         in generated
     )
 

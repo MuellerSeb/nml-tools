@@ -1,12 +1,20 @@
 program conformance
-  use nml_helper, only: NML_ERR_INVALID_INDEX, NML_OK
+  use iso_c_binding, only: c_intptr_t, c_loc
+  use iso_fortran_env, only: int16, int64
+  use nml_helper, only: NML_ERR_BOUNDS, NML_ERR_ENUM, NML_ERR_INVALID_INDEX, NML_OK
   use nml_namespaces, only: nml_namespaces_t
+  use nml_constraints, only: nml_constraints_t
+  use nml_wrapper_status, only: nml_wrapper_status_t
+  use f2py_wrapper_status, only: wrapper_status_set_wrapper, wrapper_status_is_valid_wrapper
 
   implicit none
 
   type(nml_namespaces_t) :: config
+  type(nml_constraints_t) :: constraints
+  type(nml_wrapper_status_t), target :: wrapped
+  integer(c_intptr_t) :: handle
   character(len=256) :: root
-  character(len=256) :: errmsg
+  character(len=1024) :: errmsg
   integer :: source(0:1)
   integer :: status
 
@@ -55,6 +63,27 @@ program conformance
   if (config%data%is_configured /= 27) error stop "lifecycle-named property mismatch"
   status = config%is_valid(errmsg=errmsg)
   call expect_status(status, NML_OK, "validate")
+
+  handle = transfer(c_loc(wrapped), handle)
+  call wrapper_status_set_wrapper(handle, .true., 42, .true., status, errmsg)
+  call expect_status(status, NML_OK, "call wrapper with imported type(status)")
+  if (wrapped%data%state%code /= 42) error stop "wrapper did not set derived leaf"
+  call wrapper_status_is_valid_wrapper(handle, status, errmsg)
+  call expect_status(status, NML_OK, "validate wrapped derived value")
+
+  status = constraints%set(choice=2, limit=0_int16, upper=4_int64, errmsg=errmsg)
+  call expect_status(status, NML_OK, "constraint setter")
+  status = constraints%is_valid(errmsg=errmsg)
+  call expect_status(status, NML_OK, "validate kind aliases matching old constraint locals")
+  constraints%data%choice = 3
+  status = constraints%is_valid(errmsg=errmsg)
+  call expect_status(status, NML_ERR_ENUM, "enum error")
+  if (index(errmsg, "choice") == 0) error stop "enum error message lost field name"
+  constraints%data%choice = 1
+  constraints%data%limit = -1
+  status = constraints%is_valid(errmsg=errmsg)
+  call expect_status(status, NML_ERR_BOUNDS, "bounds error")
+  if (index(errmsg, "limit") == 0) error stop "bounds error message lost field name"
 
 contains
 

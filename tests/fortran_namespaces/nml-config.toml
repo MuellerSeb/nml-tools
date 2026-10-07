@@ -3,8 +3,8 @@ path = "out/nml_helper.f90"
 
 [kinds]
 module = "iso_fortran_env"
-integer = ["int32"]
-map = { i4 = "int32" }
+integer = ["int16", "int32", "int64"]
+map = { i4 = "int32", val = "int32", allow_missing = "int16", in_bounds = "int64" }
 
 [dimensions.status]
 default = 3
@@ -22,3 +22,8 @@ name = "wrapper_status"
 schema = "wrapper_status.yml"
 mod_path = "out/nml_wrapper_status.f90"
 f2py_path = "out/f2py_wrapper_status.f90"
+
+[[namelists]]
+name = "constraints"
+schema = "constraints.yml"
+mod_path = "out/nml_constraints.f90"

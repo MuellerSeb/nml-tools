@@ -766,8 +766,8 @@ def _build_context(
                             )
                         _, enum_missing_condition, _ = _sentinel_expressions(
                             child_info,
-                            var_ref="val",
-                            len_ref="val",
+                            var_ref="nml__val",
+                            len_ref="nml__val",
                         )
                         enum_functions.append(
                             {
@@ -828,8 +828,8 @@ def _build_context(
                             )
                         _, bounds_missing_condition, child_uses_ieee = _sentinel_expressions(
                             child_info,
-                            var_ref="val",
-                            len_ref="val",
+                            var_ref="nml__val",
+                            len_ref="nml__val",
                         )
                         if child_uses_ieee:
                             requires_ieee = True
@@ -1300,8 +1300,8 @@ def _build_context(
                 )
                 _, missing_condition, _ = _sentinel_expressions(
                     enum_type_info,
-                    var_ref="val",
-                    len_ref="val",
+                    var_ref="nml__val",
+                    len_ref="nml__val",
                 )
                 enum_functions.append(
                     {
@@ -1376,8 +1376,8 @@ def _build_context(
                     )
                 _, missing_condition, uses_ieee = _sentinel_expressions(
                     bounds_type_info,
-                    var_ref="val",
-                    len_ref="val",
+                    var_ref="nml__val",
+                    len_ref="nml__val",
                 )
                 if uses_ieee:
                     requires_ieee = True
@@ -1695,6 +1695,11 @@ def _build_context(
         ))
         scope.declare(procedure, category="procedure", identity=("procedure", procedure),
                       source=f"generated {suffix} procedure '{procedure}'")
+        for state_name in ("nml__obj", "nml__status", "errmsg"):
+            scope.declare(
+                state_name, category="state", identity=("state", state_name),
+                source=f"generated procedure state '{state_name}'",
+            )
         if reader:
             scope.declare(str(namelist_name), category="namelist",
                           identity=("group", str(namelist_name)),

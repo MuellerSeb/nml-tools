@@ -83,3 +83,50 @@ def test_qualified_intrinsic_components_and_repeated_imports_remain_supported() 
     native = render_fortran(schema, file_name="run.f90")
     assert native.count("use application_types, only: status") == 1
     assert "%size" in native and "%present" in native
+
+
+@pytest.mark.parametrize("kind", ["val", "allow_missing", "in_enum", "in_bounds"])
+def test_constraint_helpers_do_not_shadow_kind_imports(kind: str) -> None:
+    native = render_fortran(
+        {
+            "type": "object",
+            "x-fortran-namelist": "Run",
+            "properties": {
+                "choice": {
+                    "type": "integer",
+                    "x-fortran-kind": kind,
+                    "enum": [1, 2],
+                    "minimum": 1,
+                }
+            },
+        },
+        file_name="run.f90",
+        kind_map={kind: "int32"},
+        kind_allowlist={"int32"},
+    )
+    assert f"integer({kind}), intent(in) :: nml__val" in native
+    assert "present(nml__allow_missing)" in native
+    assert "result(nml__in_enum)" in native
+    assert "result(nml__in_bounds)" in native
+    assert "if (nml__val == -huge(nml__val))" in native
+
+
+def test_helper_state_uses_reserved_internal_names() -> None:
+    helper = render_helper(file_name="helper.f90")
+    assert "result(nml__status)" in helper
+    assert "iostat=nml__iostat, iomsg=nml__iomsg" in helper
+    assert "this%is_open = (nml__iostat == 0)" in helper
+    assert "function to__lower(nml__string)" in helper
+    assert "function idx__check(nml__idx, nml__extents, nml__field, errmsg)" in helper
+
+
+def test_reader_group_cannot_shadow_public_error_dummy() -> None:
+    with pytest.raises(ValueError, match="namelist group 'ErrMsg'.*procedure state 'errmsg'"):
+        render_fortran(
+            {
+                "type": "object",
+                "x-fortran-namelist": "ErrMsg",
+                "properties": {"value": {"type": "integer"}},
+            },
+            file_name="errmsg.f90",
+        )

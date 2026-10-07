@@ -509,6 +509,10 @@ def test_generate_python_wrapper_normalizes_arrays_and_handles_status(
     with pytest.raises(module.NmlError) as exc:
         cfg.is_valid()
     assert exc.value.status == 11
+    assert exc.value.errmsg == "enum constraint failed"
+    assert module._split_result(("other output", 11, b"original message")) == (
+        11, "original message"
+    )
 
     with pytest.raises(ValueError, match="required argument 'method'"):
         cfg.set(method=None, values=[1.0])

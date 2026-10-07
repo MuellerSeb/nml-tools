@@ -99,22 +99,22 @@ contains
 {% if enum_functions %}
 {% for enum in enum_functions %}
   !> \brief Check whether a value is part of an enum
-  elemental logical function {{ enum.func_name }}(val, allow_missing) result(in_enum)
-    {{ enum.arg_type_spec }}, intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function {{ enum.func_name }}(nml__val, nml__allow_missing) result(nml__in_enum)
+    {{ enum.arg_type_spec }}, intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
         if ({{ enum.missing_condition }}) then
-          in_enum = .true.
+          nml__in_enum = .true.
           return
         end if
       end if
     end if
 {% if enum.use_trim %}
-    in_enum = any(trim(val) == {{ enum.enum_values_name }})
+    nml__in_enum = any(trim(nml__val) == {{ enum.enum_values_name }})
 {% else %}
-    in_enum = any(val == {{ enum.enum_values_name }})
+    nml__in_enum = any(nml__val == {{ enum.enum_values_name }})
 {% endif %}
   end function {{ enum.func_name }}
 
@@ -123,25 +123,25 @@ contains
 {% if bounds_functions %}
 {% for bounds in bounds_functions %}
   !> \brief Check whether a value is within bounds
-  elemental logical function {{ bounds.func_name }}(val, allow_missing) result(in_bounds)
-    {{ bounds.arg_type_spec }}, intent(in) :: val !< value to check
-    logical, intent(in), optional :: allow_missing !< allow sentinel values as valid
+  elemental logical function {{ bounds.func_name }}(nml__val, nml__allow_missing) result(nml__in_bounds)
+    {{ bounds.arg_type_spec }}, intent(in) :: nml__val !< value to check
+    logical, intent(in), optional :: nml__allow_missing !< allow sentinel values as valid
 
-    if (present(allow_missing)) then
-      if (allow_missing) then
+    if (present(nml__allow_missing)) then
+      if (nml__allow_missing) then
         if ({{ bounds.missing_condition }}) then
-          in_bounds = .true.
+          nml__in_bounds = .true.
           return
         end if
       end if
     end if
 
-    in_bounds = .true.
+    nml__in_bounds = .true.
 {% if bounds.has_min %}
-    if (val {% if bounds.min_exclusive %}<={% else %}<{% endif %} {{ bounds.min_name }}) in_bounds = .false.
+    if (nml__val {% if bounds.min_exclusive %}<={% else %}<{% endif %} {{ bounds.min_name }}) nml__in_bounds = .false.
 {% endif %}
 {% if bounds.has_max %}
-    if (val {% if bounds.max_exclusive %}>={% else %}>{% endif %} {{ bounds.max_name }}) in_bounds = .false.
+    if (nml__val {% if bounds.max_exclusive %}>={% else %}>{% endif %} {{ bounds.max_name }}) nml__in_bounds = .false.
 {% endif %}
   end function {{ bounds.func_name }}
 
@@ -626,7 +626,7 @@ contains
 {% if check.runtime_array %}
     if (allocated({{ check.allocation_ref }})) then
 {% endif %}
-    if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
+    if (.not. all({{ check.func_name }}({{ check.array_ref }}, nml__allow_missing=.true.))) then
       nml__status = NML_ERR_ENUM
       if (present(errmsg)) errmsg = "enum constraint failed: {{ check.display_name }}"
       return
@@ -656,7 +656,7 @@ contains
 {% if check.runtime_array %}
     if (allocated({{ check.allocation_ref }})) then
 {% endif %}
-    if (.not. all({{ check.func_name }}({{ check.array_ref }}, allow_missing=.true.))) then
+    if (.not. all({{ check.func_name }}({{ check.array_ref }}, nml__allow_missing=.true.))) then
       nml__status = NML_ERR_BOUNDS
       if (present(errmsg)) errmsg = "bounds constraint failed: {{ check.display_name }}"
       return
