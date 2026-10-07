@@ -31,6 +31,17 @@ default_file = "outputs.nml"
 namelists = ["outputs"]
 required = ["outputs"]
 
+[[project_profiles]]
+name = "standard"
+title = "Standard simulation"
+description = "Runtime, physics, and output configuration."
+file_profiles = ["main", "outputs"]
+
+[[project_profiles]]
+name = "minimal"
+title = "Minimal simulation"
+file_profiles = ["main"]
+
 [[templates]]
 profile = "main"
 path = "out/run-template.nml"

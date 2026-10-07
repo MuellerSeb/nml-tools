@@ -74,6 +74,8 @@ class LeafState:
     explicitly_assigned: bool
     null_consumed: bool
     source_span: SourceSpan | None
+    # Last explicit value; trailing null input retains this location.
+    value_source_span: SourceSpan | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +130,7 @@ class _MutableState:
     explicitly_assigned: bool = False
     null_consumed: bool = False
     source_span: SourceSpan | None = None
+    value_source_span: SourceSpan | None = None
 
 
 @dataclass(frozen=True)
@@ -364,6 +367,7 @@ def _evaluate_group_model(
             state.has_value = True
             state.explicitly_assigned = True
             state.source_span = parsed_value.span
+            state.value_source_span = parsed_value.span
             explicit_roots.add(target.root.key)
             if target.root.derived and target.component_key is not None:
                 instance = (target.root.key, target.coordinates)
@@ -409,6 +413,7 @@ def _evaluate_group_model(
             state.explicitly_assigned,
             state.null_consumed,
             state.source_span,
+            state.value_source_span,
         )
         for key, state in states.items()
     }

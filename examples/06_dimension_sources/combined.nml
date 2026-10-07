@@ -1,0 +1,7 @@
+&data
+  values = 1, 2, 3
+/
+
+&settings
+  count = 3
+/

@@ -16,6 +16,11 @@ It groups them into two logical files:
 - `outputs`, with the `outputs` namelist and an `outputs.nml` default file hint;
   `outputs` is required
 
+Two `[[project_profiles]]` entries describe project setups: `standard` requires
+both file profiles, while `minimal` requires only `main`. They are metadata for
+future project tooling; the CLI continues to validate each file separately.
+The existing templates and their generated contents remain the same.
+
 Generate the templates with:
 
 ```bash

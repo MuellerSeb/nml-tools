@@ -1,0 +1,8 @@
+title: Dimension settings
+x-fortran-namelist: settings
+type: object
+properties:
+  count:
+    type: integer
+    minimum: 1
+required: [count]

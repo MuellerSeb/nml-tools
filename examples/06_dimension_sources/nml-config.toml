@@ -1,0 +1,38 @@
+[kinds]
+module = "iso_fortran_env"
+
+[dimensions.n_values]
+default = 2
+doc = "Number of data values."
+source = { namelist = "settings", property = "count" }
+
+[[namelists]]
+schema = "schemas/data.yml"
+
+[[namelists]]
+schema = "schemas/settings.yml"
+
+[[file_profiles]]
+name = "data"
+default_file = "data.nml"
+namelists = ["data"]
+required = ["data"]
+
+[[file_profiles]]
+name = "settings"
+default_file = "settings.nml"
+namelists = ["settings"]
+required = ["settings"]
+
+[[project_profiles]]
+name = "standard"
+file_profiles = ["data", "settings"]
+
+[[templates]]
+profile = "data"
+path = "out/data-template.nml"
+doc_mode = "plain"
+value_mode = "filled"
+
+[templates.values.data]
+values = [1, 2]

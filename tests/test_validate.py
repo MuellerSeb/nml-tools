@@ -410,6 +410,22 @@ def test_null_only_required_value_does_not_establish_presence() -> None:
         _evaluate(schema, "settings = 2*")
 
 
+def test_evaluator_tracks_value_span_separately_from_trailing_null() -> None:
+    schema = {
+        "x-fortran-namelist": "run",
+        "type": "object",
+        "properties": {"count": {"type": "integer"}},
+    }
+    result = _evaluate(schema, "count=2\ncount=-1\ncount=,")
+    state = result.states[("count", (), None)]
+    assert state.value == -1
+    assert state.source_span is not None
+    assert state.source_span.start.line == 4
+    assert state.value_source_span is not None
+    assert state.value_source_span.start.line == 3
+    assert state.value_source_span.start.column == 7
+
+
 def test_defaults_satisfy_required_input_and_remain_sparse() -> None:
     schema = {
         "x-fortran-namelist": "run",
@@ -434,6 +450,7 @@ def test_defaults_satisfy_required_input_and_remain_sparse() -> None:
     assert state.initialized_by_default is True
     assert state.explicitly_assigned is False
     assert state.null_consumed is True
+    assert state.value_source_span is None
 
     string_schema = {
         "x-fortran-namelist": "run",
