@@ -32,3 +32,19 @@ def test_local_categories_and_child_scopes() -> None:
         child.declare("period", category="dummy", identity=("dummy",), source="dummy")
     assert scope.names == {"period"}
     assert scope.child("unrelated", names=set()).names == set()
+
+
+def test_module_cannot_use_itself_including_from_a_child_scope() -> None:
+    scope = FortranScope("native", module_name="native")
+    with pytest.raises(ValueError, match="module 'native' cannot USE itself"):
+        scope.import_symbol("value", "NATIVE")
+    with pytest.raises(ValueError, match="module 'native' cannot USE itself"):
+        scope.child("resolver").import_symbol("other", "Native")
+
+
+def test_source_module_names_do_not_reserve_local_identifiers() -> None:
+    scope = FortranScope("setter", module_name="native")
+    scope.import_symbol("i4", "kinds")
+    scope.child("kinds").import_symbol("other", "kinds")
+    scope.declare("kinds", category="dummy", identity=("dummy",), source="schema dummy")
+    assert scope.names == {"i4", "kinds"}

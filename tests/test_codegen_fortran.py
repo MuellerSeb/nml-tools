@@ -1114,7 +1114,7 @@ def test_generate_fortran_rejects_property_colliding_with_configured_import() ->
         )
 
 
-def test_generate_fortran_rejects_iso_c_binding_import_collision() -> None:
+def test_generate_fortran_isolates_resolver_imports_from_application_types() -> None:
     codegen = _import_codegen_module()
     schema = {
         "x-fortran-namelist": "run",
@@ -1129,12 +1129,13 @@ def test_generate_fortran_rejects_iso_c_binding_import_collision() -> None:
         },
     }
 
-    with pytest.raises(ValueError, match="application_types.*conflicts.*iso_c_binding"):
-        codegen.render_fortran(
-            schema,
-            file_name="nml_run.f90",
-            f2py_handle_helpers=True,
-        )
+    generated = codegen.render_fortran(
+        schema, file_name="nml_run.f90", f2py_handle_helpers=True,
+    )
+    assert "use application_types, only: c_ptr" in generated
+    assert "use iso_c_binding" not in generated.split("contains", maxsplit=1)[0]
+    resolver = generated.split("subroutine nml_run_resolve_handle", maxsplit=1)[1]
+    assert "use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr" in resolver
 
 
 @pytest.mark.parametrize("name", ["present", "Present", "size", "NML_OK"])

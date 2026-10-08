@@ -19,8 +19,9 @@ class _Symbol:
 class FortranScope:
     """Reject conflicting entities under the same case-insensitive local name."""
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, *, module_name: str | None = None) -> None:
         self.name = name
+        self._module_name = module_name
         self._symbols: dict[str, _Symbol] = {}
 
     @property
@@ -43,6 +44,11 @@ class FortranScope:
 
     def import_symbol(self, symbol: str, module: str, *, category: str = "import") -> None:
         """Register a USE name, optionally written as local => remote."""
+        if self._module_name is not None and module.lower() == self._module_name.lower():
+            raise ValueError(
+                f"generated module '{self._module_name}' cannot USE itself "
+                f"(source module '{module}' in Fortran scope '{self.name}')"
+            )
         parts = symbol.split("=>", maxsplit=1)
         local = parts[0].strip()
         remote = parts[-1].strip()
@@ -55,7 +61,7 @@ class FortranScope:
 
     def child(self, name: str, *, names: set[str] | None = None) -> FortranScope:
         """Copy dependencies to a procedure inventory without changing its host."""
-        scope = FortranScope(name)
+        scope = FortranScope(name, module_name=self._module_name)
         scope._symbols = {
             key: symbol for key, symbol in self._symbols.items() if names is None or key in names
         }

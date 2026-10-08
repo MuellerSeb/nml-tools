@@ -21,9 +21,6 @@ module {{ module_name }}
 {% for imported in derived_type_imports %}
   use {{ imported.module }}, only: {{ imported.type_name }}
 {% endfor %}
-{% if f2py_handle_helpers %}
-  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
-{% endif %}
 
   implicit none
 
@@ -150,6 +147,7 @@ contains
 {% if f2py_handle_helpers %}
   !> \brief Resolve an opaque C pointer handle to a {{ type_name }} pointer
   subroutine {{ type_prefix }}_resolve_handle(nml__handle, nml__obj, nml__status, errmsg)
+    use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
     integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a {{ type_name }} instance
     type({{ type_name }}), pointer :: nml__obj !< resolved namelist pointer
     integer, intent(out) :: nml__status !< nml-tools status code

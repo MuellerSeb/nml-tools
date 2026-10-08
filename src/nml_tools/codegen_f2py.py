@@ -394,7 +394,8 @@ def build_f2py_namelist_spec(
 
     namelist_name = cast("str", context["namelist_name"])
     module_name = cast("str", context["module_name"])
-    wrapper_scope = FortranScope(f"f2py_{namelist_name}")
+    wrapper_module_name = f"f2py_{namelist_name}"
+    wrapper_scope = FortranScope(wrapper_module_name, module_name=wrapper_module_name)
     wrapper_scope.import_symbol("c_intptr_t", "iso_c_binding")
     for symbol in (cast("str", context["type_name"]), f"{module_name}_resolve_handle"):
         wrapper_scope.import_symbol(symbol, module_name)

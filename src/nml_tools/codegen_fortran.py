@@ -232,7 +232,7 @@ def render_helper(
     kind_imports = _resolve_kind_imports(
         helper_kind_ids, kind_map=kind_map, kind_allowlist=kind_allowlist
     )
-    scope = FortranScope(module_name)
+    scope = FortranScope(module_name, module_name=module_name)
     scope.declare(module_name, category="module", identity=("module", module_name.lower()),
                   source=f"helper module '{module_name}'")
     for name in (*sorted(GENERATED_HELPER_IDENTIFIERS), "to__lower", "idx__check"):
@@ -1625,14 +1625,11 @@ def _build_context(
         kind_map=kind_map,
         kind_allowlist=kind_allowlist,
     )
-    module_scope = FortranScope(module_name)
+    module_scope = FortranScope(module_name, module_name=module_name)
     for symbol in helper_imports:
         module_scope.import_symbol(symbol, helper_module)
     for symbol in resolved_kind_imports:
         module_scope.import_symbol(symbol, resolved_kind_module)
-    if f2py_handle_helpers:
-        for symbol in ("c_f_pointer", "c_intptr_t", "c_null_ptr", "c_ptr"):
-            module_scope.import_symbol(symbol, "iso_c_binding")
     if requires_ieee:
         for symbol in ("ieee_value", "ieee_quiet_nan", "ieee_is_nan"):
             module_scope.import_symbol(f"nml__{symbol} => {symbol}", "ieee_arithmetic")
@@ -1689,10 +1686,24 @@ def _build_context(
         suffix: str, arguments: list[tuple[str, str]], *, reader: bool = False
     ) -> None:
         procedure = f"{module_name}_{suffix}"
-        scope = dependencies.child(procedure, names=(
-            {type_name.lower()} | {symbol.lower() for symbol in helper_imports}
-            if suffix == "set_dims" else None
-        ))
+        if suffix == "resolve_handle":
+            scope = dependencies.child(
+                procedure, names={type_name.lower(), "nml_ok", "nml_err_invalid_handle"}
+            )
+            for symbol in ("c_f_pointer", "c_intptr_t", "c_null_ptr", "c_ptr"):
+                scope.import_symbol(symbol, "iso_c_binding")
+        else:
+            names: set[str] | None = None
+            if suffix == "from_file":
+                names = {type_name.lower()}
+            elif suffix in {"set_dims", "is_set", "filled_shape"}:
+                # These operations do not declare schema-typed variables.
+                names = {type_name.lower()} | (
+                    dependencies.names & GENERATED_HELPER_IDENTIFIERS
+                ) | {name for name in dependencies.names if "__" in name}
+                if suffix == "set_dims":
+                    names.update(static_constants)
+            scope = dependencies.child(procedure, names=names)
         scope.declare(procedure, category="procedure", identity=("procedure", procedure),
                       source=f"generated {suffix} procedure '{procedure}'")
         for state_name in ("nml__obj", "nml__status", "errmsg"):
@@ -1714,6 +1725,8 @@ def _build_context(
     validate_procedure("set", properties_in_scope)
     validate_procedure("read__from_file", properties_in_scope, reader=True)
     validate_procedure("from_file", [("file", "public dummy 'file'")])
+    if f2py_handle_helpers:
+        validate_procedure("resolve_handle", [])
     validate_procedure("is_set", [("name", "public dummy 'name'"), ("idx", "public dummy 'idx'")])
     if flex_arrays:
         validate_procedure("filled_shape", [(name, f"public dummy '{name}'")
