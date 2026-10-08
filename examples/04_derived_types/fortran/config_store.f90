@@ -39,26 +39,26 @@ contains
   subroutine get_period_start(value)
     integer(i4), intent(out) :: value
 
-    value = config%period%start_year
+    value = config%data%period%start_year
   end subroutine get_period_start
 
   subroutine get_period_item_start(index, value)
     integer, intent(in) :: index
     integer(i4), intent(out) :: value
 
-    value = config%periods(index)%start_year
+    value = config%data%periods(index)%start_year
   end subroutine get_period_item_start
 
   subroutine get_station_code(value)
     integer(i4), intent(out) :: value
 
-    value = config%station%code
+    value = config%data%station%code
   end subroutine get_station_code
 
   subroutine get_station_label(value)
     character(len=24), intent(out) :: value
 
-    value = config%station%label
+    value = config%data%station%label
   end subroutine get_station_label
 
 end module config_store

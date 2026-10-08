@@ -20,20 +20,28 @@ module nml_required
     NML_ERR_NOT_SET, &
     NML_ERR_INVALID_NAME, &
     NML_ERR_INVALID_INDEX, &
-    idx_check, &
-    to_lower
+    idx__check, &
+    to__lower
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
     i4=>int32
 
   implicit none
 
+  private :: nml_required_read__from_file
+
+  !> \class nml_required_data_t
+  !> \brief Schema-backed values for required
+  type, public :: nml_required_data_t
+    integer(i4) :: count !< count
+  end type nml_required_data_t
+
   !> \class nml_required_t
   !> \brief Required generated reader
   !> \details Required generated reader
   type, public :: nml_required_t
+    type(nml_required_data_t) :: data !< schema-backed namelist values
     logical :: is_configured = .false. !< whether the namelist has been configured
-    integer(i4) :: count !< count
   contains
     procedure :: init => nml_required_init
     procedure :: from_file => nml_required_from_file
@@ -45,139 +53,147 @@ module nml_required
 contains
 
   !> \brief Initialize defaults and sentinels for required
-  integer function nml_required_init(this, errmsg) result(status)
-    class(nml_required_t), intent(inout) :: this !< namelist instance
+  integer function nml_required_init(nml__obj, errmsg) result(nml__status)
+    class(nml_required_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    this%is_configured = .false.
+    nml__obj%is_configured = .false.
 
     ! sentinel values for required/optional parameters
-    this%count = -huge(this%count) ! sentinel for required integer
+    nml__obj%data%count = -huge(nml__obj%data%count) ! sentinel for required integer
   end function nml_required_init
 
 
   !> \brief Read required namelist from file
-  integer function nml_required_from_file(this, file, errmsg) result(status)
-    class(nml_required_t), intent(inout) :: this !< namelist instance
+  integer function nml_required_from_file(nml__obj, file, errmsg) result(nml__status)
+    class(nml_required_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: file !< path to namelist file
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+
+    nml__status = nml_required_read__from_file(nml__obj, file, errmsg)
+  end function nml_required_from_file
+
+  integer function nml_required_read__from_file(nml__obj, nml__file, errmsg) &
+    result(nml__status)
+    class(nml_required_t), intent(inout) :: nml__obj
+    character(len=*), intent(in) :: nml__file
+    character(len=*), intent(out), optional :: errmsg
     ! namelist variables
     integer(i4) :: count
     ! locals
-    type(nml_file_t) :: nml
-    integer :: iostat
-    integer :: close_status
-    character(len=nml_line_buffer) :: iomsg
+    type(nml_file_t) :: nml__reader
+    integer :: nml__iostat
+    integer :: nml__close_status
+    character(len=nml_line_buffer) :: nml__iomsg
 
     namelist /required/ &
       count
 
-    status = this%init(errmsg=errmsg)
-    if (status /= NML_OK) return
-    count = this%count
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
+    count = nml__obj%data%count
 
-    status = nml%open(file, errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__reader%open(nml__file, errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 
-    status = nml%find("required", errmsg=errmsg)
-    if (status /= NML_OK) then
-      close_status = nml%close()
+    nml__status = nml__reader%find("required", errmsg=errmsg)
+    if (nml__status /= NML_OK) then
+      nml__close_status = nml__reader%close()
       return
     end if
 
     ! read namelist
-    read(nml%unit, nml=required, iostat=iostat, iomsg=iomsg)
-    if (iostat /= 0) then
-      status = NML_ERR_READ
-      if (present(errmsg)) errmsg = trim(iomsg)
-      close_status = nml%close()
+    read(nml__reader%unit, nml=required, iostat=nml__iostat, iomsg=nml__iomsg)
+    if (nml__iostat /= 0) then
+      nml__status = NML_ERR_READ
+      if (present(errmsg)) errmsg = trim(nml__iomsg)
+      nml__close_status = nml__reader%close()
       return
     end if
-    close_status = nml%close(errmsg=errmsg)
-    if (close_status /= NML_OK) then
-      status = close_status
+    nml__close_status = nml__reader%close(errmsg=errmsg)
+    if (nml__close_status /= NML_OK) then
+      nml__status = nml__close_status
       return
     end if
 
     ! assign values
-    this%count = count
+    nml__obj%data%count = count
 
     ! mark as configured
-    this%is_configured = .true.
-    status = NML_OK
-  end function nml_required_from_file
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
+  end function nml_required_read__from_file
 
   !> \brief Set required values
-  integer function nml_required_set(this, &
+  integer function nml_required_set(nml__obj, &
     count, &
-    errmsg) result(status)
+    errmsg) result(nml__status)
 
-    class(nml_required_t), intent(inout) :: this !< namelist instance
+    class(nml_required_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer(i4), intent(in) :: count !< count
-
-    status = this%init(errmsg=errmsg)
-    if (status /= NML_OK) return
+    nml__status = nml__obj%init(errmsg=errmsg)
+    if (nml__status /= NML_OK) return
 
     ! required parameters
-    this%count = count
+    nml__obj%data%count = count
 
     ! mark as configured
-    this%is_configured = .true.
-    status = NML_OK
+    nml__obj%is_configured = .true.
+    nml__status = NML_OK
   end function nml_required_set
 
   !> \brief Check whether a namelist value was set
-  integer function nml_required_is_set(this, name, idx, errmsg) result(status)
-    class(nml_required_t), intent(in) :: this !< namelist instance
+  integer function nml_required_is_set(nml__obj, name, idx, errmsg) result(nml__status)
+    class(nml_required_t), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (.not. this%is_configured) then
-      status = NML_ERR_NOT_SET
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
       if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
-    select case (to_lower(trim(name)))
+    select case (to__lower(trim(name)))
     case ("count")
       if (present(idx)) then
-        status = NML_ERR_INVALID_INDEX
+        nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'count'"
         return
       end if
-      if (this%count == -huge(this%count)) status = NML_ERR_NOT_SET
+      if (nml__obj%data%count == -huge(nml__obj%data%count)) nml__status = NML_ERR_NOT_SET
     case default
-      status = NML_ERR_INVALID_NAME
+      nml__status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
-    if (status == NML_ERR_NOT_SET .and. present(errmsg)) then
+    if (nml__status == NML_ERR_NOT_SET .and. present(errmsg)) then
       if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function nml_required_is_set
 
   !> \brief Validate required values and constraints
-  integer function nml_required_is_valid(this, errmsg) result(status)
-    class(nml_required_t), intent(in) :: this !< namelist instance
+  integer function nml_required_is_valid(nml__obj, errmsg) result(nml__status)
+    class(nml_required_t), intent(in) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: istat
+    integer :: nml__istat
 
-    status = NML_OK
+    nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (.not. this%is_configured) then
-      status = NML_ERR_NOT_SET
+    if (.not. nml__obj%is_configured) then
+      nml__status = NML_ERR_NOT_SET
       if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
       return
     end if
 
     ! required parameters
-    istat = this%is_set("count", errmsg=errmsg)
-    if (istat == NML_ERR_NOT_SET) then
-      status = NML_ERR_REQUIRED
+    nml__istat = nml__obj%is_set("count", errmsg=errmsg)
+    if (nml__istat == NML_ERR_NOT_SET) then
+      nml__status = NML_ERR_REQUIRED
       if (present(errmsg)) then
         if (len_trim(errmsg) == 0) then
           errmsg = "field not set: count"
@@ -186,8 +202,8 @@ contains
       end if
       return
     end if
-    if (istat /= NML_OK) then
-      status = istat
+    if (nml__istat /= NML_OK) then
+      nml__status = nml__istat
       return
     end if
   end function nml_required_is_valid

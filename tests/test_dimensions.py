@@ -130,15 +130,15 @@ def test_inference_accepts_multiple_files_and_dimensions() -> None:
             {
                 "type": "object",
                 "x-fortran-namelist": "other",
-                "properties": {"size": {"type": "integer"}},
+                "properties": {"count": {"type": "integer"}},
             }
         ),
     }
     assert infer_runtime_dimensions(
-        [parse_namelist("&settings count=3 /"), parse_namelist("&other size=4 /")],
+        [parse_namelist("&settings count=3 /"), parse_namelist("&other count=4 /")],
         sources={
             "n_values": DimensionSource("settings", "count"),
-            "n_other": DimensionSource("other", "size"),
+            "n_other": DimensionSource("other", "count"),
         },
         schemas=schemas,
         defaults={"n_values": 1, "n_other": 2, "unsourced": 5},

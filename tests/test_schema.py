@@ -955,6 +955,11 @@ def test_referenced_derived_types_reject_unsupported_v1_layouts(
         ("1run", "valid Fortran identifier"),
         ("run__config", "must not contain '__'"),
         (" run", "valid Fortran identifier"),
+        ("present", "reserved as a Fortran intrinsic"),
+        ("PrEsEnT", "reserved as a Fortran intrinsic"),
+        ("size", "reserved as a Fortran intrinsic"),
+        ("transfer", "reserved as a Fortran intrinsic"),
+        ("TrAnSfEr", "reserved as a Fortran intrinsic"),
     ],
 )
 def test_schema_rejects_invalid_fortran_namelist_names(
@@ -968,6 +973,54 @@ def test_schema_rejects_invalid_fortran_namelist_names(
                 "properties": {"value": {"type": "integer"}},
             }
         )
+
+
+@pytest.mark.parametrize("property_name", ["Run", "rUN"])
+def test_schema_rejects_root_property_matching_group(property_name: str) -> None:
+    with pytest.raises(ValueError, match=f"property '{property_name}'.*namelist group 'Run'"):
+        resolve_schema(
+            {
+                "type": "object",
+                "x-fortran-namelist": "Run",
+                "properties": {property_name: {"type": "integer"}},
+            }
+        )
+
+
+@pytest.mark.parametrize("inherited", ["property", "group"])
+def test_schema_rejects_group_property_collision_after_root_reference(
+    tmp_path: Path, inherited: str
+) -> None:
+    base = {"type": "object"}
+    schema = {"$ref": "base.json"}
+    if inherited == "property":
+        base["properties"] = {"rUN": {"type": "integer"}}
+        schema["x-fortran-namelist"] = "Run"
+    else:
+        base["x-fortran-namelist"] = "Run"
+        schema["properties"] = {"rUN": {"type": "integer"}}
+    (tmp_path / "base.json").write_text(json.dumps(base), encoding="utf-8")
+    source = tmp_path / "schema.json"
+    source.write_text(json.dumps(schema), encoding="utf-8")
+    with pytest.raises(ValueError, match="property 'rUN'.*namelist group 'Run'"):
+        load_schema(source)
+
+
+def test_schema_allows_qualified_component_matching_group() -> None:
+    schema = resolve_schema(
+        {
+            "type": "object",
+            "x-fortran-namelist": "Run",
+            "properties": {
+                "value": {
+                    "type": "object",
+                    "x-fortran-type": "value_t",
+                    "properties": {"rUN": {"type": "integer"}},
+                }
+            },
+        }
+    )
+    assert "%run" in render_fortran(schema, file_name="run.f90")
 
 
 @pytest.mark.parametrize(
@@ -1119,6 +1172,78 @@ def test_schema_rejects_reserved_double_underscore_identifiers(
                 "x-fortran-namelist": "run",
                 "type": "object",
                 "properties": property_schema,
+            }
+        )
+
+
+@pytest.mark.parametrize("name", ["errmsg", "ErrMsg"])
+def test_schema_rejects_reserved_errmsg_properties(name: str) -> None:
+    with pytest.raises(ValueError, match="reserved for the generated Fortran API"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "period": {
+                        "type": "object",
+                        "x-fortran-type": "period_t",
+                        "properties": {name: {"type": "integer"}},
+                    }
+                },
+            }
+        )
+
+
+@pytest.mark.parametrize("name", ["present", "size", "transfer"])
+def test_schema_allows_qualified_derived_components_named_after_intrinsics(name: str) -> None:
+    schema = resolve_schema(
+        {
+            "x-fortran-namelist": "run",
+            "type": "object",
+            "properties": {
+                "value": {
+                    "type": "object",
+                    "x-fortran-type": "value_t",
+                    "properties": {name: {"type": "integer"}},
+                }
+            },
+        }
+    )
+
+    generated = render_fortran(schema, file_name="nml_run.f90")
+    assert f"integer :: {name}" in render_helper(
+        file_name="nml_helper.f90",
+        local_derived_types=collect_local_derived_types([schema]),
+    )
+    assert f"nml__obj%data%value%{name}" in generated
+
+
+@pytest.mark.parametrize("name", ["present", "SIZE", "NML_OK", "transfer", "TrAnSfEr"])
+def test_schema_rejects_generated_dependency_properties(name: str) -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {name: {"type": "integer"}},
+            }
+        )
+
+
+@pytest.mark.parametrize("type_name", ["present", "NML_FILE_T", "nml_open", "transfer", "TrAnSfEr"])
+def test_schema_rejects_generated_dependency_type_names(type_name: str) -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        resolve_schema(
+            {
+                "x-fortran-namelist": "run",
+                "type": "object",
+                "properties": {
+                    "value": {
+                        "type": "object",
+                        "x-fortran-type": type_name,
+                        "properties": {"code": {"type": "integer"}},
+                    }
+                },
             }
         )
 

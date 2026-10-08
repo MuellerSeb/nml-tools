@@ -1,0 +1,38 @@
+[helper]
+path = "out/nml_helper.f90"
+
+[kinds]
+module = "iso_fortran_env"
+integer = ["int16", "int32", "int64"]
+map = { i4 = "int32", val = "int32", allow_missing = "int16", in_bounds = "int64" }
+
+[dimensions.status]
+default = 3
+
+[dimensions.set_dims]
+default = 2
+
+[dimensions.c_intptr_t]
+default = 2
+
+[[namelists]]
+name = "namespaces"
+schema = "namespaces.yml"
+mod_path = "out/nml_namespaces.f90"
+
+[[namelists]]
+name = "wrapper_status"
+schema = "wrapper_status.yml"
+mod_path = "out/nml_wrapper_status.f90"
+f2py_path = "out/f2py_wrapper_status.f90"
+
+[[namelists]]
+name = "constraints"
+schema = "constraints.yml"
+mod_path = "out/nml_constraints.f90"
+
+[[namelists]]
+name = "c_bindings"
+schema = "c_bindings.yml"
+mod_path = "out/nml_c_bindings.f90"
+f2py_path = "out/f2py_c_bindings.f90"

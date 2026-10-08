@@ -6,6 +6,11 @@
 
 Generate Fortran namelist modules, Markdown docs, and template namelists from a small JSON Schema-like specification with Fortran-focused extensions.
 
+The aim is schema-guided generation and validation for a defined Fortran
+namelist subset, with matching documentation and templates. This is not a
+general JSON Schema engine or a Fortran compiler/name resolver. Optional f2py
+and editor integrations use the same supported subset; they do not broaden it.
+
 ## Features
 
 - Schema input in YAML or JSON.
@@ -57,9 +62,56 @@ identifiers and must not contain `__`. Double underscores are reserved for
 generated support names such as `seed__default`, `method__enum_values`, and
 `period__start_year__min`.
 
-Schema property names and runtime dimension names must also avoid generated
-namelist type member names: `is_configured`, `init`, `init_type`, `set_dims`,
-`from_file`, `set`, `is_set`, `is_valid`, and `filled_shape`.
+Namelist group names, schema properties/components, runtime dimensions,
+constants, kind aliases, and derived-type names must not be `errmsg`
+(case-insensitively), because `errmsg=` is reserved as the stable error-output
+keyword on generated procedures. Properties and dimensions may otherwise
+match generated member names such as `set`, `is_valid`, or `is_configured`;
+they occupy separate generated containers.
+
+Generated Fortran calls a small, documented set of intrinsics directly. To
+avoid scope-dependent shadowing, the following names are unavailable
+case-insensitively wherever they are emitted unqualified: namelist group names,
+root properties, runtime dimensions, constants, kind aliases, and derived-type names:
+`present`, `size`, `shape`, `allocated`, `associated`, `trim`, `len`, `any`,
+`all`, `huge`, `reshape`, `achar`, `char`, `iachar`, `ichar`, `index`,
+`len_trim`, `minval`, and `transfer`. Fortran developers should avoid intrinsic
+names in these roles; the generator checks this explicit dependency list, not every
+Fortran intrinsic. Qualified derived components such as `%size` and `%present`
+are allowed, but still follow the identifier, `__`, and `errmsg` rules.
+
+The generated helper API also reserves `NML_OK`, its `NML_ERR_*` status
+constants, `nml_file_t`, `nml_line_buffer`, `nml_open`, `nml_find`, and
+`nml_close` in unqualified scopes. Additional conflicts depend on the schema
+and configuration and are checked case-insensitively before rendering:
+
+- A schema-spelled root property cannot equal its namelist group name. Schema
+  loading enforces this for every output mode, including documentation/templates,
+  and after root `$ref` composition. Qualified components may match the group.
+- Native setter/reader arguments cannot shadow imported constants, kind
+  aliases, or derived types needed in their scope, the outer object type,
+  or their own generated procedure name.
+- Helper constants, local derived types, and kind imports must have distinct
+  local names; imports from different modules or of different remote entities
+  cannot claim the same local name.
+- Generated module types/procedures cannot conflict with imported symbols.
+  f2py arguments are deterministically mangled where needed, but conflicting
+  imported types/kinds and wrapper procedures are rejected.
+- An emitted module cannot `use` itself, even under a different spelling/case.
+  Choose distinct names for generated modules and helper/kind/application
+  modules they actually import. For example, a namelist named `helper` needs
+  a helper module name other than the default `nml_helper`. Unused configured
+  dependencies do not impose this restriction.
+
+The opaque-handle resolver imports its C-binding dependencies locally. Enabling
+f2py therefore does not reserve names such as `c_intptr_t` or `c_ptr` for native
+setter/reader fields or runtime dimensions. f2py mangles arguments that would
+shadow its own required imports; Python-facing names remain unchanged.
+
+Diagnostics name the conflicting sources and generated scope. There is no
+blanket ban on `nml_*` schema properties or dimensions. These rules also apply
+to schemas used for documentation/templates: such schemas describe the same
+Fortran-generatable subset.
 
 ### x-fortran-namelist
 
@@ -465,9 +517,14 @@ mod_path = "out/nml_optimization.f90"
 
 ### [helper]
 
-Controls the generated helper module.
+Controls the nml-tools-generated helper module. This source is required when
+generating any native Fortran module (`mod_path`) or f2py wrapper
+(`f2py_path`); it is not an application-provided extension point. Application
+derived types and kind modules remain supported through their schema and
+`[kinds]` configuration.
 
-- `path` (string, required to generate helper): output file for the helper module.
+- `path` (string, required for `mod_path` or `f2py_path`): output file for the
+  generated helper module.
 - `module` (string, optional): Fortran module name (default: `nml_helper`).
 - `buffer` (int, optional): line buffer length for the helper module.
 - `header` (string, optional): text inserted at the top of the helper file.
@@ -505,10 +562,10 @@ Named runtime array dimension defaults.
 - Names must be unique across `[constants]` and `[dimensions]`.
 - Names must not contain `__`; nml-tools reserves double underscores for
   generated helper identifiers.
-- Names must not collide with namelist property names, because generated
-  Fortran stores the current runtime extent as a field with the dimension name.
-- Names must not collide with generated namelist type members such as `init`,
-  `set_dims`, or `is_valid`.
+- Names may match namelist properties and generated operation names because
+  dimensions are stored below a separate `dims` component.
+- Used dimensions retain their `[dimensions]` configuration order in the public
+  `dims` type and positional Fortran `set_dims(...)` arguments.
 - Entries may be used in `x-fortran-shape`, but not in `x-fortran-len`.
 - Arrays whose shape contains a `[dimensions]` name are generated as
   allocatable runtime-sized arrays.
@@ -613,7 +670,7 @@ cfg.set(periods=[{"start_year": 1980}, {"start_year": 2001}])
 Only the internal f2py ABI is flattened: `%` paths are encoded with `__`, for
 example `period__start_year` and `has__period__start_year`. Generated Fortran
 support identifiers also use `__` as an internal separator, for example
-`seed__default`, `method__enum_values`, and `n_periods__default`. Do not use
+`seed__default`, `method__enum_values`, and `n_periods__dim_default`. Do not use
 `__` in schema property, component, derived type/module, constant, or runtime
 dimension names; it is reserved for generated identifiers. Python
 `is_set("period.start_year")`
@@ -657,7 +714,8 @@ Schema entries to generate per-namelist outputs.
   When present, it must match the schema's `x-fortran-namelist`
   case-insensitively; the schema remains canonical for generated namelist names.
   The schema's `x-fortran-namelist` must be a valid user Fortran identifier, and
-  `__` is reserved for generated internal names.
+  follow the documented intrinsic/helper identifier reservations. `__` is
+  reserved for generated internal names.
 - `schema` (string): schema file path.
 - `mod_path` (string, optional): Fortran module output path.
 - `doc_path` (string, optional): Markdown output path.
@@ -937,6 +995,40 @@ Character substring assignment, complex schema values, nested derived values,
 component arrays, nondefault lower bounds, and user-defined formatted I/O are
 currently explicit capability boundaries.
 
+## Generated Fortran layout
+
+Generated schema values and runtime dimensions use separate public containers:
+
+```fortran
+type(nml_run_t) :: config
+
+value = config%data%iterations
+extent = config%dims%n_items
+```
+
+The generated module declares public `nml_run_data_t`, optional
+`nml_run_dims_t`, and outer `nml_run_t` types. Schema values live below
+`config%data`; configured runtime dimensions live below `config%dims`; lifecycle
+state and type-bound procedures remain on `config`. Namelist files stay flat:
+they continue to use `iterations` rather than `data%iterations`.
+
+This separates storage responsibilities; it does not encapsulate them. Both
+containers remain public. Use `set_dims` to change dimensions: direct assignment
+to `%dims` does not resize dependent storage or update lifecycle state. Direct
+mutation of `%data` likewise does not maintain allocation/configuration
+invariants; callers are responsible for keeping the documented layout valid.
+Only failed `set_dims` updates promise to leave both containers unchanged, not
+arbitrary failed reads or setters.
+
+This replaced the earlier flat native layout. Existing Fortran callers must
+change `%field` to `%data%field` and `%dimension` to `%dims%dimension`. Python
+wrappers retain their existing field and dimension names.
+
+Generated arrays have lower bound one in every dimension. Public indices use
+`1:size(array, dim)`, and callers must not manually reallocate public generated
+storage with non-one lower bounds. Setter inputs may have other lower bounds;
+their values are copied by shape into one-based generated storage.
+
 ## Error handling
 
 Generated type-bound procedures return integer status codes and accept an
@@ -965,6 +1057,9 @@ Status codes (defined in the helper module):
 Notes:
 
 - `errmsg`, when present, is filled with a short message (including `iomsg` on read errors).
+- The caller owns the character buffer; messages may be truncated to its length.
+  Capture the integer code and message together before another operation reuses
+  that buffer. Reader cleanup preserves the original read/find failure message.
 - When every field has an effective default or is otherwise optional, a readable
   file may omit that namelist group. `from_file` then succeeds with the same
   initialized defaults and optional-value sentinels as an empty group. A missing
@@ -973,6 +1068,24 @@ Notes:
   `NML_ERR_INVALID_NAME`/`NML_ERR_INVALID_INDEX` on misuse.
 - `NML_ERR_INVALID_HANDLE` only reports zero f2py handles. Non-zero invalid
   handles are outside the generated wrapper contract.
+
+For example, handle or save the failure before making another generated call:
+
+```fortran
+integer :: code, saved_code
+character(len=1024) :: errmsg
+character(len=:), allocatable :: saved_message
+
+code = config%from_file("run.nml", errmsg=errmsg)
+if (code /= NML_OK) then
+  saved_code = code
+  saved_message = trim(errmsg)
+  ! saved_code and saved_message now remain available after another call.
+end if
+```
+
+A status type owning both `code` and `msg` is a separate future API decision;
+this layout change retains integer results and `errmsg=`.
 
 ## Documentation format
 

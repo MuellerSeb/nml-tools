@@ -222,6 +222,9 @@ def test_cli_generate_discovers_pyproject_tool_config(tmp_path: Path) -> None:
             [tool.nml-tools]
             minimum-version = "0"
 
+            [tool.nml-tools.helper]
+            path = "out/nml_helper.f90"
+
             [tool.nml-tools.kinds]
             module = "iso_fortran_env"
             real = ["real64"]
@@ -272,6 +275,9 @@ def test_cli_default_prefers_nml_config_over_pyproject(tmp_path: Path) -> None:
             module = "iso_fortran_env"
             real = ["real64"]
             integer = ["int32"]
+
+            [helper]
+            path = "out/nml_helper.f90"
 
             [[namelists]]
             schema = "schema.yml"

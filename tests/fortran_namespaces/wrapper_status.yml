@@ -1,0 +1,20 @@
+title: Wrapper status type
+x-fortran-namelist: wrapper_status
+type: object
+required: [state]
+properties:
+  state:
+    type: object
+    x-fortran-type: status
+    x-fortran-module: application_types
+    properties:
+      code:
+        type: integer
+  pointer_state:
+    type: object
+    x-fortran-type: c_ptr
+    x-fortran-module: application_types
+    properties:
+      code:
+        type: integer
+        default: 0

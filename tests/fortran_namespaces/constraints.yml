@@ -1,0 +1,18 @@
+title: Constraint internal state
+x-fortran-namelist: constraints
+type: object
+properties:
+  choice:
+    type: integer
+    x-fortran-kind: val
+    enum: [1, 2]
+    minimum: 1
+    maximum: 2
+  limit:
+    type: integer
+    x-fortran-kind: allow_missing
+    minimum: 0
+  upper:
+    type: integer
+    x-fortran-kind: in_bounds
+    maximum: 4

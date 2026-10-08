@@ -11,6 +11,7 @@ from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from ._fortran_scope import FortranScope
 from ._utils import (
     normalize_constant_values,
     normalize_runtime_dimensions,
@@ -66,6 +67,7 @@ class F2pyArgumentSpec:
     python_name: str | None = None
     derived_leaves: list[F2pyDerivedLeafSpec] | None = None
     derived_type_name: str | None = None
+    abi_name: str | None = None
 
 
 @dataclass
@@ -390,11 +392,63 @@ def build_f2py_namelist_spec(
     array_dimensions: list[F2pyArrayDimensionSpec] = []
     derived_type_names: list[str] = []
 
-    field_argument_names: set[str] = {"handle", "status", "errmsg"}
-    field_argument_names.update(field.name.lower() for field in fields)
+    namelist_name = cast("str", context["namelist_name"])
+    module_name = cast("str", context["module_name"])
+    wrapper_module_name = f"f2py_{namelist_name}"
+    wrapper_scope = FortranScope(wrapper_module_name, module_name=wrapper_module_name)
+    wrapper_scope.import_symbol("c_intptr_t", "iso_c_binding")
+    for symbol in (cast("str", context["type_name"]), f"{module_name}_resolve_handle"):
+        wrapper_scope.import_symbol(symbol, module_name)
+    for kind_import in cast("list[str]", context["kind_imports"]):
+        wrapper_scope.import_symbol(kind_import, cast("str", context["kind_module"]))
+    for field in fields:
+        derived = _derived_schema(_normalized_properties(schema)[field.name])
+        if derived is not None:
+            type_name = _derived_type_name(derived)
+            if type_name.lower() not in {name.lower() for name in derived_type_names}:
+                derived_type_names.append(type_name)
+            wrapper_scope.import_symbol(type_name, module_name)
+    if derived_type_names:
+        for symbol in ("NML_OK", "NML_ERR_INVALID_INDEX"):
+            wrapper_scope.import_symbol(symbol, helper_module)
+    wrapper_procedure_names = {
+        f"{namelist_name}_{suffix}".lower()
+        for suffix in (
+            "from_file_wrapper",
+            "set_wrapper",
+            "set_dims_wrapper",
+            "is_set_wrapper",
+            "is_valid_wrapper",
+        )
+    }
+    for procedure in wrapper_procedure_names:
+        if procedure.endswith("set_dims_wrapper") and not context["runtime_dimensions"]:
+            continue
+        wrapper_scope.declare(
+            procedure, category="procedure", identity=("procedure", procedure),
+            source=f"generated f2py wrapper procedure '{procedure}'",
+        )
+    procedure_scope = wrapper_scope.child(f"{namelist_name}_wrapper arguments")
+    for symbol in ("nml__errmsg", "nml__handle", "nml__obj", "nml__status"):
+        procedure_scope.declare(symbol, category="state", identity=("state", symbol),
+                                source=f"generated wrapper state '{symbol}'")
+    wrapper_reserved_names = procedure_scope.names | {
+        "associated", "errmsg", "handle", "len", "size", "status", "this",
+    }
+    field_abi_names: dict[str, str] = {}
+    field_names_in_use = set(wrapper_reserved_names)
+    for field in fields:
+        base_name = (
+            f"{field.name}__value"
+            if field.name.lower() in wrapper_reserved_names
+            else field.name
+        )
+        abi_name = _unique_generated_name(base_name, field_names_in_use)
+        field_names_in_use.add(abi_name.lower())
+        field_abi_names[field.name] = abi_name
 
-    argument_names_in_use: set[str] = set(field_argument_names)
-    bridge_names_in_use: set[str] = set(field_argument_names) | {
+    argument_names_in_use: set[str] = set(field_names_in_use)
+    bridge_names_in_use: set[str] = set(field_names_in_use) | {
         "handle",
         "status",
         "errmsg",
@@ -403,6 +457,7 @@ def build_f2py_namelist_spec(
 
     for field in fields:
         type_info = type_infos[field.name]
+        abi_name = field_abi_names[field.name]
         rank = len(type_info.dimensions) if type_info.category == "array" else 0
         prop = _normalized_properties(schema)[field.name]
         derived = _derived_schema(prop)
@@ -414,10 +469,6 @@ def build_f2py_namelist_spec(
                     argument_names_in_use.add(generated_dim_name.lower())
                     dim_names.append(generated_dim_name)
             derived_type_name = _derived_type_name(derived)
-            if derived_type_name.lower() not in {
-                name.lower() for name in derived_type_names
-            }:
-                derived_type_names.append(derived_type_name)
             leaves = _f2py_derived_leaves(
                 field.name,
                 derived,
@@ -448,6 +499,7 @@ def build_f2py_namelist_spec(
                 has_flag=outer_has_flag,
                 derived_leaves=leaves,
                 derived_type_name=derived_type_name,
+                abi_name=abi_name,
             )
             if field.requires_input:
                 required_args.append(spec)
@@ -538,13 +590,14 @@ def build_f2py_namelist_spec(
             doc_type=_python_doc_type(type_info),
             requirement="required" if field.requires_input else "optional",
             has_flag=has_flag,
+            abi_name=abi_name,
         )
         if field.requires_input:
             required_args.append(spec)
         else:
             optional_args.append(spec)
         field_arguments, field_declarations = _f2py_field_arguments(
-            field, type_info, dim_names=dim_names
+            field, type_info, abi_name=abi_name, dim_names=dim_names
         )
         argument_list.extend(field_arguments)
         argument_declarations.extend(field_declarations)
@@ -565,16 +618,21 @@ def build_f2py_namelist_spec(
                 _optional_bridge_declaration(field.name, type_info, maybe_name)
             )
             bridge_assignments.append(
-                _optional_bridge_assignment(field.name, type_info, has_flag, maybe_name)
+                _optional_bridge_assignment(
+                    field.name,
+                    type_info,
+                    has_flag,
+                    maybe_name,
+                    source_name=abi_name,
+                    dim_names=dim_names,
+                )
             )
             set_call_arguments.append(f"{field.name}={maybe_name}")
         else:
-            set_call_arguments.append(f"{field.name}={field.name}")
+            set_call_arguments.append(f"{field.name}={abi_name}")
 
     runtime_dimension_args = cast("list[dict[str, str]]", context["set_dims_arguments"])
-    set_dims_argument_names_in_use: set[str] = {
-        str(entry["name"]).lower() for entry in runtime_dimension_args
-    }
+    set_dims_argument_names_in_use: set[str] = set(wrapper_reserved_names)
     set_dims_bridge_names_in_use: set[str] = set(set_dims_argument_names_in_use) | {
         "handle",
         "status",
@@ -585,6 +643,13 @@ def build_f2py_namelist_spec(
     for entry in runtime_dimension_args:
         const_name = entry["name"]
         arg_name = entry["arg_name"]
+        abi_name = _unique_generated_name(
+            f"{const_name}__value"
+            if const_name.lower() in wrapper_reserved_names
+            else const_name,
+            set_dims_argument_names_in_use,
+        )
+        set_dims_argument_names_in_use.add(abi_name.lower())
         python_name = _python_parameter_name(const_name)
         has_base = f"has__{const_name}"
         has_flag = _unique_generated_name(has_base, set_dims_argument_names_in_use)
@@ -602,11 +667,12 @@ def build_f2py_namelist_spec(
                 has_flag=has_flag,
                 fixed_shape=None,
                 python_name=python_name,
+                abi_name=abi_name,
             )
         )
-        set_dims_argument_list.append(const_name)
+        set_dims_argument_list.append(abi_name)
         set_dims_argument_declarations.append(
-            f"integer, intent(in) :: {const_name} !< runtime dimension override for {const_name}"
+            f"integer, intent(in) :: {abi_name} !< runtime dimension override for {const_name}"
         )
         set_dims_argument_list.append(has_flag)
         set_dims_argument_declarations.append(
@@ -619,7 +685,7 @@ def build_f2py_namelist_spec(
         set_dims_bridge_assignments.append(
             f"if ({has_flag}) then\n"
             f"  allocate({maybe_name})\n"
-            f"  {maybe_name} = {const_name}\n"
+            f"  {maybe_name} = {abi_name}\n"
             "end if"
         )
         set_dims_call_arguments.append(f"{arg_name}={maybe_name}")
@@ -805,12 +871,13 @@ def _f2py_field_arguments(
     field: FieldSpec,
     type_info: FieldTypeInfo,
     *,
+    abi_name: str,
     dim_names: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     requirement = "required" if field.requires_input else "optional"
     if type_info.category != "array":
-        return [field.name], [
-            f"{type_info.arg_type_spec}, intent(in) :: {field.name} "
+        return [abi_name], [
+            f"{type_info.arg_type_spec}, intent(in) :: {abi_name} "
             f"!< {_one_line(field.title)} ({requirement})"
         ]
 
@@ -822,10 +889,10 @@ def _f2py_field_arguments(
         for dim_name in dim_names
     ]
     declarations.append(
-        f"{type_info.arg_type_spec}, dimension({dims}), intent(in) :: {field.name} "
+        f"{type_info.arg_type_spec}, dimension({dims}), intent(in) :: {abi_name} "
         f"!< {_one_line(field.title)} ({requirement})"
     )
-    return [*dim_names, field.name], declarations
+    return [*dim_names, abi_name], declarations
 
 
 def _f2py_derived_leaves(
@@ -901,16 +968,22 @@ def _derived_bridge_assignments(
     if rank and not init_allocates_array:
         dims = ", ".join(dim_names)
         lines.append(f"{indent}allocate({maybe_name}({dims}))")
-    lines.append(f"{indent}status = this%init_type({name}={maybe_name}, errmsg=errmsg)")
-    lines.append(f"{indent}if (status /= NML_OK) return")
+    lines.append(
+        f"{indent}nml__status = nml__obj%init_type({name}={maybe_name}, "
+        "errmsg=nml__errmsg)"
+    )
+    lines.append(f"{indent}if (nml__status /= NML_OK) return")
     if rank:
         if init_allocates_array:
             for dim_index, dim_name in enumerate(dim_names, start=1):
                 lines.extend(
                     [
                         f"{indent}if ({dim_name} > size({maybe_name}, {dim_index})) then",
-                        f"{indent}  status = NML_ERR_INVALID_INDEX",
-                        f'{indent}  errmsg = "dimension {dim_index} exceeds bounds for \'{name}\'"',
+                        f"{indent}  nml__status = NML_ERR_INVALID_INDEX",
+                        (
+                            f"{indent}  nml__errmsg = \"dimension {dim_index} "
+                            f"exceeds bounds for '{name}'\""
+                        ),
                         f"{indent}  return",
                         f"{indent}end if",
                     ]
@@ -949,28 +1022,33 @@ def _optional_bridge_assignment(
     type_info: FieldTypeInfo,
     has_flag: str,
     maybe_name: str,
+    *,
+    source_name: str,
+    dim_names: list[str],
 ) -> str:
     if type_info.category == "array":
-        dims = ", ".join(_array_dimension_argument_names(name, len(type_info.dimensions)))
+        dims = ", ".join(dim_names)
         allocate_stmt = f"allocate({maybe_name}({dims}))"
         if type_info.element_category == "string":
-            allocate_stmt = f"allocate(character(len=len({name})) :: {maybe_name}({dims}))"
+            allocate_stmt = (
+                f"allocate(character(len=len({source_name})) :: {maybe_name}({dims}))"
+            )
         return (
             f"if ({has_flag}) then\n"
             f"  {allocate_stmt}\n"
-            f"  {maybe_name} = {name}\n"
+            f"  {maybe_name} = {source_name}\n"
             "end if"
         )
     if type_info.category == "string":
         return (
             f"if ({has_flag}) then\n"
-            f"  {maybe_name} = {name}\n"
+            f"  {maybe_name} = {source_name}\n"
             "end if"
         )
     return (
         f"if ({has_flag}) then\n"
         f"  allocate({maybe_name})\n"
-        f"  {maybe_name} = {name}\n"
+        f"  {maybe_name} = {source_name}\n"
         "end if"
     )
 

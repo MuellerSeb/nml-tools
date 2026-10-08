@@ -193,7 +193,7 @@ def test_load_dimensions_validates_values_and_duplicate_names() -> None:
     )
 
     assert dimensions == {"n_cells": 3}
-    assert specs[0].name == "n_cells__default"
+    assert specs[0].name == "n_cells__dim_default"
     assert specs[0].value == "3"
     assert specs[0].doc == "Number of cells."
 
@@ -203,7 +203,7 @@ def test_load_dimensions_validates_values_and_duplicate_names() -> None:
     with pytest.raises(click.ClickException, match="default name duplicates a constant"):
         cli_module._load_dimensions(
             {"dimensions": {"n_cells": {"default": 3}}},
-            {"n_cells__default": 3},
+            {"n_cells__dim_default": 3},
         )
 
     with pytest.raises(click.ClickException, match="duplicates another dimension"):
@@ -1353,6 +1353,9 @@ def test_generate_command_uses_pyproject_config_in_process(tmp_path: Path) -> No
                 [tool.nml-tools]
                 minimum-version = "0"
 
+                [tool.nml-tools.helper]
+                path = "out/nml_helper.f90"
+
                 [tool.nml-tools.kinds]
                 module = "iso_fortran_env"
                 real = ["real64"]
@@ -1370,6 +1373,131 @@ def test_generate_command_uses_pyproject_config_in_process(tmp_path: Path) -> No
 
         assert result.exit_code == 0, result.output
         assert Path("out/nml_demo.f90").exists()
+
+
+def test_generate_command_requires_helper_path_for_fortran_output(tmp_path: Path) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            "x-fortran-namelist: demo\ntype: object\nproperties:\n  value:\n    type: integer\n",
+            encoding="utf-8",
+        )
+        Path("nml-config.toml").write_text(
+            "[kinds]\nmodule = 'iso_fortran_env'\n\n[[namelists]]\n"
+            "schema = 'schema.yml'\nmod_path = 'out/nml_demo.f90'\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(cli_module.cli, ["generate"])
+
+        assert result.exit_code != 0
+        assert "Fortran module generation requires [helper].path" in result.output
+
+
+def test_generate_command_allows_missing_helper_path_without_fortran_output(
+    tmp_path: Path,
+) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            "x-fortran-namelist: demo\ntype: object\nproperties:\n  value:\n    type: integer\n",
+            encoding="utf-8",
+        )
+        Path("nml-config.toml").write_text(
+            "[kinds]\nmodule = 'iso_fortran_env'\n\n[[namelists]]\n"
+            "schema = 'schema.yml'\ndoc_path = 'out/nml_demo.md'\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(cli_module.cli, ["generate"])
+
+        assert result.exit_code == 0, result.output
+        assert Path("out/nml_demo.md").exists()
+        assert not Path("nml_helper.f90").exists()
+
+
+@pytest.mark.parametrize("command", ["generate", "gen-fortran"])
+def test_commands_allow_helper_free_local_derived_types_without_fortran_output(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            dedent(
+                """
+                x-fortran-namelist: demo
+                type: object
+                properties:
+                  value:
+                    type: object
+                    x-fortran-type: value_t
+                    properties:
+                      count:
+                        type: integer
+                """
+            ),
+            encoding="utf-8",
+        )
+        Path("nml-config.toml").write_text(
+            "[kinds]\nmodule = 'iso_fortran_env'\n\n[[namelists]]\n"
+            "schema = 'schema.yml'\ndoc_path = 'out/nml_demo.md'\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(cli_module.cli, [command])
+
+        assert result.exit_code == 0, result.output
+        assert not Path("nml_helper.f90").exists()
+
+
+def test_load_kind_settings_rejects_generated_dependency_alias() -> None:
+    with pytest.raises(click.ClickException, match="reserved"):
+        cli_module._load_kind_settings(
+            {
+                "kinds": {
+                    "module": "iso_fortran_env",
+                    "map": {"present": "int32"},
+                    "integer": ["int32"],
+                }
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("command", "output_kind"),
+    [
+        ("generate", "docs"),
+        ("gen-markdown", "docs"),
+        ("check", "docs"),
+        ("generate", "templates"),
+        ("gen-template", "templates"),
+        ("check", "templates"),
+    ],
+)
+def test_helper_free_outputs_reject_property_matching_namelist_group(
+    tmp_path: Path, command: str, output_kind: str
+) -> None:
+    runner = CliRunner()
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        Path("schema.yml").write_text(
+            "x-fortran-namelist: Run\ntype: object\nproperties:\n  rUN:\n    type: integer\n",
+            encoding="utf-8",
+        )
+        outputs = (
+            "doc_path = 'out/run.md'\n"
+            if output_kind == "docs"
+            else "\n[[templates]]\npath = 'out/run.nml'\nnamelists = ['Run']\n"
+        )
+        Path("nml-config.toml").write_text(
+            "[kinds]\nmodule = 'iso_fortran_env'\n\n[[namelists]]\n"
+            "schema = 'schema.yml'\n" + outputs,
+            encoding="utf-8",
+        )
+        result = runner.invoke(cli_module.cli, [command])
+        assert result.exit_code != 0
+        assert "property 'rUN' conflicts with namelist group 'Run'" in result.output
+        assert not Path("out").exists()
 
 
 def test_generate_command_resolves_definitions_for_all_outputs(tmp_path: Path) -> None:
@@ -1410,6 +1538,9 @@ def test_generate_command_resolves_definitions_for_all_outputs(tmp_path: Path) -
                 real = ["real64"]
                 integer = ["int32"]
                 map = { i4 = "int32" }
+
+                [helper]
+                path = "out/nml_helper.f90"
 
                 [[namelists]]
                 schema = "schema.yml"
@@ -1630,6 +1761,9 @@ def test_generation_subcommands_use_discovered_pyproject_config(
             [tool.nml-tools]
             minimum-version = "0"
 
+            [tool.nml-tools.helper]
+            path = "out/nml_helper.f90"
+
             [tool.nml-tools.kinds]
             module = "iso_fortran_env"
             real = ["real64"]
@@ -1847,6 +1981,9 @@ def test_check_command_passes_and_reports_differences(tmp_path: Path) -> None:
                 [tool.nml-tools]
                 minimum-version = "0"
 
+                [tool.nml-tools.helper]
+                path = "out/nml_helper.f90"
+
                 [tool.nml-tools.kinds]
                 module = "iso_fortran_env"
                 real = ["real64"]
@@ -1908,6 +2045,9 @@ def test_check_command_reports_missing_files(tmp_path: Path) -> None:
                 module = "iso_fortran_env"
                 real = ["real64"]
                 integer = ["int32"]
+
+                [helper]
+                path = "out/nml_helper.f90"
 
                 [[namelists]]
                 schema = "schema.yml"

@@ -47,22 +47,22 @@ contains
   subroutine get_iterations(value)
     integer, intent(out) :: value !< current iteration count
 
-    value = config%iterations
+    value = config%data%iterations
   end subroutine get_iterations
 
   !> \brief Return the configured tolerance
   subroutine get_tolerance(value)
     real(dp), intent(out) :: value !< current tolerance
 
-    value = config%tolerance
+    value = config%data%tolerance
   end subroutine get_tolerance
 
   !> \brief Return the current number of configured weights
   subroutine get_weight_count(value)
     integer, intent(out) :: value !< current weight array extent
 
-    if (allocated(config%weights)) then
-      value = size(config%weights)
+    if (allocated(config%data%weights)) then
+      value = size(config%data%weights)
     else
       value = 0
     end if
@@ -73,34 +73,34 @@ contains
     integer, intent(in) :: index !< one-based weight index
     real(dp), intent(out) :: value !< current weight value
 
-    value = config%weights(index)
+    value = config%data%weights(index)
   end subroutine get_weight
 
   !> \brief Return the configured enabled flag
   subroutine get_enabled(value)
     logical, intent(out) :: value !< current enabled flag
 
-    value = config%enabled
+    value = config%data%enabled
   end subroutine get_enabled
 
   !> \brief Print the persistent config instance
   subroutine print_config()
     integer :: i
 
-    write(*, '(a, i0)') 'iterations = ', config%iterations
-    write(*, '(a, es12.5)') 'tolerance = ', config%tolerance
-    write(*, '(a, l1)') 'enabled = ', config%enabled
-    if (.not. allocated(config%weights)) then
+    write(*, '(a, i0)') 'iterations = ', config%data%iterations
+    write(*, '(a, es12.5)') 'tolerance = ', config%data%tolerance
+    write(*, '(a, l1)') 'enabled = ', config%data%enabled
+    if (.not. allocated(config%data%weights)) then
       write(*, '(a)') 'weights = <unallocated>'
       return
     end if
-    if (size(config%weights) == 0) then
+    if (size(config%data%weights) == 0) then
       write(*, '(a)') 'weights = <empty>'
       return
     end if
     write(*, '(a)', advance='no') 'weights = '
-    do i = 1, size(config%weights)
-      write(*, '(es12.5, 1x)', advance='no') config%weights(i)
+    do i = 1, size(config%data%weights)
+      write(*, '(es12.5, 1x)', advance='no') config%data%weights(i)
     end do
     write(*, *)
   end subroutine print_config
