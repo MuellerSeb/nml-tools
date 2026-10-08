@@ -97,6 +97,16 @@ and configuration and are checked case-insensitively before rendering:
 - Generated module types/procedures cannot conflict with imported symbols.
   f2py arguments are deterministically mangled where needed, but conflicting
   imported types/kinds and wrapper procedures are rejected.
+- An emitted module cannot `use` itself, even under a different spelling/case.
+  Choose distinct names for generated modules and helper/kind/application
+  modules they actually import. For example, a namelist named `helper` needs
+  a helper module name other than the default `nml_helper`. Unused configured
+  dependencies do not impose this restriction.
+
+The opaque-handle resolver imports its C-binding dependencies locally. Enabling
+f2py therefore does not reserve names such as `c_intptr_t` or `c_ptr` for native
+setter/reader fields or runtime dimensions. f2py mangles arguments that would
+shadow its own required imports; Python-facing names remain unchanged.
 
 Diagnostics name the conflicting sources and generated scope. There is no
 blanket ban on `nml_*` schema properties or dimensions. These rules also apply

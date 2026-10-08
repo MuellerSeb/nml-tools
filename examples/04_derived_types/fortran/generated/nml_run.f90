@@ -31,7 +31,6 @@ module nml_run
   use iso_fortran_env, only: &
     i4=>int32
   use application_types, only: station_t
-  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
 
   implicit none
 
@@ -135,6 +134,7 @@ contains
 
   !> \brief Resolve an opaque C pointer handle to a nml_run_t pointer
   subroutine nml_run_resolve_handle(nml__handle, nml__obj, nml__status, errmsg)
+    use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
     integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_run_t instance
     type(nml_run_t), pointer :: nml__obj !< resolved namelist pointer
     integer, intent(out) :: nml__status !< nml-tools status code

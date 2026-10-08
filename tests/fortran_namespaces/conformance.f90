@@ -6,12 +6,15 @@ program conformance
   use nml_constraints, only: nml_constraints_t
   use nml_wrapper_status, only: nml_wrapper_status_t
   use f2py_wrapper_status, only: wrapper_status_set_wrapper, wrapper_status_is_valid_wrapper
+  use nml_c_bindings, only: nml_c_bindings_t
+  use f2py_c_bindings, only: c_bindings_from_file_wrapper, c_bindings_set_dims_wrapper
 
   implicit none
 
   type(nml_namespaces_t) :: config
   type(nml_constraints_t) :: constraints
   type(nml_wrapper_status_t), target :: wrapped
+  type(nml_c_bindings_t), target :: c_config
   integer(c_intptr_t) :: handle
   character(len=256) :: root
   character(len=1024) :: errmsg
@@ -65,11 +68,34 @@ program conformance
   call expect_status(status, NML_OK, "validate")
 
   handle = transfer(c_loc(wrapped), handle)
-  call wrapper_status_set_wrapper(handle, .true., 42, .true., status, errmsg)
+  call wrapper_status_set_wrapper(handle, has__state=.true., state__code=42, &
+    has__state__code=.true., has__pointer_state=.false., pointer_state__code=0, &
+    has__pointer_state__code=.false., nml__status=status, nml__errmsg=errmsg)
   call expect_status(status, NML_OK, "call wrapper with imported type(status)")
   if (wrapped%data%state%code /= 42) error stop "wrapper did not set derived leaf"
   call wrapper_status_is_valid_wrapper(handle, status, errmsg)
   call expect_status(status, NML_OK, "validate wrapped derived value")
+  if (wrapped%data%pointer_state%code /= 0) error stop "application c_ptr default mismatch"
+
+  status = c_config%set(c_intptr_t=1, c_ptr=2, c_null_ptr=3, c_f_pointer=4, &
+    values=[5, 6], errmsg=errmsg)
+  call expect_status(status, NML_OK, "native C-binding-named fields")
+  if (c_config%data%c_intptr_t /= 1 .or. c_config%data%c_ptr /= 2) then
+    error stop "native C-binding fields mismatch"
+  end if
+  handle = transfer(c_loc(c_config), handle)
+  call c_bindings_set_dims_wrapper(handle, 3, .true., status, errmsg)
+  call expect_status(status, NML_OK, "C-binding-named wrapper dimension")
+  call c_bindings_from_file_wrapper(handle, trim(root) // "/c_bindings.nml", status, errmsg)
+  call expect_status(status, NML_OK, "read C-binding-named fields through wrapper")
+  if (c_config%dims%c_intptr_t /= 3 .or. c_config%data%c_intptr_t /= 17) then
+    error stop "C-binding property/dimension overlap mismatch"
+  end if
+  if (c_config%data%c_ptr /= 18 .or. c_config%data%c_null_ptr /= 19 &
+    .or. c_config%data%c_f_pointer /= 20) error stop "C-binding namelist fields mismatch"
+  if (any(c_config%data%values /= [7, 8, 9])) error stop "C-binding dimension allocation mismatch"
+  status = c_config%is_valid(errmsg=errmsg)
+  call expect_status(status, NML_OK, "validate C-binding-named configuration")
 
   status = constraints%set(choice=2, limit=0_int16, upper=4_int64, errmsg=errmsg)
   call expect_status(status, NML_OK, "constraint setter")

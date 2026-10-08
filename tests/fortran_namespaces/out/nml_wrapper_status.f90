@@ -24,7 +24,7 @@ module nml_wrapper_status
     to__lower, &
     NML_ERR_INVALID_HANDLE
   use application_types, only: status
-  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
+  use application_types, only: c_ptr
 
   implicit none
 
@@ -34,6 +34,7 @@ module nml_wrapper_status
   !> \brief Schema-backed values for wrapper_status
   type, public :: nml_wrapper_status_data_t
     type(status) :: state !< state
+    type(c_ptr) :: pointer_state !< pointer_state
   end type nml_wrapper_status_data_t
 
   !> \class nml_wrapper_status_t
@@ -55,6 +56,7 @@ contains
 
   !> \brief Resolve an opaque C pointer handle to a nml_wrapper_status_t pointer
   subroutine nml_wrapper_status_resolve_handle(nml__handle, nml__obj, nml__status, errmsg)
+    use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
     integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_wrapper_status_t instance
     type(nml_wrapper_status_t), pointer :: nml__obj !< resolved namelist pointer
     integer, intent(out) :: nml__status !< nml-tools status code
@@ -85,6 +87,7 @@ contains
     ! derived values
     nml__status = nml__obj%init_type( &
       state=nml__obj%data%state, &
+      pointer_state=nml__obj%data%pointer_state, &
       errmsg=errmsg)
     if (nml__status /= NML_OK) return
   end function nml_wrapper_status_init
@@ -92,15 +95,20 @@ contains
   !> \brief Initialize derived values with their field-specific defaults
   integer function nml_wrapper_status_init_type(nml__obj, &
     state, &
+    pointer_state, &
     errmsg) result(nml__status)
     class(nml_wrapper_status_t), intent(in) :: nml__obj !< parent namelist instance
     type(status), intent(inout), optional :: state !< state
+    type(c_ptr), intent(inout), optional :: pointer_state !< pointer_state
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
 
     nml__status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (present(state)) then
       state%code = -huge(state%code) ! sentinel for derived component code
+    end if
+    if (present(pointer_state)) then
+      pointer_state%code = 0
     end if
   end function nml_wrapper_status_init_type
 
@@ -121,6 +129,7 @@ contains
     character(len=*), intent(out), optional :: errmsg
     ! namelist variables
     type(status) :: state
+    type(c_ptr) :: pointer_state
     ! locals
     type(nml_file_t) :: nml__reader
     integer :: nml__iostat
@@ -128,11 +137,13 @@ contains
     character(len=nml_line_buffer) :: nml__iomsg
 
     namelist /wrapper_status/ &
-      state
+      state, &
+      pointer_state
 
     nml__status = nml__obj%init(errmsg=errmsg)
     if (nml__status /= NML_OK) return
     state = nml__obj%data%state
+    pointer_state = nml__obj%data%pointer_state
 
     nml__status = nml__reader%open(nml__file, errmsg=errmsg)
     if (nml__status /= NML_OK) return
@@ -169,6 +180,7 @@ contains
 
     ! assign values
     nml__obj%data%state = state
+    nml__obj%data%pointer_state = pointer_state
 
     ! mark as configured
     nml__obj%is_configured = .true.
@@ -178,17 +190,20 @@ contains
   !> \brief Set wrapper_status values
   integer function nml_wrapper_status_set(nml__obj, &
     state, &
+    pointer_state, &
     errmsg) result(nml__status)
 
     class(nml_wrapper_status_t), intent(inout) :: nml__obj !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     type(status), intent(in), optional :: state !< state
+    type(c_ptr), intent(in), optional :: pointer_state !< pointer_state
     nml__status = nml__obj%init(errmsg=errmsg)
     if (nml__status /= NML_OK) return
 
     ! required parameters
     ! override with provided values
     if (present(state)) nml__obj%data%state = state
+    if (present(pointer_state)) nml__obj%data%pointer_state = pointer_state
 
     ! mark as configured
     nml__obj%is_configured = .true.
@@ -221,6 +236,18 @@ contains
       if (present(idx)) then
         nml__status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'state'"
+        return
+      end if
+    case ("pointer_state%code")
+      if (present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "index not supported for 'pointer_state'"
+        return
+      end if
+    case ("pointer_state")
+      if (present(idx)) then
+        nml__status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "index not supported for 'pointer_state'"
         return
       end if
     case default

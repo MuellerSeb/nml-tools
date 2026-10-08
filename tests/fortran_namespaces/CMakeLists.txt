@@ -12,4 +12,6 @@ add_executable(generated_namespaces
   out/nml_wrapper_status.f90
   out/f2py_wrapper_status.f90
   out/nml_constraints.f90
+  out/nml_c_bindings.f90
+  out/f2py_c_bindings.f90
 )

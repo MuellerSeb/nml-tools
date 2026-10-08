@@ -7,7 +7,7 @@
 module f2py_wrapper_status
   use iso_c_binding, only: c_intptr_t
   use nml_helper, only: NML_OK, NML_ERR_INVALID_INDEX
-  use nml_wrapper_status, only: nml_wrapper_status_t, nml_wrapper_status_resolve_handle, status
+  use nml_wrapper_status, only: nml_wrapper_status_t, nml_wrapper_status_resolve_handle, status, c_ptr
   implicit none
 
 contains
@@ -32,15 +32,22 @@ contains
     has__state, &
     state__code, &
     has__state__code, &
+    has__pointer_state, &
+    pointer_state__code, &
+    has__pointer_state__code, &
     nml__status, nml__errmsg)
     integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_wrapper_status_t instance
     logical, intent(in) :: has__state !< whether state was provided
     integer, intent(in) :: state__code !< state%code
     logical, intent(in) :: has__state__code !< whether state%code was provided
+    logical, intent(in) :: has__pointer_state !< whether pointer_state was provided
+    integer, intent(in) :: pointer_state__code !< pointer_state%code
+    logical, intent(in) :: has__pointer_state__code !< whether pointer_state%code was provided
     integer, intent(out) :: nml__status !< nml-tools status code
     character(len=1024), intent(out) :: nml__errmsg !< error message for non-OK status values
     type(nml_wrapper_status_t), pointer :: nml__obj
     type(status), allocatable :: maybe__state
+    type(c_ptr), allocatable :: maybe__pointer_state
 
     call nml_wrapper_status_resolve_handle(nml__handle, nml__obj, nml__status, nml__errmsg)
     if (.not. associated(nml__obj)) then
@@ -52,8 +59,15 @@ contains
       if (nml__status /= NML_OK) return
       if (has__state__code) maybe__state%code = state__code
     end if
+    if (has__pointer_state) then
+      allocate(maybe__pointer_state)
+      nml__status = nml__obj%init_type(pointer_state=maybe__pointer_state, errmsg=nml__errmsg)
+      if (nml__status /= NML_OK) return
+      if (has__pointer_state__code) maybe__pointer_state%code = pointer_state__code
+    end if
     nml__status = nml__obj%set( &
       state=maybe__state, &
+      pointer_state=maybe__pointer_state, &
       errmsg=nml__errmsg)
   end subroutine wrapper_status_set_wrapper
 

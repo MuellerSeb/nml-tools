@@ -40,6 +40,7 @@ module nml_helper
   !> \brief Shared constants for generated namelist modules
   integer, parameter, public :: status__dim_default = 3
   integer, parameter, public :: set_dims__dim_default = 2
+  integer, parameter, public :: c_intptr_t__dim_default = 2
 
   !> \class nml_file_t
   !> \brief Type for namelist file operations

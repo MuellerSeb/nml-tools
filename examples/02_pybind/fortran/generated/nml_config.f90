@@ -35,7 +35,6 @@ module nml_config
   use iso_fortran_env, only: &
     i4=>int32, &
     dp=>real64
-  use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
 
   implicit none
 
@@ -126,6 +125,7 @@ contains
 
   !> \brief Resolve an opaque C pointer handle to a nml_config_t pointer
   subroutine nml_config_resolve_handle(nml__handle, nml__obj, nml__status, errmsg)
+    use iso_c_binding, only: c_f_pointer, c_intptr_t, c_null_ptr, c_ptr
     integer(c_intptr_t), intent(in) :: nml__handle !< opaque handle to a nml_config_t instance
     type(nml_config_t), pointer :: nml__obj !< resolved namelist pointer
     integer, intent(out) :: nml__status !< nml-tools status code

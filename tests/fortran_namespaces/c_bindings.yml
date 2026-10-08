@@ -1,0 +1,22 @@
+title: Resolver dependency isolation
+x-fortran-namelist: c_bindings
+type: object
+properties:
+  c_intptr_t:
+    type: integer
+    default: 0
+  c_ptr:
+    type: integer
+    default: 0
+  c_null_ptr:
+    type: integer
+    default: 0
+  c_f_pointer:
+    type: integer
+    default: 0
+  values:
+    type: array
+    x-fortran-shape: c_intptr_t
+    items:
+      type: integer
+      default: 0

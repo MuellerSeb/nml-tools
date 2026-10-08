@@ -10,3 +10,11 @@ properties:
     properties:
       code:
         type: integer
+  pointer_state:
+    type: object
+    x-fortran-type: c_ptr
+    x-fortran-module: application_types
+    properties:
+      code:
+        type: integer
+        default: 0

@@ -1,0 +1,7 @@
+&c_bindings
+  c_intptr_t = 17
+  c_ptr = 18
+  c_null_ptr = 19
+  c_f_pointer = 20
+  values = 7, 8, 9
+/
