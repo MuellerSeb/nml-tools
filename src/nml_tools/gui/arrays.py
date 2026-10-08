@@ -221,17 +221,20 @@ def initial_array(
 
 
 def _broadcast_first_axis(values: list[Any], shape: tuple[int, ...]) -> list[Any]:
+    """Repeat each first-axis value across the remaining dimensions."""
     tail = shape[1:]
     return [_filled(tail, value) for value in values]
 
 
 def _filled(shape: Sequence[int], value: Any) -> Any:
+    """Build a nested array of the requested shape from one copied value."""
     if not shape:
         return copy.deepcopy(value)
     return [_filled(shape[1:], value) for _ in range(shape[0])]
 
 
 def _reshape(values: Sequence[Any], shape: tuple[int, ...]) -> list[Any]:
+    """Reshape flat values into nested lists with the requested dimensions."""
     iterator = iter(values)
 
     def build(remaining: tuple[int, ...]) -> Any:
@@ -243,6 +246,7 @@ def _reshape(values: Sequence[Any], shape: tuple[int, ...]) -> list[Any]:
 
 
 def _flatten(value: Any) -> Iterator[Any]:
+    """Yield scalar leaves from a nested list in display order."""
     if isinstance(value, list):
         for child in value:
             yield from _flatten(child)
@@ -251,6 +255,7 @@ def _flatten(value: Any) -> Iterator[Any]:
 
 
 def _list_shape(value: Any) -> tuple[int, ...]:
+    """Return a rectangular nested-list shape, or empty for invalid input."""
     if not isinstance(value, list) or not value:
         return ()
     first = _list_shape(value[0])
@@ -260,6 +265,7 @@ def _list_shape(value: Any) -> tuple[int, ...]:
 
 
 def _native_value(value: Any) -> Any:
+    """Convert NumPy scalar values to ordinary Python values recursively."""
     if isinstance(value, list):
         return [_native_value(item) for item in value]
     return value.item() if hasattr(value, "item") else value

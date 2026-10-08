@@ -145,6 +145,7 @@ class ProfileTab(QWidget):
             form.reset()
 
     def _update_navigation(self, index: int) -> None:
+        """Enable page-navigation actions for the selected page index."""
         self.back.setEnabled(index > 0)
         self.next.setEnabled(0 <= index < len(self.profile.pages) - 1)
         self.restore.setEnabled(index >= 0)
@@ -204,6 +205,7 @@ class ProfileConfigTab(QWidget):
         layout.addLayout(run_row)
 
     def _build_profile_controls(self, project: GuiProject, layout: QVBoxLayout) -> None:
+        """Add schema selection and output metadata controls for a new profile."""
         group = QGroupBox("File profile", self)
         group_layout = QVBoxLayout(group)
         lists = QHBoxLayout()
@@ -246,9 +248,11 @@ class ProfileConfigTab(QWidget):
         layout.addWidget(group, 1)
 
     def dimensions(self) -> dict[str, int]:
+        """Return the runtime dimensions entered on this config tab."""
         return {name: box.value() for name, box in self.dimension_boxes.items()}
 
     def schema_keys(self) -> list[str]:
+        """Return the ordered schema keys selected for a new profile."""
         if self.selected_schemas is None:
             return []
         result: list[str] = []
@@ -329,21 +333,25 @@ class ConfigurationDialog(QDialog):
 
     @staticmethod
     def _schema_item(name: str, key: str) -> QListWidgetItem:
+        """Create a visible schema item carrying its normalized registry key."""
         item = QListWidgetItem(name)
         item.setData(Qt.ItemDataRole.UserRole, key)
         return item
 
     @staticmethod
     def _move_selected(source: QListWidget, target: QListWidget) -> None:
+        """Move selected schemas between the available and chosen lists."""
         for item in source.selectedItems():
             target.addItem(source.takeItem(source.row(item)))
 
     @staticmethod
     def _move_all(source: QListWidget, target: QListWidget) -> None:
+        """Move every schema from one selection list to the other."""
         while source.count():
             target.addItem(source.takeItem(0))
 
     def _add_config(self, *, primary: bool = False) -> ProfileConfigTab:
+        """Insert a config tab for configured, imported, or new profiles."""
         tab = ProfileConfigTab(
             self.project,
             self.dimensions,
@@ -363,6 +371,7 @@ class ConfigurationDialog(QDialog):
         return tab
 
     def _tab_changed(self, index: int) -> None:
+        """Turn selection of the trailing plus tab into a new config tab."""
         if self.tabs.widget(index) is self.plus_tab:
             self.tabs.blockSignals(True)
             try:
@@ -371,6 +380,7 @@ class ConfigurationDialog(QDialog):
                 self.tabs.blockSignals(False)
 
     def _close_tab(self, index: int) -> None:
+        """Close a tab after confirming any unsaved profile changes."""
         widget = self.tabs.widget(index)
         if widget is None or widget is self.plus_tab:
             return
@@ -391,6 +401,7 @@ class ConfigurationDialog(QDialog):
         self._remove_tab(widget)
 
     def _remove_tab(self, widget: QWidget) -> None:
+        """Remove a tab and keep one usable config tab when none remain."""
         with QSignalBlocker(self.tabs):
             index = self.tabs.indexOf(widget)
             self.config_tabs.discard(widget)
@@ -404,6 +415,7 @@ class ConfigurationDialog(QDialog):
                 self.tabs.setCurrentIndex(min(index, self.tabs.count() - 2))
 
     def _browse(self, tab: ProfileConfigTab) -> None:
+        """Choose an existing namelist file for a config tab."""
         name, _ = QFileDialog.getOpenFileName(
             self, "Load namelist", str(self.project.output_root), "Namelist files (*.nml)"
         )
@@ -415,6 +427,7 @@ class ConfigurationDialog(QDialog):
             tab.source_combo.setCurrentIndex(index)
 
     def _select_source(self, tab: ProfileConfigTab) -> None:
+        """Inspect a selected namelist and populate its dimensions and schemas."""
         name = tab.source_combo.currentData()
         tab.source_path = Path(name) if name else None
         if not name:
@@ -439,6 +452,7 @@ class ConfigurationDialog(QDialog):
             target.addItem(self._schema_item(page.name, page.key))
 
     def _run_configuration(self, config: ProfileConfigTab) -> None:
+        """Replace a config tab with editors for its selected profiles."""
         prepared: list[ProfileTab] = []
         allow_shrink = False
         try:
@@ -522,6 +536,7 @@ class ConfigurationDialog(QDialog):
             QMessageBox.critical(self, "Invalid configuration", str(exc))
 
     def _put_editor(self, editor: ProfileTab) -> None:
+        """Insert or replace the editor associated with one output file."""
         self.tabs.blockSignals(True)
         path = (self.project.output_root / editor.profile.default_file).resolve()
         old = self.editors.get(path)
@@ -537,6 +552,7 @@ class ConfigurationDialog(QDialog):
         editor.cancel.clicked.connect(lambda: self._cancel_profile(editor))
 
     def _cancel_profile(self, editor: ProfileTab) -> None:
+        """Replace an editor with its last saved values and dimensions."""
         replacement = ProfileTab(
             self.project, editor.profile, editor.saved_values, editor.saved_dimensions, self
         )
@@ -546,6 +562,7 @@ class ConfigurationDialog(QDialog):
         self._put_editor(replacement)
 
     def _save(self, editors: list[ProfileTab]) -> None:
+        """Validate and persist the supplied profile editors together."""
         try:
             values = [(editor, editor.values()) for editor in editors]
             save_profiles(
@@ -559,9 +576,11 @@ class ConfigurationDialog(QDialog):
             QMessageBox.critical(self, "Save namelist", str(exc))
 
     def _save_all(self) -> None:
+        """Save every open profile editor."""
         self._save(list(self.editors.values()))
 
     def _restore_all(self) -> None:
+        """Restore schema defaults in every open profile editor."""
         for editor in self.editors.values():
             editor.restore_all()
 

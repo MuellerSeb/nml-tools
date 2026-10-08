@@ -145,6 +145,7 @@ class GuiProject:
         return self.output_dir or self.root
 
     def profile(self, key: str) -> GuiProfile:
+        """Find a configured profile by its case-insensitive key."""
         for profile in self.profiles:
             if profile.key == key.lower():
                 return profile
@@ -303,6 +304,7 @@ def _evaluated_group_values(
     schema: Mapping[str, Any],
     sizes: Mapping[str, int],
 ) -> dict[str, Any]:
+    """Convert evaluated namelist leaves into schema-shaped GUI values."""
     properties = schema.get("properties", {})
     if not isinstance(properties, Mapping):
         raise ValueError(f"schema for namelist '{evaluated.name}' has invalid properties")
@@ -336,6 +338,7 @@ def _evaluated_array(
     states: list[tuple[tuple[int, ...], str | None, LeafState]],
     sizes: Mapping[str, int],
 ) -> list[Any]:
+    """Rebuild a dense editable array while retaining assigned indices."""
     items = schema.get("items")
     if not isinstance(items, Mapping):
         raise ValueError("array field must define object 'items'")
@@ -364,6 +367,7 @@ def _evaluated_array(
 
 
 def _component_names(schema: Mapping[str, Any]) -> dict[str, str]:
+    """Map lower-case derived component names to schema spelling."""
     properties = schema.get("properties", {})
     if not isinstance(properties, Mapping):
         return {}
@@ -371,12 +375,14 @@ def _component_names(schema: Mapping[str, Any]) -> dict[str, str]:
 
 
 def _filled(shape: tuple[int, ...], value: Any) -> Any:
+    """Build a nested array of copied values for an evaluated shape."""
     if not shape:
         return copy.deepcopy(value)
     return [_filled(shape[1:], value) for _ in range(shape[0])]
 
 
 def _imported_scalar(value: Any) -> Any:
+    """Copy an imported scalar and trim Fortran string padding."""
     return value.rstrip() if isinstance(value, str) else copy.deepcopy(value)
 
 
@@ -385,6 +391,7 @@ def _normalize_profile_values(
     profile: GuiProfile,
     sizes: Mapping[str, int],
 ) -> dict[str, dict[str, Any]]:
+    """Validate profile names and normalize fields to schema spelling."""
     if not isinstance(raw, Mapping):
         raise ValueError(f"file profile '{profile.name}' values must be an object")
     pages = {page.key: page for page in profile.pages}
@@ -440,6 +447,7 @@ def _normalize_value(
     sizes: Mapping[str, int],
     path: str,
 ) -> Any:
+    """Validate and normalize one scalar, array, or derived value."""
     kind = schema.get("type")
     if kind == "array":
         if not isinstance(value, list):
@@ -502,6 +510,7 @@ def _normalize_value(
 
 
 def _normalize_dimensions(dimensions: Mapping[str, int], project: GuiProject) -> dict[str, int]:
+    """Merge dimension overrides with project defaults and validate them."""
     if not isinstance(dimensions, Mapping):
         raise ValueError("dimensions must map names to positive integers")
     result = dict(project.default_dimensions)
@@ -529,6 +538,7 @@ def overlay_values(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict
 
 
 def _profile_path(project: GuiProject, profile: GuiProfile) -> Path:
+    """Resolve and confine a profile's file beneath the output directory."""
     path = (project.output_root / profile.default_file).resolve()
     if path == project.output_root or project.output_root not in path.parents:
         raise ValueError("profile output must be a file inside the output directory")
@@ -536,6 +546,7 @@ def _profile_path(project: GuiProject, profile: GuiProfile) -> Path:
 
 
 def _parsed_groups(path: Path) -> tuple[str, dict[str, Any]]:
+    """Read a namelist file and index its unique groups by lower-case name."""
     text = path.read_text(encoding="utf-8")
     parsed = parse_namelist(text, source=str(path))
     groups = {}
@@ -683,6 +694,7 @@ def import_profile(
 
 
 def _assignments(name: str, value: Any, schema: Mapping[str, Any]) -> Iterable[str]:
+    """Yield indexed Fortran assignments recursively for one schema value."""
     if schema["type"] == "array":
         assigned = value.assigned if isinstance(value, InputArray) else None
 
@@ -758,6 +770,7 @@ def save_profiles(
 
 
 def _atomic_write(path: Path, content: str) -> None:
+    """Replace a namelist file atomically after writing beside the target."""
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)

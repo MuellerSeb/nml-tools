@@ -1,0 +1,44 @@
+title: Output configuration
+description: Controls for trajectory and snapshot output.
+x-fortran-namelist: outputs
+type: object
+required: [trajectory_file, output_interval_steps]
+properties:
+  trajectory_file:
+    title: Trajectory file
+    type: string
+    format: file-path
+    x-fortran-len: 256
+    default: trajectory.csv
+  write_trajectory:
+    title: Write trajectory
+    type: boolean
+    default: true
+  output_interval_steps:
+    title: Output interval in steps
+    type: integer
+    x-fortran-kind: i4
+    minimum: 1
+    default: 10
+  numeric_precision:
+    title: Decimal precision
+    type: number
+    x-fortran-kind: dp
+    minimum: 0.0
+    default: 0.001
+  output_format:
+    title: Output format
+    type: string
+    x-fortran-len: 16
+    enum: [csv, netcdf]
+    default: csv
+  snapshot_times:
+    title: Snapshot times
+    type: array
+    x-fortran-shape: n_snapshots
+    items:
+      type: string
+      format: date-time
+      x-fortran-len: 32
+    examples:
+      - ["2026-01-01 00:30", "2026-01-01 01:00"]

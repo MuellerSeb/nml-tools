@@ -44,6 +44,7 @@ from .model import MISSING, InputArray, overlay_values, suggestion
 
 
 def _exec(dialog: Any) -> int:
+    """Execute a Qt dialog through the Qt 5 or Qt 6 method name."""
     method = getattr(dialog, "exec", None)
     if method is None:
         method = dialog.exec_
@@ -51,15 +52,18 @@ def _exec(dialog: Any) -> int:
 
 
 def _accepted(dialog: Any) -> int:
+    """Return the accepted-dialog result code across supported Qt bindings."""
     value = getattr(dialog, "Accepted", None)
     value = value if value is not None else dialog.DialogCode.Accepted
     return int(getattr(value, "value", value))
 
 
 def _derived_array_editor(editor_type: type[Any], parent: QWidget) -> Any:
+    """Create a guidata editor that correctly commits derived-type cells."""
     # guidata's fixed-size record handler cannot commit (field, *indices) keys.
     class DerivedArrayEditor(editor_type):  # type: ignore[misc]
         def accept(self) -> None:
+            """Commit structured edits before accepting the dialog."""
             for (name, *indices), value in self._data.current_changes.items():
                 self._data.get_array()[name][tuple(indices)] = value
             self._data.current_changes.clear()
@@ -69,6 +73,7 @@ def _derived_array_editor(editor_type: type[Any], parent: QWidget) -> Any:
 
 
 def _output_root(widget: QWidget) -> Path:
+    """Find the output directory attached to a widget's parent form."""
     current: QWidget | None = widget
     while current is not None:
         root = getattr(current, "output_root", None)
@@ -79,10 +84,12 @@ def _output_root(widget: QWidget) -> Path:
 
 
 def _relative_path(path: str, widget: QWidget) -> str:
+    """Express a selected file relative to the namelist output directory."""
     return Path(os.path.relpath(path, _output_root(widget))).as_posix()
 
 
 def _parse_date_time(value: Any) -> QDateTime:
+    """Parse supported namelist date-time strings into a Qt date-time."""
     text = str(value)
     for pattern in (
         "yyyy-MM-dd HH:mm:ss",
@@ -101,6 +108,7 @@ def _parse_date_time(value: Any) -> QDateTime:
 
 
 def _add_path_array_controls(editor: Any, owner: QWidget) -> tuple[Any, Any, Any]:
+    """Add browse-and-apply controls below a guidata path array editor."""
     line = QLineEdit(editor)
     browse = QPushButton("...", editor)
     update = QPushButton("Update selected", editor)
@@ -126,21 +134,25 @@ def _add_path_array_controls(editor: Any, owner: QWidget) -> tuple[Any, Any, Any
 
 
 def _install_date_time_delegate(editor: Any) -> None:
+    """Use a date-time control when editing string array cells in guidata."""
     from guidata.widgets.arrayeditor.editorwidget import (  # type: ignore[import-untyped]
         ArrayDelegate,
     )
 
     class DateTimeDelegate(ArrayDelegate):  # type: ignore[misc]
         def createEditor(self, parent: QWidget, option: Any, index: Any) -> QDateTimeEdit:
+            """Create the date-time control for one guidata cell."""
             control = QDateTimeEdit(parent)
             control.setCalendarPopup(True)
             control.setDisplayFormat("yyyy-MM-dd HH:mm")
             return control
 
         def setEditorData(self, control: QDateTimeEdit, index: Any) -> None:
+            """Load the current cell text into the date-time control."""
             control.setDateTime(_parse_date_time(index.model().data(index)))
 
         def setModelData(self, control: QDateTimeEdit, model: Any, index: Any) -> None:
+            """Write the selected date-time back to the guidata model."""
             model.setData(index, control.dateTime().toString("yyyy-MM-dd HH:mm"))
 
     view = editor.arraywidget.view
@@ -148,6 +160,7 @@ def _install_date_time_delegate(editor: Any) -> None:
 
 
 def _seeded(schema: Mapping[str, Any]) -> bool:
+    """Return whether a schema supplies a default or example value."""
     if "default" in schema or schema.get("examples"):
         return True
     kind = schema.get("type")
@@ -200,6 +213,7 @@ class ScalarField(QWidget):
         signal.connect(lambda *_: setattr(self, "modified", True))
 
     def set_value(self, value: Any) -> None:
+        """Display a Python value in the scalar control."""
         if isinstance(self.control, QComboBox):
             index = self.control.findData(value)
             self.control.setCurrentIndex(max(index, 0))
@@ -212,6 +226,7 @@ class ScalarField(QWidget):
         self.modified = True
 
     def value(self) -> Any:
+        """Return the control value converted to its schema type."""
         if isinstance(self.control, QComboBox):
             return self.control.currentData()
         if isinstance(self.control, QCheckBox):
@@ -233,6 +248,7 @@ class ScalarField(QWidget):
         return text
 
     def reset(self, sizes: Mapping[str, int]) -> None:
+        """Restore the scalar's schema suggestion without marking an edit."""
         self.set_value(suggestion(self.schema, sizes))
         self.modified = False
 
@@ -245,6 +261,7 @@ class PathField(ScalarField):
         self.browse.clicked.connect(self._browse)
 
     def _browse(self) -> None:
+        """Select a file and display its path relative to the output directory."""
         path, _ = QFileDialog.getOpenFileName(self, "Select file", str(_output_root(self)))
         if path:
             self.set_value(_relative_path(path, self))
@@ -265,11 +282,13 @@ class DateTimeField(ScalarField):
         self.control.dateTimeChanged.connect(lambda *_: setattr(self, "modified", True))
 
     def set_value(self, value: Any) -> None:
+        """Display a namelist date-time while preserving its original spelling."""
         self._original = str(value)
         self.control.setDateTime(_parse_date_time(value))
         self.modified = True
 
     def value(self) -> str:
+        """Return the original or user-edited date-time string."""
         if not self.modified:
             return self._original
         return self.control.dateTime().toString("yyyy-MM-dd HH:mm")
@@ -309,6 +328,7 @@ class ObjectField(QGroupBox):
             self.rows[name] = row
 
     def value(self) -> dict[str, Any]:
+        """Collect the present component values from this derived object."""
         result: dict[str, Any] = {}
         for name, row in self.rows.items():
             value = row.value()
@@ -317,6 +337,7 @@ class ObjectField(QGroupBox):
         return result
 
     def reset(self, sizes: Mapping[str, int]) -> None:
+        """Restore defaults for every component of the derived object."""
         defaults = (
             suggestion(self.schema, sizes)
             if "default" in self.schema or self.schema.get("examples")
@@ -382,6 +403,7 @@ class ArrayField(QWidget):
         self._update_summary()
 
     def value(self) -> list[Any]:
+        """Return dense array values plus the indices selected for output."""
         if self.inline is not None:
             value = self.inline.value()
             if getattr(self.inline, "modified", False) or isinstance(value, dict) and value:
@@ -390,6 +412,7 @@ class ArrayField(QWidget):
         return InputArray(copy.deepcopy(self._value), set(self.assigned))
 
     def reset(self, sizes: Mapping[str, int]) -> None:
+        """Restore the array suggestion and its assigned indices."""
         self.sizes = sizes
         self._value = suggestion(self.schema, sizes)
         shape = array_shape(self._value)
@@ -400,6 +423,7 @@ class ArrayField(QWidget):
         self._update_summary()
 
     def _update_summary(self) -> None:
+        """Show the array shape or an inline editor for a single element."""
         shape = array_shape(self._value)
         if self.inline is not None:
             self.layout().removeWidget(self.inline)
@@ -416,6 +440,7 @@ class ArrayField(QWidget):
         self.summary.setText("×".join(str(value) for value in shape))
 
     def _edit(self) -> None:
+        """Edit the array in guidata and record changed Fortran indices."""
         try:
             import numpy as np
             from guidata.widgets.arrayeditor import ArrayEditor  # type: ignore[import-untyped]
@@ -467,6 +492,7 @@ class ArrayField(QWidget):
             QMessageBox.critical(self, "Array editor", str(exc))
 
     def _intrinsic_array(self, np: Any) -> Any:
+        """Convert intrinsic array values to a typed NumPy array."""
         kind = self.items.get("type")
         if not isinstance(kind, str):
             raise ValueError("array items must define a string type")
@@ -481,6 +507,7 @@ class ArrayField(QWidget):
         return np.asarray(self._value, dtype=dtype)
 
     def _structured_array(self, np: Any) -> Any:
+        """Convert derived-type values to a structured NumPy array."""
         properties = self.items.get("properties")
         if not isinstance(properties, Mapping):
             raise ValueError("derived array items must define properties")
@@ -513,6 +540,7 @@ class ArrayField(QWidget):
         return result
 
     def _objects_from_structured(self, value: Any, rank: int, np: Any) -> list[Any]:
+        """Convert an edited structured array back to derived-value mappings."""
         data = np.asarray(value)
         if rank == 1:
             data = data.reshape((-1,))
@@ -527,6 +555,7 @@ class ArrayField(QWidget):
     def _display_labels(
         self, displayed_shape: tuple[int, ...], rank: int
     ) -> tuple[list[str] | None, list[str] | None]:
+        """Return configured column and row labels for the displayed array."""
         if rank == 1:
             return axis_labels(self.schema, 1, displayed_shape[1]), None
         if rank != 2:
@@ -566,6 +595,7 @@ class FieldRow(QWidget):
         layout.addWidget(self.field, 1)
 
     def value(self) -> Any:
+        """Return the row value, omitting untouched fields without seed data."""
         if isinstance(self.field, ScalarField) and not (
             self._provided or _seeded(self.schema) or self.field.modified
         ):
@@ -576,9 +606,11 @@ class FieldRow(QWidget):
         return MISSING if isinstance(self.field, ObjectField) and not value else value
 
     def reset(self, sizes: Mapping[str, int]) -> None:
+        """Replace this row with a fresh field using schema suggestions."""
         self.set_value(MISSING, sizes)
 
     def set_value(self, value: Any, sizes: Mapping[str, int]) -> None:
+        """Rebuild the row field for a supplied value and array dimensions."""
         self._provided = value is not MISSING
         self.sizes = sizes
         initial = value
@@ -676,6 +708,7 @@ class DerivedTable(QTableWidget):
         )
 
     def values(self) -> dict[str, Any]:
+        """Collect each table row into scalar or indexed derived values."""
         result = copy.deepcopy(self.data)
         for (name, indices), obj in self.objects.items():
             value = obj.value()
@@ -688,6 +721,7 @@ class DerivedTable(QTableWidget):
         return result
 
     def reset(self) -> None:
+        """Restore defaults and assigned positions for all derived rows."""
         for name, data in self.data.items():
             if isinstance(data, InputArray):
                 shape = array_shape(data)
@@ -764,6 +798,7 @@ class ReferencedArrayTable(QTableWidget):
         )
 
     def values(self) -> dict[str, InputArray]:
+        """Collect non-empty table cells as explicitly assigned arrays."""
         result = {}
         for name, cells in self.rows.items():
             assigned = {
@@ -776,6 +811,7 @@ class ReferencedArrayTable(QTableWidget):
         return result
 
     def reset(self) -> None:
+        """Restore defaults in every referenced-array table row."""
         for name, cells in self.rows.items():
             schema = self.schemas[name]
             defaults = suggestion(schema, self.sizes)
@@ -864,6 +900,7 @@ class NamelistForm(QWidget):
             self.rows[name] = row
 
     def values(self) -> dict[str, Any]:
+        """Collect fields and grouped tables in original schema order."""
         result: dict[str, Any] = {}
         for name, row in self.rows.items():
             value = row.value()
@@ -874,6 +911,7 @@ class NamelistForm(QWidget):
         return {name: result[name] for name in self.schema["properties"] if name in result}
 
     def reset(self) -> None:
+        """Restore every standalone field and grouped table on the form."""
         for row in self.rows.values():
             row.reset(self.sizes)
         for table in self.tables:
@@ -889,6 +927,7 @@ def _field_widget(
     *,
     fit_arrays: bool = False,
 ) -> Any:
+    """Choose the editor widget that matches a property's schema type."""
     kind = schema.get("type")
     if kind == "array":
         return ArrayField(name, schema, value, sizes, parent, fit_existing=fit_arrays)
@@ -902,18 +941,21 @@ def _field_widget(
 
 
 def _field_label(name: str, schema: Mapping[str, Any], required: bool) -> str:
+    """Build a field label from its title, name, and required marker."""
     title = schema.get("title")
     label = f"{title} ({name})" if isinstance(title, str) and title.strip() else name
     return f"{label} *" if required else label
 
 
 def _nested_get(value: Any, indices: tuple[int, ...]) -> Any:
+    """Retrieve a value from nested lists using zero-based indices."""
     for index in indices:
         value = value[index]
     return value
 
 
 def _structured_to_objects(data: Any) -> list[Any]:
+    """Convert a structured NumPy array into nested component mappings."""
     names = data.dtype.names or ()
 
     def build(axis: int, prefix: tuple[int, ...]) -> Any:
@@ -926,10 +968,12 @@ def _structured_to_objects(data: Any) -> list[Any]:
 
 
 def _numpy_scalar(value: Any) -> Any:
+    """Convert a NumPy scalar to its native Python equivalent."""
     return value.item() if hasattr(value, "item") else value
 
 
 def _preserve_omissions(edited: Any, original: Any, defaults: Any) -> Any:
+    """Drop untouched default components that were absent from saved input."""
     if isinstance(edited, list) and isinstance(original, list):
         return [
             _preserve_omissions(item, original[index], defaults) if index < len(original) else item
