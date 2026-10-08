@@ -1,0 +1,59 @@
+title: Falling bodies
+description: Parallel arrays describing the bodies in the simulation.
+x-fortran-namelist: bodies
+type: object
+required: [body_ids, masses, initial_state_files, release_times]
+properties:
+  body_ids:
+    title: Body identifiers
+    type: array
+    x-fortran-shape: n_bodies
+    items:
+      type: integer
+      x-fortran-kind: i4
+      minimum: 1
+    examples: [[1, 2, 3]]
+  masses:
+    title: Masses in kilograms
+    type: array
+    x-fortran-shape: n_bodies
+    items:
+      type: number
+      x-fortran-kind: dp
+      exclusiveMinimum: 0.0
+    examples: [[1.0, 2.5, 5.0]]
+  names:
+    title: Body names
+    type: array
+    x-fortran-shape: n_bodies
+    items:
+      type: string
+      x-fortran-len: 32
+    examples: [[light, medium, heavy]]
+  active:
+    title: Active bodies
+    type: array
+    x-fortran-shape: n_bodies
+    items:
+      type: boolean
+    examples: [[true, true, true]]
+  initial_state_files:
+    title: Initial-state files
+    type: array
+    x-fortran-shape: n_bodies
+    items:
+      type: string
+      format: file-path
+      x-fortran-len: 256
+    examples:
+      - [../input/body_1.csv, ../input/body_2.csv, ../input/body_3.csv]
+  release_times:
+    title: Release times
+    type: array
+    x-fortran-shape: n_bodies
+    items:
+      type: string
+      format: date-time
+      x-fortran-len: 32
+    examples:
+      - ["2026-01-01 00:00", "2026-01-01 00:05", "2026-01-01 00:10"]

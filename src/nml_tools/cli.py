@@ -1385,6 +1385,34 @@ def cli(verbose: int, quiet: int) -> None:
     _configure_logging(verbose, quiet)
 
 
+@cli.command("gui", context_settings=_CONTEXT_SETTINGS)
+@click.option(
+    "--input-path", "-i",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Directory containing nml-config.toml and schemas (default: current directory).",
+)
+@click.option(
+    "--output-path", "-o",
+    type=click.Path(file_okay=False, path_type=Path),
+    help="Directory for namelist files (default: input path).",
+)
+def gui(input_path: Path | None, output_path: Path | None) -> None:
+    """Edit and save namelist files using schema-driven Qt forms."""
+    try:
+        from .gui import launch_gui
+
+        exit_code = launch_gui(input_path, output_path)
+    except ImportError as exc:
+        raise click.ClickException(
+            "GUI dependencies are unavailable; install 'nml-tools[gui]' "
+            f"and a Qt binding: {exc}"
+        ) from exc
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(f"failed to start GUI: {exc}") from exc
+    if exit_code:
+        raise Exit(exit_code)
+
+
 @cli.command("generate", context_settings=_CONTEXT_SETTINGS)
 @click.option(
     "--config",

@@ -1,0 +1,45 @@
+title: Gravity configuration
+description: Spatial axes and gravitational acceleration.
+x-fortran-namelist: gravity
+type: object
+required: [gravity_vector]
+properties:
+  spatial_dimensions:
+    title: Number of spatial dimensions
+    type: integer
+    x-fortran-kind: i4
+    minimum: 1
+    maximum: 3
+    default: 3
+  gravitational_constant:
+    title: Gravitational constant
+    description: Gravitational constant in m3 kg-1 s-2.
+    type: number
+    x-fortran-kind: dp
+    exclusiveMinimum: 0.0
+    default: 6.6743e-11
+  axis_codes:
+    title: Axis identifiers
+    type: array
+    x-fortran-shape: 3
+    items:
+      type: integer
+      x-fortran-kind: i4
+    examples: [[1, 2, 3]]
+    x-nml-tools-ui:
+      axes:
+        "1":
+          labels: [X, Y, Z]
+  gravity_vector:
+    title: Gravity vector
+    description: Acceleration components in m s-2.
+    type: array
+    x-fortran-shape: 3
+    items:
+      type: number
+      x-fortran-kind: dp
+    examples: [[0.0, 0.0, -9.81]]
+    x-nml-tools-ui:
+      axes:
+        "1":
+          labels: [X, Y, Z]

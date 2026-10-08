@@ -937,6 +937,57 @@ Character substring assignment, complex schema values, nested derived values,
 component arrays, nondefault lower bounds, and user-defined formatted I/O are
 currently explicit capability boundaries.
 
+## GUI
+
+Install the current checkout with its optional GUI dependencies and a Qt binding
+(Python 3.9 or newer):
+
+```bash
+python -m pip install '.[gui]' PyQt5
+nml-tools gui -i /path/to/schemas -o /path/to/project
+```
+
+QtPy also permits other supported Qt bindings. Omit `-i` to use the current
+directory, and `-o` to save alongside `nml-config.toml`.
+
+The editor loads each profile's `default_file` from the output directory and
+saves directly to that namelist file. Missing values use schema defaults, then
+examples or type-specific suggestions. Invalid input is reported. No JSON
+configuration or JSON-to-namelist conversion is involved. Selected groups are
+rewritten on save; other groups and their comments remain intact.
+
+Each profile has a tab with a namelist list, editable pages, navigation, reset,
+cancel, and save actions. The Config tab applies runtime dimensions with Run;
+the `+` tab can import a `.nml` file or create another profile. One-element
+one-dimensional arrays use inline scalar or derived-object editors while
+remaining arrays in the saved namelist. Resizable arrays retain a resize action.
+
+Applications can launch a subset of the configured profiles:
+
+```python
+from nml_tools.gui import launch_gui
+
+launch_gui(
+    schemas_dir="/path/to/schemas",
+    output_dir="/path/to/project",
+    file_profiles={"main": ["mainconfig", "time_periods"], "parameter": []},
+    initial_values={"main": {"mainconfig": {"nDomains": 2}}},
+    initial_dimensions={"max_domains": 2},
+)
+```
+
+`file_profiles` is the third argument. `None` or `{}` selects all configured
+profiles; an empty list selects every namelist in that profile. Names are
+checked case-insensitively and pages retain TOML order. `initial_values` is an
+in-memory dictionary of profile/namelist/field values applied over existing
+input. Use keyword arguments for values and dimensions when migrating callers
+of the previous GUI API.
+
+Named runtime dimensions come from TOML, `initial_dimensions`, or the Config
+controls; partial namelist assignments cannot reliably recover them. Existing
+Qt applications reuse their QApplication; importing `nml_tools.gui` alone
+does not import Qt.
+
 ## Error handling
 
 Generated type-bound procedures return integer status codes and accept an

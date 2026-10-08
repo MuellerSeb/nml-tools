@@ -1,0 +1,38 @@
+&run
+  run_id = 1
+  label = "gravity-demo"
+  start_time = "2026-01-01 00:00"
+  time_step_seconds = 0.1
+  enabled = .true.
+  restart_file = "../input/restart_state.dat"
+/
+&gravity
+  spatial_dimensions = 3
+  gravitational_constant = 6.6743e-11
+  axis_codes(1) = 1
+  axis_codes(2) = 2
+  axis_codes(3) = 3
+  gravity_vector(1) = 0.0
+  gravity_vector(2) = 0.0
+  gravity_vector(3) = -9.81
+/
+&bodies
+  body_ids(1) = 1
+  body_ids(2) = 2
+  body_ids(3) = 3
+  masses(1) = 1.0
+  masses(2) = 2.5
+  masses(3) = 5.0
+  names(1) = "light"
+  names(2) = "medium"
+  names(3) = "heavy"
+  active(1) = .true.
+  active(2) = .true.
+  active(3) = .true.
+  initial_state_files(1) = "../input/body_1.csv"
+  initial_state_files(2) = "../input/body_2.csv"
+  initial_state_files(3) = "../input/body_3.csv"
+  release_times(1) = "2026-01-01 00:00"
+  release_times(2) = "2026-01-01 00:05"
+  release_times(3) = "2026-01-01 00:10"
+/
