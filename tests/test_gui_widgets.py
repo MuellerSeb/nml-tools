@@ -104,7 +104,9 @@ def test_numeric_fields_use_appropriate_controls(application):
     assert isinstance(wide.control, QLineEdit)
 
 
-def test_inline_array_title_and_hint_styles(application):
+def test_inline_array_title_and_hint_styles(application, monkeypatch):
+    messages = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: messages.append(args[1:]))
     array = FieldRow(
         "weights",
         {
@@ -125,6 +127,24 @@ def test_inline_array_title_and_hint_styles(application):
     assert array.fieldLabel.isHidden() and array.infoButton.isHidden()
     assert inline.tableWidget.columnCount() == 2
     assert [inline.tableWidget.horizontalHeaderItem(i).text() for i in range(2)] == ["1", "2"]
+    assert inline.tableWidget.height() < 100
+    inline.infoButton.click()
+    assert messages == [("Body weights", "Weight for each body.")]
+
+    aligned = NamelistForm(
+        {
+            "type": "object",
+            "properties": {
+                "short": {"type": "integer"},
+                "long": {"title": "A much longer field label", "type": "string"},
+            },
+        },
+        {"short": 1, "long": "value"},
+        {},
+    )
+    aligned.show()
+    application.processEvents()
+    assert len({row.editorHost.geometry().x() for row in aligned.rows.values()}) == 1
 
     default = FieldRow("label", {"type": "string", "default": "fallback"}, MISSING, {})
     example = FieldRow("note", {"type": "string", "examples": ["sample"]}, MISSING, {})

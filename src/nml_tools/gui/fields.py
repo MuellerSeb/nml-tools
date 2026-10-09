@@ -479,6 +479,7 @@ class ObjectField(QGroupBox):
                 row.field.show_hint(hint_source[name], self.has_default)
             layout.addRow(row)
             self.rows[name] = row
+        _align_field_rows(self.rows)
 
     def value(self) -> dict[str, Any]:
         """Collect the present component values from this derived object."""
@@ -529,9 +530,10 @@ class InlineArrayTable(QWidget):
         self.cells: dict[tuple[int, ...], FieldRow] = {}
         self.titleLabel.setText(_field_label(name, schema, required))
         description = schema.get("description")
-        self.infoButton.setVisible(isinstance(description, str) and bool(description.strip()))
+        has_description = isinstance(description, str) and bool(description.strip())
+        self.infoButton.setVisible(has_description)
         self.infoButton.setStyleSheet(f"color: {_palette_color(QPalette.Link)}; font-weight: bold;")
-        if self.infoButton.isVisible():
+        if has_description:
             self.infoButton.clicked.connect(
                 lambda: QMessageBox.information(
                     self, str(schema.get("title", name)), str(description).strip()
@@ -599,7 +601,7 @@ class InlineArrayTable(QWidget):
         cast(QHeaderView, table.horizontalHeader()).setSectionResizeMode(
             QHeaderView.ResizeToContents
         )
-        table.resizeRowsToContents()
+        _fit_table_height(table)
 
     def value(self) -> InputArray:
         """Return dense values and only defaulted, loaded, or edited indices."""
@@ -1073,6 +1075,27 @@ class FieldRow(QWidget):
             self.field.modified = True
 
 
+def _align_field_rows(rows: Mapping[str, FieldRow]) -> None:
+    """Align editors by giving visible labels the widest label width."""
+    labels = [row.fieldLabel for row in rows.values() if not row.fieldLabel.isHidden()]
+    if labels:
+        width = max(label.sizeHint().width() for label in labels)
+        for label in labels:
+            label.setFixedWidth(width)
+
+
+def _fit_table_height(table: QTableWidget) -> None:
+    """Fit short tables to their rows and cap taller tables for scrolling."""
+    table.resizeRowsToContents()
+    height = (
+        table.horizontalHeader().height()
+        + sum(table.rowHeight(row) for row in range(table.rowCount()))
+        + 2 * table.frameWidth()
+        + 2
+    )
+    table.setFixedHeight(min(400, height))
+
+
 class DerivedTable(QTableWidget):
     """Same-reference objects as rows, reusing the existing component editors."""
 
@@ -1181,10 +1204,7 @@ class DerivedTable(QTableWidget):
                     obj.rows[columns[0]].layout().addWidget(info)
                 self.objects[name, indices] = obj
                 self.table_rows.append((name, indices, item))
-        self.resizeRowsToContents()
-        self.setMinimumHeight(
-            min(400, header.height() + sum(self.rowHeight(i) for i in range(self.rowCount())) + 4)
-        )
+        _fit_table_height(self)
         self.installEventFilter(self)
 
     def values(self) -> dict[str, Any]:
@@ -1347,11 +1367,7 @@ class ReferencedArrayTable(QTableWidget):
                 self.setCellWidget(row_index, index + 1, cell)
                 cells.append(cell)
             self.rows[name] = cells
-        self.resizeRowsToContents()
-        header = cast(QHeaderView, self.horizontalHeader())
-        self.setMinimumHeight(
-            min(400, header.height() + sum(self.rowHeight(i) for i in range(self.rowCount())) + 4)
-        )
+        _fit_table_height(self)
         self.installEventFilter(self)
 
     def values(self) -> dict[str, InputArray]:
@@ -1493,6 +1509,7 @@ class NamelistForm(QWidget):
                 row.field.setEnabled(False)
             layout.addRow(row)
             self.rows[name] = row
+        _align_field_rows(self.rows)
 
     def values(self) -> dict[str, Any]:
         """Collect fields and grouped tables in original schema order."""
