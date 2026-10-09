@@ -1,9 +1,9 @@
-# Example 06: GUI configuration
+# Example 07: GUI project profiles
 
 This example uses the `nml-tools` GUI to configure a small multi-body gravity
 simulation. It demonstrates scalar and array fields for integers, floating-point
 numbers, strings, booleans, file paths, and date-times. Four namelist schemas are
-split across two output-file profiles.
+split across three file profiles and reused by two project profiles.
 
 ## Requirements and installation
 
@@ -27,7 +27,7 @@ guidata, and NumPy.
 ## Example layout
 
 ```text
-06_gui/
+07_gui/
 ├── nml-config.toml       # dimensions, schemas, and file profiles
 ├── schemas/              # four JSON Schema-compatible YAML files
 │   ├── run.yml
@@ -46,20 +46,27 @@ The input directory passed to the GUI must contain `nml-config.toml`; schema
 paths in that file are relative to the same directory. The output directory must
 be writable. It may be empty initially.
 
-The profiles in this example are:
+The file profiles are:
 
-- `simulation`: `run`, `gravity`, and `bodies` → `simulation.nml`
-- `reporting`: `run` and `outputs` → `reporting.nml`
+- `setup`: `run` and `gravity` → `setup.nml`
+- `bodies`: `bodies` → `bodies.nml`
+- `reporting`: `outputs` → `reporting.nml`
 
-The shared `run` namelist appears in both files and can be edited independently.
+The project profiles are:
+
+- `simulation`: `setup` and `bodies`
+- `report_preview`: `setup` and `reporting`
+
+This demonstrates how projects can reuse the same `setup` file profile while
+presenting only the files relevant to each workflow.
 
 ## Run the example
 
 From the repository root:
 
 ```bash
-mkdir -p examples/06_gui/out
-nml-tools gui -i examples/06_gui -o examples/06_gui/out
+mkdir -p examples/07_gui/out
+nml-tools gui -i examples/07_gui -o examples/07_gui/out
 ```
 
 Or from this directory:
@@ -68,18 +75,20 @@ Or from this directory:
 nml-tools gui -i . -o out
 ```
 
-In the initial Config tab, keep or change `n_bodies` and `n_snapshots`, then
-click **Run**. Edit each profile and use **Save** or **Save all**. File browser
-selections are stored relative to `out`, which is why the supplied defaults use
-paths such as `../input/body_1.csv`.
+Choose a project in the project selector and click **Add**. Its two file profiles
+appear in the project tree and as editable tabs. Use **Save** or **Save all** to
+write their namelist files. File browser selections are stored relative to
+`out`, which is why the supplied defaults use paths such as
+`../input/body_1.csv`.
 
 ## Expected output
 
-After saving both profiles, `out` contains:
+After adding and saving both project profiles, `out` contains:
 
 ```text
 out/
-├── simulation.nml
+├── setup.nml
+├── bodies.nml
 └── reporting.nml
 ```
 
@@ -96,4 +105,5 @@ Arrays are written with explicit Fortran indices, for example:
 /
 ```
 
-Running the same command again reloads existing values from these namelist files.
+Only files belonging to the selected project need to be saved. Running the same
+command again reloads existing values from the namelist files that are present.

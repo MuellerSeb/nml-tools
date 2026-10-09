@@ -12,16 +12,22 @@ __all__ = ["launch_gui"]
 def launch_gui(
     schemas_dir: Path | str | None = None,
     output_dir: Path | str | None = None,
-    file_profiles: Mapping[str, list[str]] | None = None,
+    project_profiles: str
+    | Mapping[str, Mapping[str, list[str]]]
+    | Mapping[str, list[str]]
+    | None = None,
     initial_values: Mapping[str, Any] | None = None,
     initial_dimensions: Mapping[str, int] | None = None,
 ) -> int:
-    """Edit selected profiles; empty lists select all namelists in that profile.
+    """Edit selected projects; nested mappings select their files/namelists.
 
-    None or an empty mapping selects all configured profiles. Values are nested
-    by profile, namelist, and field, and override existing namelist input.
-    Dimensions override TOML defaults. Output defaults to schemas_dir.
+    A project-profile name selects it from TOML. None selects all projects. The
+    legacy flat file-profile mapping is still accepted. Values remain keyed by
+    file profile and override existing namelist input. Output defaults to
+    schemas_dir.
     """
     from .app import launch_gui as _launch_gui
 
-    return _launch_gui(schemas_dir, output_dir, file_profiles, initial_values, initial_dimensions)
+    return _launch_gui(
+        schemas_dir, output_dir, project_profiles, initial_values, initial_dimensions
+    )

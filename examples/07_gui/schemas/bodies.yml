@@ -12,7 +12,8 @@ properties:
       type: integer
       x-fortran-kind: i4
       minimum: 1
-    examples: [[1, 2, 3]]
+    default: [1, 2, 3]
+    x-fortran-default-repeat: true
   masses:
     title: Masses in kilograms
     type: array
@@ -21,7 +22,8 @@ properties:
       type: number
       x-fortran-kind: dp
       exclusiveMinimum: 0.0
-    examples: [[1.0, 2.5, 5.0]]
+    default: [1.0, 2.5, 5.0]
+    x-fortran-default-repeat: true
   names:
     title: Body names
     type: array
@@ -45,8 +47,8 @@ properties:
       type: string
       format: file-path
       x-fortran-len: 256
-    examples:
-      - [../input/body_1.csv, ../input/body_2.csv, ../input/body_3.csv]
+    default: [../input/body_1.csv, ../input/body_2.csv, ../input/body_3.csv]
+    x-fortran-default-repeat: true
   release_times:
     title: Release times
     type: array
@@ -55,5 +57,5 @@ properties:
       type: string
       format: date-time
       x-fortran-len: 32
-    examples:
-      - ["2026-01-01 00:00", "2026-01-01 00:05", "2026-01-01 00:10"]
+    default: ["2026-01-01 00:00", "2026-01-01 00:05", "2026-01-01 00:10"]
+    x-fortran-default-repeat: true

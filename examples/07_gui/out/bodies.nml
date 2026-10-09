@@ -1,21 +1,3 @@
-&run
-  run_id = 1
-  label = "gravity-demo"
-  start_time = "2026-01-01 00:00"
-  time_step_seconds = 0.1
-  enabled = .true.
-  restart_file = "../input/restart_state.dat"
-/
-&gravity
-  spatial_dimensions = 3
-  gravitational_constant = 6.6743e-11
-  axis_codes(1) = 1
-  axis_codes(2) = 2
-  axis_codes(3) = 3
-  gravity_vector(1) = 0.0
-  gravity_vector(2) = 0.0
-  gravity_vector(3) = -9.81
-/
 &bodies
   body_ids(1) = 1
   body_ids(2) = 2

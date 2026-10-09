@@ -7,21 +7,24 @@ import math
 import os
 import tempfile
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from itertools import product
 from pathlib import Path
 from typing import Any, Mapping, cast
 
 import click
+import yaml
 
+from .._dimensions import DimensionSource, infer_runtime_dimensions
 from .._namelist_eval import EvaluatedGroup, LeafState, _expand_values, _value_count, evaluate_group
 from .._namelist_parser import RawValue, ScalarSelector, parse_namelist
 from ..cli import (
-    _iter_file_profiles,
     _load_config_checked,
+    _load_config_metadata,
     _load_constants,
     _load_dimensions,
     _load_namelist_registry,
+    _load_toml,
     _namelist_registry_by_key,
 )
 from ..codegen_fortran import _format_scalar_default
@@ -30,9 +33,22 @@ from ..validate import _scalar_constraints, _validate_scalar_value, validate_sch
 from .arrays import initial_array, resolve_shape
 
 MISSING = object()
+GUI_REF_ORIGIN_KEY = "_nml_tools_gui_ref_origin"
 
 
-class InputArray(list):
+def _mark_referenced_arrays(loaded: Iterable[Any]) -> None:
+    """Keep array-reference identity needed only by the GUI table layout."""
+    for namelist in loaded:
+        path = namelist.entry["schema"]
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw_properties = raw.get("properties", {}) if isinstance(raw, Mapping) else {}
+        for name, child in namelist.schema.get("properties", {}).items():
+            source = raw_properties.get(name, {})
+            if child.get("type") == "array" and isinstance(source.get("$ref"), str):
+                child[GUI_REF_ORIGIN_KEY] = source["$ref"]
+
+
+class InputArray(list[Any]):
     """Dense editor values with the indices selected for namelist output."""
 
     def __init__(self, values: list[Any], assigned: set[tuple[int, ...]]):
@@ -126,6 +142,20 @@ class GuiProfile:
     description: str | None
     default_file: str
     pages: tuple[NamelistPage, ...]
+    required: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class GuiProjectProfile:
+    """An ordered set of namelist files edited as one project."""
+
+    name: str
+    key: str
+    title: str
+    description: str | None
+    profiles: tuple[GuiProfile, ...]
+    source: Path | None = None
+    custom: bool = False
 
 
 @dataclass(frozen=True)
@@ -138,6 +168,8 @@ class GuiProject:
     profiles: tuple[GuiProfile, ...]
     output_dir: Path | None = None
     namelists: tuple[NamelistPage, ...] = ()
+    project_profiles: tuple[GuiProjectProfile, ...] = ()
+    dimension_sources: dict[str, DimensionSource] = field(default_factory=dict)
 
     @property
     def output_root(self) -> Path:
@@ -151,13 +183,29 @@ class GuiProject:
                 return profile
         raise KeyError(key)
 
+    def project_profile(self, key: str) -> GuiProjectProfile:
+        """Find a project profile by its case-insensitive name."""
+        for profile in self.project_profiles:
+            if profile.key == key.lower():
+                return profile
+        raise KeyError(key)
+
 
 def load_project(
     schemas_dir: Path | str | None = None,
     output_dir: Path | str | None = None,
+    project_profiles: str
+    | Mapping[str, Mapping[str, list[str]]]
+    | Mapping[str, list[str]]
+    | None = None,
+    *,
     file_profiles: Mapping[str, list[str]] | None = None,
 ) -> GuiProject:
-    """Load schemas and profiles, using a separate output directory if given."""
+    """Load schemas and selected project profiles from the project config."""
+    if file_profiles is not None:
+        if project_profiles is not None:
+            raise ValueError("pass project_profiles or file_profiles, not both")
+        project_profiles = file_profiles
     root = Path.cwd() if schemas_dir is None else Path(schemas_dir)
     root = root.resolve()
     output_root = root if output_dir is None else Path(output_dir).resolve()
@@ -170,8 +218,10 @@ def load_project(
         constants, _ = _load_constants(config)
         dimensions, _ = _load_dimensions(config, constants)
         loaded = _load_namelist_registry(config, resolved_path.parent, SchemaResolver())
+        _mark_referenced_arrays(loaded)
         registry = _namelist_registry_by_key(loaded)
-        configured_profiles = _iter_file_profiles(config, registry)
+        metadata = _load_config_metadata(config, registry)
+        configured_profiles = metadata.file_profiles
     except click.ClickException as exc:
         raise RuntimeError(exc.format_message()) from exc
     except (OSError, ValueError) as exc:
@@ -204,9 +254,26 @@ def load_project(
                 description=configured.description,
                 default_file=configured.default_file,
                 pages=pages,
+                required=tuple(configured.required),
             )
         )
 
+    by_key = {profile.key: profile for profile in profiles}
+    configured_projects = tuple(
+        GuiProjectProfile(
+            configured.name,
+            configured.key,
+            configured.title or configured.name,
+            configured.description,
+            tuple(by_key[key] for key in configured.file_profiles),
+            config_path,
+        )
+        for configured in metadata.project_profiles.values()
+    )
+    if not configured_projects:
+        configured_projects = (
+            GuiProjectProfile("default", "default", "Default", None, tuple(profiles), config_path),
+        )
     project = GuiProject(
         root,
         constants,
@@ -214,12 +281,69 @@ def load_project(
         tuple(profiles),
         output_root,
         namelists,
+        configured_projects,
+        metadata.dimension_sources,
     )
-    if file_profiles is None:
+    if project_profiles is None or project_profiles == {}:
         return project
-    if not isinstance(file_profiles, Mapping):
-        raise ValueError("file_profiles must map profile names to lists of namelist names")
-    selected = {}
+    if isinstance(project_profiles, str):
+        try:
+            selected_project = project.project_profile(project_profiles)
+        except KeyError as exc:
+            raise ValueError(f"unknown project profile '{project_profiles}'") from exc
+        return replace(
+            project,
+            profiles=selected_project.profiles,
+            project_profiles=(selected_project,),
+        )
+    if not isinstance(project_profiles, Mapping):
+        raise ValueError("project_profiles must be a name or mapping")
+    if project_profiles and all(isinstance(value, list) for value in project_profiles.values()):
+        selected_profiles = _select_profiles(
+            project, cast(Mapping[str, list[str]], project_profiles)
+        )
+        implicit = GuiProjectProfile(
+            "default", "default", "Default", None, selected_profiles, custom=True
+        )
+        return replace(project, profiles=selected_profiles, project_profiles=(implicit,))
+    if not all(isinstance(value, Mapping) for value in project_profiles.values()):
+        raise ValueError("project_profiles must map project names to file-profile mappings")
+    selected_projects: list[GuiProjectProfile] = []
+    union: dict[str, GuiProfile] = {}
+    for project_name, selection in project_profiles.items():
+        if not isinstance(project_name, str):
+            raise ValueError("project profile names must be strings")
+        configured_project = next(
+            (item for item in project.project_profiles if item.key == project_name.lower()), None
+        )
+        available = configured_project.profiles if configured_project else project.profiles
+        base = replace(project, profiles=available)
+        chosen = (
+            available
+            if not selection
+            else _select_profiles(base, cast(Mapping[str, list[str]], selection))
+        )
+        item = GuiProjectProfile(
+            configured_project.name if configured_project else project_name,
+            project_name.lower(),
+            configured_project.title if configured_project else project_name,
+            configured_project.description if configured_project else None,
+            chosen,
+            configured_project.source if configured_project else None,
+            configured_project is None,
+        )
+        selected_projects.append(item)
+        union.update((profile.key, profile) for profile in chosen)
+    return replace(
+        project, profiles=tuple(union.values()), project_profiles=tuple(selected_projects)
+    )
+
+
+def _select_profiles(
+    project: GuiProject, file_profiles: Mapping[str, list[str]]
+) -> tuple[GuiProfile, ...]:
+    """Apply the legacy file-profile selection shape."""
+    selected: dict[str, GuiProfile] = {}
     for name, names in file_profiles.items():
         if not isinstance(name, str) or not isinstance(names, list):
             raise ValueError("file_profiles must map profile names to lists of namelist names")
@@ -238,11 +362,7 @@ def load_project(
         selected[profile.key] = replace(
             profile, pages=tuple(page for page in profile.pages if not keys or page.key in keys)
         )
-    if selected:
-        project = replace(
-            project, profiles=tuple(selected[p.key] for p in project.profiles if p.key in selected)
-        )
-    return project
+    return tuple(selected[p.key] for p in project.profiles if p.key in selected)
 
 
 def create_virtual_project(
@@ -297,6 +417,178 @@ def create_virtual_project(
         pages=tuple(selected),
     )
     return replace(project, profiles=(profile,))
+
+
+def discover_project_files(project: GuiProject) -> tuple[Path, ...]:
+    """Find additional project-profile TOML files in input and output roots."""
+    config = (project.root / "nml-config.toml").resolve()
+    paths = {
+        path.resolve()
+        for root in {project.root, project.output_root}
+        for path in root.glob("*.toml")
+        if path.name != "nml-config.toml" and path.resolve() != config
+    }
+    return tuple(sorted(paths))
+
+
+def load_project_profile_file(project: GuiProject, path: Path) -> GuiProjectProfile:
+    """Load one custom project profile against the configured schema registry."""
+    data = _load_toml(path)
+    available = {profile.key: profile for profile in project.profiles}
+    pages = {page.key: page for page in project.namelists}
+    raw_files = data.get("file_profiles", [])
+    if not isinstance(raw_files, list):
+        raise ValueError("'file_profiles' must be a list")
+    custom_keys: set[str] = set()
+    for entry in raw_files:
+        if not isinstance(entry, Mapping):
+            raise ValueError("each file profile must be a table")
+        name = entry.get("name")
+        default_file = entry.get("default_file")
+        members = entry.get("namelists")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("file profile must define a non-empty name")
+        if not isinstance(default_file, str) or not default_file.strip():
+            raise ValueError(f"file profile '{name}' must define default_file")
+        if (
+            not isinstance(members, list)
+            or not members
+            or not all(isinstance(item, str) for item in members)
+        ):
+            raise ValueError(f"file profile '{name}' must define namelist names")
+        unknown = [item for item in members if item.lower() not in pages]
+        if unknown:
+            raise ValueError(f"file profile '{name}' has unknown namelists: {', '.join(unknown)}")
+        key = name.lower()
+        if key in custom_keys:
+            raise ValueError(f"file profile '{name}' is defined more than once")
+        custom_keys.add(key)
+        member_keys = [item.lower() for item in members]
+        if len(member_keys) != len(set(member_keys)):
+            raise ValueError(f"file profile '{name}' repeats a namelist")
+        required = entry.get("required", [])
+        if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+            raise ValueError(f"file profile '{name}' required members must be strings")
+        required_keys = [item.lower() for item in required]
+        if len(required_keys) != len(set(required_keys)) or not set(required_keys) <= set(
+            member_keys
+        ):
+            raise ValueError(f"file profile '{name}' has invalid required namelists")
+        title = _optional_toml_text(entry, "title", f"file profile '{name}'")
+        description = _optional_toml_text(entry, "description", f"file profile '{name}'")
+        profile = GuiProfile(
+            name.strip(),
+            key,
+            title or name,
+            description,
+            default_file.strip(),
+            tuple(pages[item] for item in member_keys),
+            tuple(required_keys),
+        )
+        _profile_path(project, profile)
+        available[key] = profile
+    raw_projects = data.get("project_profiles")
+    if not isinstance(raw_projects, list) or len(raw_projects) != 1:
+        raise ValueError("additional TOML must define exactly one project profile")
+    entry = raw_projects[0]
+    if not isinstance(entry, Mapping):
+        raise ValueError("project profile must be a table")
+    name = entry.get("name")
+    members = entry.get("file_profiles")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("project profile must define a non-empty name")
+    if (
+        not isinstance(members, list)
+        or not members
+        or not all(isinstance(item, str) for item in members)
+    ):
+        raise ValueError(f"project profile '{name}' must define file profile names")
+    member_keys = [item.lower() for item in members]
+    if len(member_keys) != len(set(member_keys)):
+        raise ValueError(f"project profile '{name}' repeats a file profile")
+    unknown = [item for item in members if item.lower() not in available]
+    if unknown:
+        raise ValueError(f"project profile '{name}' has unknown files: {', '.join(unknown)}")
+    title = _optional_toml_text(entry, "title", f"project profile '{name}'")
+    description = _optional_toml_text(entry, "description", f"project profile '{name}'")
+    return GuiProjectProfile(
+        name.strip(),
+        name.lower(),
+        title or name,
+        description,
+        tuple(available[item] for item in member_keys),
+        path.resolve(),
+        True,
+    )
+
+
+def _optional_toml_text(entry: Mapping[str, Any], key: str, label: str) -> str | None:
+    """Read one optional non-empty string from a custom project file."""
+    value = entry.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{label} '{key}' must be a string")
+    return value.strip() or None
+
+
+def save_project_profile(project: GuiProject, profile: GuiProjectProfile) -> Path:
+    """Persist one custom project profile in the schema directory."""
+    if not profile.custom:
+        raise ValueError("configured project profiles are read-only")
+    if not profile.key.replace("-", "_").isalnum():
+        raise ValueError("project name may contain only letters, numbers, '-' and '_'")
+    path = (project.root / f"{profile.key}.toml").resolve()
+    if project.root not in path.parents:
+        raise ValueError("custom project file must remain inside the schema directory")
+    if path.exists() and (profile.source is None or path != profile.source.resolve()):
+        existing = load_project_profile_file(project, path)
+        if existing.key != profile.key:
+            raise ValueError(f"refusing to overwrite unrelated TOML file '{path.name}'")
+    lines: list[str] = []
+    for item in profile.profiles:
+        lines.extend(
+            [
+                "[[file_profiles]]",
+                f'name = "{_toml_escape(item.name)}"',
+                f'default_file = "{_toml_escape(item.default_file)}"',
+                "namelists = ["
+                + ", ".join(f'"{_toml_escape(page.name)}"' for page in item.pages)
+                + "]",
+            ]
+        )
+        if item.title != item.name:
+            lines.append(f'title = "{_toml_escape(item.title)}"')
+        if item.description:
+            lines.append(f'description = "{_toml_escape(item.description)}"')
+        if item.required:
+            lines.append(
+                "required = ["
+                + ", ".join(f'"{_toml_escape(name)}"' for name in item.required)
+                + "]"
+            )
+        lines.append("")
+    lines.extend(
+        [
+            "[[project_profiles]]",
+            f'name = "{_toml_escape(profile.name)}"',
+            "file_profiles = ["
+            + ", ".join(f'"{_toml_escape(item.name)}"' for item in profile.profiles)
+            + "]",
+            "",
+        ]
+    )
+    if profile.title != profile.name:
+        lines.insert(-1, f'title = "{_toml_escape(profile.title)}"')
+    if profile.description:
+        lines.insert(-1, f'description = "{_toml_escape(profile.description)}"')
+    _atomic_write(path, "\n".join(lines))
+    return path
+
+
+def _toml_escape(value: str) -> str:
+    """Escape a string for the small TOML subset written by the GUI."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
 
 def _evaluated_group_values(
@@ -570,9 +862,25 @@ def recover_dimensions(
         paths = (_profile_path(project, profile) for profile in project.profiles)
     pages = project.namelists or tuple(page for p in project.profiles for page in p.pages)
     schemas = {page.key: page.schema for page in pages}
+    unique_paths = tuple(dict.fromkeys(paths))
+    if project.dimension_sources:
+        parsed = [
+            parse_namelist(path.read_text(encoding="utf-8"), source=str(path))
+            for path in unique_paths
+            if path.exists()
+        ]
+        return infer_runtime_dimensions(
+            parsed,
+            sources=project.dimension_sources,
+            schemas=schemas,
+            defaults=project.default_dimensions,
+            overrides=overrides,
+            constants=project.constants,
+        )
     extents: dict[str, int] = {}
     explicit: dict[str, int] = {}
-    for path in dict.fromkeys(paths):
+    # Compatibility for older configs which predate explicit dimension sources.
+    for path in unique_paths:
         if not path.exists():
             continue
         _, groups = _parsed_groups(path)
@@ -640,6 +948,91 @@ def recover_dimensions(
     return dimensions
 
 
+def ensure_dimension_sources(
+    project: GuiProject, profiles: Iterable[GuiProfile]
+) -> tuple[GuiProfile, ...]:
+    """Ensure every configured dimension source occurs in exactly one file."""
+    result = list(profiles)
+    pages = {page.key: page for page in project.namelists}
+    used = set().union(*(_schema_dimensions(page.schema) for item in result for page in item.pages))
+    for dimension, source in project.dimension_sources.items():
+        if dimension not in used:
+            continue
+        occurrences = [
+            index
+            for index, profile in enumerate(result)
+            if any(page.key == source.namelist for page in profile.pages)
+        ]
+        if len(occurrences) > 1:
+            raise ValueError(
+                f"dimension '{dimension}' source namelist '{source.namelist}' "
+                "must occur in exactly one file profile"
+            )
+        if occurrences:
+            continue
+        source_page = pages.get(source.namelist)
+        if source_page is None:
+            raise ValueError(
+                f"dimension '{dimension}' source namelist '{source.namelist}' is unavailable"
+            )
+        if not result:
+            raise ValueError(
+                f"add a file profile for dimension source namelist '{source.namelist}'"
+            )
+        result[0] = replace(result[0], pages=(*result[0].pages, source_page))
+    return tuple(result)
+
+
+def _schema_dimensions(schema: Mapping[str, Any]) -> set[str]:
+    """Collect symbolic array dimensions used by a resolved schema."""
+    result: set[str] = set()
+    shape = schema.get("x-fortran-shape")
+    for token in shape if isinstance(shape, list) else [shape]:
+        if isinstance(token, str) and token != ":":
+            result.add(token.lower())
+    properties = schema.get("properties", {})
+    if isinstance(properties, Mapping):
+        for child in properties.values():
+            if isinstance(child, Mapping):
+                result.update(_schema_dimensions(child))
+    items = schema.get("items")
+    if isinstance(items, Mapping):
+        result.update(_schema_dimensions(items))
+    return result
+
+
+def dimension_source_values(
+    project: GuiProject,
+    profiles: Iterable[GuiProfile],
+    dimensions: Mapping[str, int],
+) -> dict[str, dict[str, dict[str, int]]]:
+    """Return project dimensions expressed as their source namelist fields."""
+    result: dict[str, dict[str, dict[str, int]]] = {}
+    profile_items = tuple(profiles)
+    used = set().union(
+        *(_schema_dimensions(page.schema) for item in profile_items for page in item.pages)
+    )
+    for dimension, source in project.dimension_sources.items():
+        if dimension not in used:
+            continue
+        matches = [
+            profile
+            for profile in profile_items
+            if any(page.key == source.namelist for page in profile.pages)
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"dimension '{dimension}' source namelist '{source.namelist}' "
+                "must occur in exactly one file profile"
+            )
+        profile = matches[0]
+        page = next(page for page in profile.pages if page.key == source.namelist)
+        result.setdefault(profile.key, {}).setdefault(page.name, {})[source.property] = dimensions[
+            dimension
+        ]
+    return result
+
+
 def load_profile(
     project: GuiProject,
     profile: GuiProfile,
@@ -668,29 +1061,6 @@ def load_profile(
             )
             result[page.name] = _evaluated_group_values(evaluated, page.schema, sizes)
     return result
-
-
-def import_profile(
-    project: GuiProject, path: Path, dimensions: Mapping[str, int]
-) -> tuple[GuiProfile, dict[str, Any]]:
-    """Import a namelist file, checking every group against the project registry."""
-    _, groups = _parsed_groups(path)
-    unknown = groups.keys() - {page.key for page in project.namelists}
-    if unknown:
-        raise ValueError(
-            f"Namelists {', '.join(sorted(unknown))} are not part of this nml-config.toml"
-        )
-    matches = [
-        profile
-        for profile in project.profiles
-        if Path(profile.default_file).name.casefold() == path.name.casefold()
-    ]
-    profile = (
-        matches[0]
-        if len(matches) == 1
-        else create_virtual_project(project, path.stem, path.name, groups).profiles[0]
-    )
-    return profile, load_profile(project, profile, dimensions, path)
 
 
 def _assignments(name: str, value: Any, schema: Mapping[str, Any]) -> Iterable[str]:

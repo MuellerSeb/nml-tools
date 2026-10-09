@@ -6,10 +6,11 @@ from textwrap import dedent
 import pytest
 
 from nml_tools.gui.model import (
+    GUI_REF_ORIGIN_KEY,
     create_virtual_project,
-    import_profile,
     load_profile,
     load_project,
+    load_project_profile_file,
     overlay_values,
     recover_dimensions,
     save_profiles,
@@ -121,6 +122,28 @@ def test_profiles_filter_in_toml_order_and_validate_names(tmp_path):
             load_project(tmp_path, file_profiles=selection)
 
 
+def test_load_project_marks_only_referenced_arrays(tmp_path):
+    _write_project(tmp_path)
+    schemas = tmp_path / "nml-schemas"
+    (schemas / "parameter.yml").write_text(
+        "$defs:\n  parameter:\n    type: array\n    x-fortran-shape: 2\n"
+        "    items:\n      type: number\n",
+        encoding="utf-8",
+    )
+    alpha = schemas / "alpha.yml"
+    alpha.write_text(
+        alpha.read_text(encoding="utf-8").replace(
+            "  weights:\n    type: array\n    x-fortran-shape: n_items\n"
+            "    items:\n      type: number\n",
+            "  weights:\n    $ref: parameter.yml#/$defs/parameter\n",
+        ),
+        encoding="utf-8",
+    )
+    properties = load_project(tmp_path).profile("main").pages[1].schema["properties"]
+    assert properties["weights"][GUI_REF_ORIGIN_KEY] == "parameter.yml#/$defs/parameter"
+    assert GUI_REF_ORIGIN_KEY not in properties["settings"]
+
+
 def test_save_reload_preserves_unselected_groups_and_uses_no_json(tmp_path):
     _write_project(tmp_path)
     project = load_project(tmp_path, file_profiles={"main": ["alpha"]})
@@ -164,25 +187,24 @@ def test_all_saves_validate_before_replacing_any_file(tmp_path):
     assert not (tmp_path / "main.nml").exists()
 
 
-def test_missing_input_import_errors_and_partial_array_input(tmp_path):
+def test_missing_input_errors_and_partial_array_input(tmp_path):
     _write_project(tmp_path)
     project = load_project(tmp_path)
-    assert load_profile(project, project.profile("main"), {}) == {}
-    path = tmp_path / "imported.nml"
+    profile = project.profile("main")
+    assert load_profile(project, profile, {}) == {}
+    path = tmp_path / "main.nml"
     path.write_text("&alpha count=2 weights(2)=3.5 options%enabled=.true. /\n")
-    profile, values = import_profile(project, path, {})
-    assert profile.default_file == "imported.nml"
+    values = load_profile(project, profile, {})
     assert values["alpha"]["weights"] == [0.0, 3.5]
     assert values["alpha"]["options"] == {"enabled": True}
     for text in (
-        "&unknown a=1 /",
         "&alpha count=2 / &alpha count=3 /",
         "&alpha count=2 weights(3)=1 /",
         "&alpha count=2",
     ):
         path.write_text(text)
         with pytest.raises(ValueError):
-            import_profile(project, path, {})
+            load_profile(project, profile, {})
 
 
 def test_complete_arrays_and_recover_dimensions_before_loading(tmp_path):
@@ -277,6 +299,19 @@ def test_virtual_profiles_without_toml_profiles_and_output_safety(tmp_path):
     assert virtual.profiles[0].name == "custom"
     with pytest.raises(ValueError, match="inside"):
         create_virtual_project(project, "bad", "../outside.nml", ["alpha"])
+
+
+def test_external_project_profiles_cannot_escape_output_directory(tmp_path):
+    _write_project(tmp_path)
+    project = load_project(tmp_path)
+    path = tmp_path / "unsafe.toml"
+    path.write_text(
+        '[[file_profiles]]\nname = "unsafe"\ndefault_file = "../outside.nml"\n'
+        'namelists = ["alpha"]\n\n[[project_profiles]]\nname = "unsafe"\n'
+        'file_profiles = ["unsafe"]\n'
+    )
+    with pytest.raises(ValueError, match="inside"):
+        load_project_profile_file(project, path)
 
 
 def test_save_rejects_strings_that_fortran_would_truncate(tmp_path):

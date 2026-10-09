@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>FieldRow</class>
+ <widget class="QWidget" name="FieldRow">
+  <layout class="QHBoxLayout" name="rootLayout">
+   <property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property>
+   <item><widget class="QLabel" name="fieldLabel"><property name="text"><string>Property</string></property></widget></item>
+   <item><widget class="QWidget" name="editorHost"><layout class="QHBoxLayout" name="editorLayout"><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property></layout></widget></item>
+   <item><widget class="QToolButton" name="infoButton"><property name="toolTip"><string>Show property description</string></property><property name="accessibleName"><string>Property information</string></property><property name="text"><string>i</string></property><property name="styleSheet"><string>color: #267ac3; font-weight: bold;</string></property></widget></item>
+  </layout>
+ </widget>
+ <resources/><connections/>
+</ui>

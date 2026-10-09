@@ -26,10 +26,9 @@ properties:
       type: integer
       x-fortran-kind: i4
     examples: [[1, 2, 3]]
-    x-nml-tools-ui:
-      axes:
-        "1":
-          labels: [X, Y, Z]
+    axes:
+      "1":
+        labels: [X, Y, Z]
   gravity_vector:
     title: Gravity vector
     description: Acceleration components in m s-2.
@@ -38,8 +37,7 @@ properties:
     items:
       type: number
       x-fortran-kind: dp
-    examples: [[0.0, 0.0, -9.81]]
-    x-nml-tools-ui:
-      axes:
-        "1":
-          labels: [X, Y, Z]
+    default: [0.0, 0.0, -9.81]
+    axes:
+      "1":
+        labels: [X, Y, Z]

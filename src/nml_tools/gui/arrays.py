@@ -83,7 +83,7 @@ def validate_array_shape(
 
 def axis_labels(schema: Mapping[str, Any], axis: int, extent: int) -> list[str] | None:
     """Return labels for a one-based array *axis*, validating their count."""
-    metadata = schema.get("x-nml-tools-ui", {})
+    metadata = schema if "axes" in schema else schema.get("x-nml-tools-ui", {})
     if metadata is None:
         return None
     if not isinstance(metadata, Mapping):
@@ -123,7 +123,7 @@ def axis_labels(schema: Mapping[str, Any], axis: int, extent: int) -> list[str] 
 
 def table_axes(schema: Mapping[str, Any], rank: int) -> tuple[int, int] | None:
     """Return zero-based ``(row, column)`` axes for a two-dimensional display."""
-    metadata = schema.get("x-nml-tools-ui", {})
+    metadata = schema if "table" in schema else schema.get("x-nml-tools-ui", {})
     if not isinstance(metadata, Mapping):
         raise ValueError("'x-nml-tools-ui' must be an object")
     table = metadata.get("table")
