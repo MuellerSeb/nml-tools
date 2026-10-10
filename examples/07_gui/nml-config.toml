@@ -1,0 +1,65 @@
+[kinds]
+module = "iso_fortran_env"
+integer = ["int32"]
+real = ["real64"]
+map = { i4 = "int32", dp = "real64" }
+
+[dimensions.n_bodies]
+default = 3
+doc = "Number of falling bodies."
+
+[dimensions.n_snapshots]
+default = 2
+doc = "Number of requested output snapshots."
+
+[[namelists]]
+name = "run"
+schema = "schemas/run.yml"
+
+[[namelists]]
+name = "gravity"
+schema = "schemas/gravity.yml"
+
+[[namelists]]
+name = "bodies"
+schema = "schemas/bodies.yml"
+
+[[namelists]]
+name = "outputs"
+schema = "schemas/outputs.yml"
+
+[[file_profiles]]
+name = "setup"
+title = "Simulation setup"
+description = "Runtime and gravity settings shared by both projects."
+default_file = "setup.nml"
+namelists = ["run", "gravity"]
+required = ["run", "gravity"]
+
+[[file_profiles]]
+name = "bodies"
+title = "Falling bodies"
+description = "Inputs for the bodies in the full simulation."
+default_file = "bodies.nml"
+namelists = ["bodies"]
+required = ["bodies"]
+
+[[file_profiles]]
+name = "reporting"
+title = "Reporting"
+description = "Output controls for the reporting preview."
+default_file = "reporting.nml"
+namelists = ["outputs"]
+required = ["outputs"]
+
+[[project_profiles]]
+name = "simulation"
+title = "Full simulation"
+description = "Simulation setup and falling-body inputs."
+file_profiles = ["setup", "bodies"]
+
+[[project_profiles]]
+name = "report_preview"
+title = "Reporting preview"
+description = "Simulation setup and reporting controls."
+file_profiles = ["setup", "reporting"]

@@ -1,0 +1,8 @@
+[[file_profiles]]
+name = "ts"
+default_file = "ts1.nml"
+namelists = ["bodies", "run"]
+
+[[project_profiles]]
+name = "Test"
+file_profiles = ["ts"]

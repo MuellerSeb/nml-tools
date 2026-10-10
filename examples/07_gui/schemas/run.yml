@@ -1,0 +1,39 @@
+title: Run configuration
+description: General controls for the gravity simulation.
+x-fortran-namelist: run
+type: object
+required: [run_id, start_time, time_step_seconds]
+properties:
+  run_id:
+    title: Run identifier
+    type: integer
+    x-fortran-kind: i4
+    minimum: 1
+    default: 1
+  label:
+    title: Run label
+    type: string
+    x-fortran-len: 64
+    default: gravity-demo
+  start_time:
+    title: Start time
+    type: string
+    format: date-time
+    x-fortran-len: 32
+    default: "2026-01-01 00:00"
+  time_step_seconds:
+    title: Time step in seconds
+    type: number
+    x-fortran-kind: dp
+    exclusiveMinimum: 0.0
+    default: 0.1
+  enabled:
+    title: Run simulation
+    type: boolean
+    default: true
+  restart_file:
+    title: Optional restart file
+    type: string
+    format: file-path
+    x-fortran-len: 256
+    default: ../input/restart_state.dat
