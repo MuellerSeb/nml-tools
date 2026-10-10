@@ -49,6 +49,7 @@ from .model import (
     recover_dimensions,
     save_profiles,
     save_project_profile,
+    suggestion,
 )
 from .ui import load_ui
 
@@ -56,7 +57,7 @@ _UNSET = object()
 
 
 def _untouched_page_values(
-    schema: Mapping[str, Any], source: Mapping[str, Any] | None
+    schema: Mapping[str, Any], source: Mapping[str, Any] | None, sizes: Mapping[str, int]
 ) -> dict[str, Any]:
     """Collect loaded values and defaults without constructing an unseen page."""
     properties = schema.get("properties", {})
@@ -71,13 +72,20 @@ def _untouched_page_values(
             raw.get(name, _UNSET),
             name.lower() in required or "default" in child,
             name,
+            sizes,
         )
         if value is not _UNSET:
             result[name] = value
     return result
 
 
-def _untouched_value(schema: Mapping[str, Any], value: Any, required: bool, name: str) -> Any:
+def _untouched_value(
+    schema: Mapping[str, Any],
+    value: Any,
+    required: bool,
+    name: str,
+    sizes: Mapping[str, int],
+) -> Any:
     """Apply GUI default/required rules to an unvisited field."""
     kind = schema.get("type")
     if value is not _UNSET:
@@ -92,7 +100,7 @@ def _untouched_value(schema: Mapping[str, Any], value: Any, required: bool, name
         base = schema.get("default", {})
         source = overlay_values(base, value) if isinstance(base, Mapping) else dict(value)
     elif "default" in schema:
-        return copy.deepcopy(schema["default"])
+        return suggestion(schema, sizes) if kind == "array" else copy.deepcopy(schema["default"])
     elif kind != "object":
         if required:
             raise ValueError(f"required field '{name}' has no value")
@@ -112,6 +120,7 @@ def _untouched_value(schema: Mapping[str, Any], value: Any, required: bool, name
             source.get(child_name, _UNSET),
             child_name.lower() in child_required or "default" in child,
             f"{name}%{child_name}",
+            sizes,
         )
         if child_value is not _UNSET:
             result[child_name] = child_value
@@ -176,7 +185,7 @@ class ProfileTab(QWidget):
             result[page.name] = (
                 (form or self._ensure_form(index)).values()
                 if form is not None or self._fit_arrays
-                else _untouched_page_values(page.schema, self._values.get(page.name))
+                else _untouched_page_values(page.schema, self._values.get(page.name), self._sizes)
             )
         return result
 
@@ -353,6 +362,7 @@ class ConfigurationDialog(QDialog):
         parent: QWidget | None = None,
         initial_values: Mapping[str, Any] | None = None,
         initial_dimensions: Mapping[str, int] | None = None,
+        preload_projects: bool = False,
     ) -> None:
         super().__init__(parent)
         load_ui("app.ui", self)
@@ -403,6 +413,14 @@ class ConfigurationDialog(QDialog):
         self.restoreAllButton.clicked.connect(self._restore_all)
         self.saveAllButton.clicked.connect(self._save_all)
         self.closeButton.clicked.connect(self.accept)
+        if preload_projects:
+            try:
+                for project_profile in self.available_projects.values():
+                    self._register_project(project_profile)
+                first = next(iter(self.loaded_projects))
+                self.treeWidget_projectStructure.setCurrentItem(self.project_items[first])
+            except (OSError, ValueError, KeyError) as exc:
+                QMessageBox.critical(self, "Invalid configuration", str(exc))
 
     @staticmethod
     def _schema_item(name: str, key: str) -> QListWidgetItem:
@@ -1028,7 +1046,10 @@ def launch_gui(
         application = QApplication(sys.argv[:1])
         application.setApplicationName("nml-tools")
     dialog = ConfigurationDialog(
-        project, initial_values=initial_values, initial_dimensions=initial_dimensions
+        project,
+        initial_values=initial_values,
+        initial_dimensions=initial_dimensions,
+        preload_projects=bool(project_profiles),
     )
     if not owns_application:
         _exec(dialog)

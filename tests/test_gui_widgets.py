@@ -23,7 +23,7 @@ try:
 except ImportError:
     pytest.skip("Qt binding unavailable", allow_module_level=True)
 
-from nml_tools.gui.app import ConfigurationDialog, ProfileConfigTab
+from nml_tools.gui.app import ConfigurationDialog, ProfileConfigTab, ProfileTab
 from nml_tools.gui.fields import (
     ArrayField,
     FieldRow,
@@ -580,6 +580,72 @@ def test_inactive_projects_stay_hidden_and_tree_fills_splitter(application, proj
     tree.setCurrentItem(file_item)
     assert file_item.isExpanded()
     dialog.close()
+
+
+def test_explicit_project_profiles_are_preloaded(application, project):
+    from dataclasses import replace
+
+    profile = project.profiles[0]
+    project = replace(
+        project,
+        project_profiles=(
+            GuiProjectProfile("one", "one", "One", None, (profile,)),
+            GuiProjectProfile("two", "two", "Two", None, (profile,)),
+        ),
+    )
+    dialog = ConfigurationDialog(project, preload_projects=True)
+    assert list(dialog.loaded_projects) == ["one", "two"]
+    assert dialog.treeWidget_projectStructure.topLevelItemCount() == 2
+    assert dialog.active_project == "one"
+    dialog.close()
+
+
+def test_unopened_page_repeats_array_defaults(application, tmp_path):
+    from nml_tools.gui.model import save_profiles
+
+    first = NamelistPage(
+        "first",
+        "first",
+        {
+            "type": "object",
+            "x-fortran-namelist": "first",
+            "properties": {"enabled": {"type": "boolean", "default": False}},
+        },
+    )
+    geology = NamelistPage(
+        "geoparameter",
+        "geoparameter",
+        {
+            "type": "object",
+            "x-fortran-namelist": "geoparameter",
+            "properties": {
+                "GeoParam": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "x-fortran-shape": ["n_geo_units", 5],
+                    "default": [1.0, 1000.0, 100.0, 1, 1],
+                    "x-fortran-default-repeat": True,
+                }
+            },
+            "required": ["GeoParam"],
+        },
+    )
+    profile = GuiProfile(
+        "parameter", "parameter", "Parameter", None, "parameters.nml", (first, geology)
+    )
+    project = GuiProject(
+        tmp_path,
+        {},
+        {"n_geo_units": 2},
+        (profile,),
+        namelists=(first, geology),
+    )
+    tab = ProfileTab(project, profile, {}, {"n_geo_units": 2})
+    assert "geoparameter" not in tab.forms
+    values = tab.values()
+    assert [len(row) for row in values["geoparameter"]["GeoParam"]] == [5, 5]
+    save_profiles(project, [(profile, values, {"n_geo_units": 2})])
+    assert (tmp_path / "parameters.nml").read_text().count("GeoParam(") == 10
 
 
 def test_shared_reference_table_edit_reset_and_round_trip(application, tmp_path):

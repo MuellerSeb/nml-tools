@@ -21,10 +21,10 @@ def launch_gui(
 ) -> int:
     """Edit selected projects; nested mappings select their files/namelists.
 
-    A project-profile name selects it from TOML. None selects all projects. The
-    legacy flat file-profile mapping is still accepted. Values remain keyed by
-    file profile and override existing namelist input. Output defaults to
-    schemas_dir.
+    Explicit project-profile selections are loaded into the tree. None exposes
+    every configured project in the dropdown without loading it. The legacy
+    flat file-profile mapping is still accepted. Values remain keyed by file
+    profile and override existing namelist input. Output defaults to schemas_dir.
     """
     from .app import launch_gui as _launch_gui
 
