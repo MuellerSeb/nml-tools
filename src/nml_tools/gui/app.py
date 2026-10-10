@@ -371,6 +371,10 @@ class ConfigurationDialog(QDialog):
                 raise ValueError(f"duplicate initial value profile '{name}'")
             self.initial_values[profile.key] = values
         self.dimension_overrides = initial_dimensions or {}
+        profiles = project.project_profiles or (
+            GuiProjectProfile("default", "default", "Default", None, project.profiles, custom=True),
+        )
+        self.available_projects = {profile.key: profile for profile in profiles}
         self.loaded_projects: dict[str, GuiProjectProfile] = {}
         self.project_items: dict[str, QTreeWidgetItem] = {}
         self.project_editors: dict[str, dict[Path, ProfileTab]] = {}
@@ -381,6 +385,7 @@ class ConfigurationDialog(QDialog):
         self.config_tab: ProfileConfigTab | None = None
         self.plus_tab = QWidget(self.tabs)
         self.tabs.setTabsClosable(True)
+        self.splitter.setSizes([self.width(), self.width() * 3])
         self.treeWidget_projectStructure.setColumnCount(2)
         self.treeWidget_projectStructure.setHeaderLabels(["Project structure", ""])
         header = self.treeWidget_projectStructure.header()
@@ -398,20 +403,6 @@ class ConfigurationDialog(QDialog):
         self.restoreAllButton.clicked.connect(self._restore_all)
         self.saveAllButton.clicked.connect(self._save_all)
         self.closeButton.clicked.connect(self.accept)
-        try:
-            profiles = project.project_profiles or (
-                GuiProjectProfile(
-                    "default", "default", "Default", None, project.profiles, custom=True
-                ),
-            )
-            for project_profile in profiles:
-                self._register_project(project_profile)
-            if self.loaded_projects:
-                first = next(iter(self.loaded_projects))
-                self.treeWidget_projectStructure.setCurrentItem(self.project_items[first])
-                self._show_project(first)
-        except (OSError, ValueError, KeyError) as exc:
-            QMessageBox.critical(self, "Invalid configuration", str(exc))
 
     @staticmethod
     def _schema_item(name: str, key: str) -> QListWidgetItem:
@@ -436,7 +427,7 @@ class ConfigurationDialog(QDialog):
         """List configured and discoverable project-profile sources."""
         combo = self.sourceComboBox_loadProject
         combo.addItem("<new>", ("new", ""))
-        for profile in self.project.project_profiles:
+        for profile in self.available_projects.values():
             combo.addItem(profile.title, ("configured", profile.key))
         for path in discover_project_files(self.project):
             combo.addItem(path.name, ("path", str(path)))
@@ -476,7 +467,7 @@ class ConfigurationDialog(QDialog):
                 if profile.key in self.loaded_projects:
                     raise ValueError(f"project '{name}' is already loaded")
             elif kind == "configured":
-                profile = self.project.project_profile(value)
+                profile = self.available_projects[value]
             else:
                 profile = load_project_profile_file(self.project, Path(value))
             self._register_project(profile)
@@ -622,8 +613,18 @@ class ConfigurationDialog(QDialog):
                 editor.select_page(page_key)
 
     def _tab_changed(self, index: int) -> None:
-        """Use the trailing plus tab to reopen/reset the persistent Config tab."""
-        if self.tabs.widget(index) is self.plus_tab and self.active_project is not None:
+        """Synchronize profile tabs with the tree and handle the trailing plus tab."""
+        widget = self.tabs.widget(index)
+        if isinstance(widget, ProfileTab) and self.active_project is not None:
+            root = self.project_items[self.active_project]
+            for child_index in range(root.childCount()):
+                item = root.child(child_index)
+                if item.data(0, Qt.ItemDataRole.UserRole)[2] == widget.profile.key:
+                    item.setExpanded(True)
+                    with QSignalBlocker(self.treeWidget_projectStructure):
+                        self.treeWidget_projectStructure.setCurrentItem(item)
+                    break
+        elif widget is self.plus_tab and self.active_project is not None:
             profile = self.loaded_projects[self.active_project]
             config = self.project_configs[self.active_project]
             self.config_tab = (
@@ -684,8 +685,7 @@ class ConfigurationDialog(QDialog):
                         next(
                             index
                             for index in range(config.source_combo.count())
-                            if config.source_combo.itemData(index)
-                            == ("profile", profiles[0].key)
+                            if config.source_combo.itemData(index) == ("profile", profiles[0].key)
                         )
                     )
             except (OSError, ValueError) as exc:

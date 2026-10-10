@@ -28,10 +28,10 @@ from qtpy.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
-    QToolButton,
     QWidget,
 )
 
@@ -102,7 +102,7 @@ def _palette_color(role: Any) -> str:
 
 def _hint_style(default: bool) -> str:
     """Return the distinct schema-hint style requested by the editor."""
-    color = "#e6a0a0" if default else "#b8b8b8"
+    color = "#cc7070" if default else "#888888"
     return f"color: {color}; font-style: italic;"
 
 
@@ -190,6 +190,56 @@ def _contains_default(schema: Mapping[str, Any]) -> bool:
     )
 
 
+class OptionalSpinBox(QSpinBox):
+    """Integer editor that can retain a visually empty value."""
+
+    def __init__(self, lower: int, upper: int, parent: QWidget) -> None:
+        self._empty = False
+        super().__init__(parent)
+        self.setRange(lower, upper)
+        self.lineEdit().textEdited.connect(self._text_edited)
+        self.editingFinished.connect(self._restore_empty)
+
+    def _text_edited(self, text: str) -> None:
+        """Keep manually cleared input blank instead of restoring its old value."""
+        self._empty = not text
+
+    def _restore_empty(self) -> None:
+        """Keep Qt's input correction from restoring a cleared value."""
+        if self._empty:
+            self.lineEdit().clear()
+
+    def set_empty(self, hint: str = "") -> None:
+        """Display an empty value with an optional placeholder hint."""
+        self._empty = True
+        self.lineEdit().setPlaceholderText(hint)
+        self.lineEdit().clear()
+
+    def is_empty(self) -> bool:
+        """Return whether the editor currently represents no integer."""
+        return self._empty
+
+    def textFromValue(self, value: int) -> str:
+        """Keep Qt repaints from restoring a cleared value."""
+        if getattr(self, "_empty", False):
+            return ""
+        return str(super().textFromValue(value))
+
+    def valueFromText(self, text: str) -> int:
+        """Retain the numeric value internally while its editor is empty."""
+        return self.value() if not text.strip() else int(super().valueFromText(text))
+
+    def setValue(self, value: int) -> None:
+        """Replace an empty state with an explicit integer."""
+        self._empty = False
+        super().setValue(value)
+
+    def stepBy(self, steps: int) -> None:
+        """Make stepping away from an empty state explicit input."""
+        self._empty = False
+        super().stepBy(steps)
+
+
 class ScalarField(QWidget):
     def __init__(self, schema: Mapping[str, Any], value: Any, parent: QWidget | None = None):
         super().__init__(parent)
@@ -212,9 +262,7 @@ class ScalarField(QWidget):
             lower += "exclusiveMinimum" in schema
             upper -= "exclusiveMaximum" in schema
             if -2_147_483_648 <= lower <= int(value) <= upper <= 2_147_483_647:
-                spin = QSpinBox(self)
-                spin.setRange(lower, upper)
-                control = spin
+                control = OptionalSpinBox(lower, upper, self)
             else:
                 control = QLineEdit(self)
         else:
@@ -243,19 +291,27 @@ class ScalarField(QWidget):
             else control.currentIndexChanged
         )
         signal.connect(self._mark_modified)
+        if isinstance(control, OptionalSpinBox):
+            control.lineEdit().textEdited.connect(self._mark_modified)
 
     def _mark_modified(self, *_args: Any) -> None:
         """Mark a user choice and remove hint-only styling."""
         self.modified = True
-        if isinstance(self.control, QLineEdit) and not self.control.text() and self._hint:
+        empty = isinstance(self.control, QLineEdit) and not self.control.text()
+        empty = empty or isinstance(self.control, OptionalSpinBox) and self.control.is_empty()
+        if empty and self._hint:
             self._apply_hint(*self._hint)
             return
         self.control.setStyleSheet("")
         self._hint_visible = False
-        if isinstance(self.control, QSpinBox):
+        if isinstance(self.control, OptionalSpinBox):
+            self.control.lineEdit().setPlaceholderText("")
+        elif isinstance(self.control, QSpinBox):
             self.control.setPrefix("")
         if isinstance(self.control, QCheckBox):
             self.control.setTristate(False)
+            self.control.setText("")
+            self.control.setToolTip(str(self._hint[0]) if self._hint else "")
 
     def show_hint(self, value: Any, default: bool) -> None:
         """Display a default or example without treating it as user input."""
@@ -265,8 +321,7 @@ class ScalarField(QWidget):
 
     def _apply_hint(self, value: Any, default: bool) -> None:
         """Apply a remembered hint without changing modification state."""
-        label = "Default" if default else "Example"
-        text = f"{label}: {value}"
+        text = str(value)
         if isinstance(self.control, QLineEdit):
             self.control.clear()
             self.control.setPlaceholderText(text)
@@ -274,11 +329,12 @@ class ScalarField(QWidget):
             self.control.insertItem(0, text, MISSING)
             self.control.setCurrentIndex(0)
         elif isinstance(self.control, QCheckBox):
-            self.control.setTristate(True)
-            self.control.setCheckState(Qt.PartiallyChecked)
+            self.control.setTristate(False)
+            self.control.setChecked(bool(value))
             self.control.setText(text)
-        elif isinstance(self.control, QSpinBox):
-            self.control.setPrefix(f"{label}: ")
+            self.control.setToolTip(text)
+        elif isinstance(self.control, OptionalSpinBox):
+            self.control.set_empty(text)
         self.control.setStyleSheet(_hint_style(default))
         self._hint_visible = True
 
@@ -295,10 +351,8 @@ class ScalarField(QWidget):
         elif isinstance(self.control, QCheckBox):
             self.control.setTristate(True)
             self.control.setCheckState(Qt.PartiallyChecked)
-        elif isinstance(self.control, QSpinBox) and self.control.minimum() > -2_147_483_648:
-            self.control.setMinimum(self.control.minimum() - 1)
-            self.control.setSpecialValueText("…")
-            self.control.setValue(self.control.minimum())
+        elif isinstance(self.control, OptionalSpinBox):
+            self.control.set_empty()
         self.modified = False
 
     def set_value(self, value: Any) -> None:
@@ -311,9 +365,10 @@ class ScalarField(QWidget):
         elif isinstance(self.control, QCheckBox):
             self.control.setTristate(False)
             self.control.setText("")
+            self.control.setToolTip("")
             self.control.setChecked(bool(value))
-        elif isinstance(self.control, QSpinBox):
-            self.control.setPrefix("")
+        elif isinstance(self.control, OptionalSpinBox):
+            self.control.lineEdit().setPlaceholderText("")
             self.control.setValue(value)
         else:
             self.control.setText(str(value))
@@ -337,6 +392,10 @@ class ScalarField(QWidget):
             return self.control.currentData()
         if isinstance(self.control, QCheckBox):
             return self.control.isChecked()
+        if isinstance(self.control, OptionalSpinBox) and self.control.is_empty():
+            if self._hint_visible and self._hint and self._hint[1]:
+                return self._hint[0]
+            return MISSING
         if isinstance(self.control, QSpinBox):
             return self.control.value()
         text = self.control.text()
@@ -396,7 +455,7 @@ class DateTimeField(ScalarField):
         self._hint = (value, default)
         self._hint_visible = True
         self.control.setStyleSheet(_hint_style(default))
-        self.control.setToolTip(f"{'Default' if default else 'Example'}: {value}")
+        self.control.setToolTip(str(value))
         self.modified = False
 
     def set_value(self, value: Any) -> None:
@@ -539,9 +598,6 @@ class InlineArrayTable(QWidget):
                     self, str(schema.get("title", name)), str(description).strip()
                 )
             )
-        self.pathControls.setVisible(self.items.get("format") == "file-path")
-        self.browsePathButton.clicked.connect(self._browse_path)
-        self.updatePathButton.clicked.connect(self._update_paths)
         self.tableWidget.installEventFilter(self)
         self._populate()
 
@@ -586,9 +642,16 @@ class InlineArrayTable(QWidget):
                     canonical[axes[0]], canonical[axes[1]] = displayed
                     positions.append((tuple(index + 1 for index in canonical), row, column))
         defaulted = "default" in self.schema
+        fallback = suggestion(self.schema, self.sizes)
+        has_hint = defaulted or bool(self.schema.get("examples"))
         for indices, row, column in positions:
             raw = _nested_get(self._value, tuple(index - 1 for index in indices))
             cell = FieldRow(self.name, self.items, raw, self.sizes, self)
+            if has_hint and isinstance(cell.field, ScalarField):
+                cell.field._hint = (
+                    _nested_get(fallback, tuple(index - 1 for index in indices)),
+                    defaulted,
+                )
             if indices in self._hinted or indices not in self._assigned:
                 cell._provided = False
                 if isinstance(cell.field, ScalarField):
@@ -598,9 +661,7 @@ class InlineArrayTable(QWidget):
                         cell.field.show_unset()
             table.setCellWidget(row, column, cell)
             self.cells[indices] = cell
-        cast(QHeaderView, table.horizontalHeader()).setSectionResizeMode(
-            QHeaderView.ResizeToContents
-        )
+        _configure_table_columns(table)
         _fit_table_height(table)
 
     def value(self) -> InputArray:
@@ -609,29 +670,17 @@ class InlineArrayTable(QWidget):
         assigned = set(self._assigned)
         for indices, cell in self.cells.items():
             modified = _field_modified(cell.field)
-            value = (
-                cell.field.value()
-                if modified or indices in self._assigned and indices not in self._hinted
-                else _nested_get(self._value, tuple(index - 1 for index in indices))
-            )
+            value = cell.field.value() if modified else MISSING
+            if modified and value is MISSING:
+                assigned.discard(indices)
+                continue
+            if not modified:
+                value = _nested_get(self._value, tuple(index - 1 for index in indices))
             target = _nested_get(result, tuple(index - 1 for index in indices[:-1]))
             target[indices[-1] - 1] = value
             if modified:
                 assigned.add(indices)
         return InputArray(result, assigned)
-
-    def _browse_path(self) -> None:
-        """Choose a path for later application to selected cells."""
-        path, _ = QFileDialog.getOpenFileName(self, "Select file", str(_output_root(self)))
-        if path:
-            self.pathEdit.setText(_relative_path(path, self))
-
-    def _update_paths(self) -> None:
-        """Apply the path entry to selected editable cells."""
-        for index in self.tableWidget.selectedIndexes():
-            cell = self.tableWidget.cellWidget(index.row(), index.column())
-            if isinstance(cell, FieldRow):
-                cell.set_value(self.pathEdit.text(), self.sizes)
 
     def eventFilter(self, watched: Any, event: Any) -> bool:
         """Provide spreadsheet-style copy and paste for inline cells."""
@@ -1027,6 +1076,12 @@ class FieldRow(QWidget):
                 raise ValueError(f"required field '{self.name}' has no value")
             return MISSING
         value = self.field.value()
+        if value is MISSING:
+            if "default" in self.schema:
+                return copy.deepcopy(self.schema["default"])
+            if self.required:
+                raise ValueError(f"required field '{self.name}' has no value")
+            return MISSING
         if isinstance(value, InputArray) and not value.assigned:
             if self.required:
                 raise ValueError(f"required field '{self.name}' has no value")
@@ -1087,13 +1142,26 @@ def _align_field_rows(rows: Mapping[str, FieldRow]) -> None:
 def _fit_table_height(table: QTableWidget) -> None:
     """Fit short tables to their rows and cap taller tables for scrolling."""
     table.resizeRowsToContents()
-    height = (
+    content_height = (
         table.horizontalHeader().height()
         + sum(table.rowHeight(row) for row in range(table.rowCount()))
         + 2 * table.frameWidth()
         + 2
     )
-    table.setFixedHeight(min(400, height))
+    table.setFixedHeight(min(400, content_height) + table.horizontalScrollBar().sizeHint().height())
+
+
+def _configure_table_columns(table: QTableWidget, label_column: int | None = None) -> None:
+    """Fit table columns initially while keeping them manually resizable."""
+    header = cast(QHeaderView, table.horizontalHeader())
+    header.setMinimumSectionSize(88)
+    header.setSectionResizeMode(QHeaderView.Interactive)
+    header.sectionHandleDoubleClicked.connect(table.resizeColumnToContents)
+    table.resizeColumnsToContents()
+    for column in range(table.columnCount()):
+        table.setColumnWidth(column, max(88, table.columnWidth(column)))
+    if label_column is not None:
+        table.setColumnWidth(label_column, max(180, table.columnWidth(label_column)))
 
 
 class DerivedTable(QTableWidget):
@@ -1119,10 +1187,9 @@ class DerivedTable(QTableWidget):
         first = next(iter(schemas.values()))
         first = first["items"] if first["type"] == "array" else first
         columns = list(first["properties"])
-        self.setColumnCount(len(columns))
-        self.setHorizontalHeaderLabels(columns)
-        header = cast(QHeaderView, self.horizontalHeader())
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.setColumnCount(len(columns) + 1)
+        self.setHorizontalHeaderLabels(["Namelist Property", *columns])
+        self.verticalHeader().setVisible(False)
         for name, schema in schemas.items():
             value = values.get(name, MISSING)
             is_array = schema["type"] == "array"
@@ -1151,9 +1218,10 @@ class DerivedTable(QTableWidget):
                     if value is not MISSING
                     else set()
                 ) & positions
-                self.data[name] = InputArray(
-                    dense, source_positions | (positions if _seeded(schema) else set())
-                )
+                seeded = _seeded(schema) or (name.lower() in required and _contains_default(item))
+                if seeded:
+                    source_positions.update(positions)
+                self.data[name] = InputArray(dense, source_positions)
             else:
                 self.data[name] = {} if value is MISSING else value
                 if value is not MISSING or _seeded(schema) or name.lower() in required:
@@ -1172,38 +1240,25 @@ class DerivedTable(QTableWidget):
                 row = self.rowCount()
                 self.insertRow(row)
                 suffix = "(" + ",".join(str(i + 1) for i in indices) + ")" if indices else ""
-                label = QTableWidgetItem(name + suffix + (" *" if name.lower() in required else ""))
-                label.setToolTip(str(schema.get("description", schema.get("title", name))))
-                self.setVerticalHeaderItem(row, label)
+                self.setCellWidget(
+                    row,
+                    0,
+                    _property_widget(name + suffix, schema, name.lower() in required, self),
+                )
                 for column, component in enumerate(columns):
                     component_row = obj.rows[component]
                     component_row.fieldLabel.hide()
-                    self.setCellWidget(row, column, component_row)
+                    self.setCellWidget(row, column + 1, component_row)
                     label = QTableWidgetItem(
                         component + (" *" if component in item.get("required", []) else "")
                     )
                     label.setToolTip(
                         str(item["properties"][component].get("description", component))
                     )
-                    self.setHorizontalHeaderItem(column, label)
-                description = str(schema.get("description", "")).strip()
-                if description and columns:
-                    title = str(schema.get("title", name))
-                    info = QToolButton(obj.rows[columns[0]])
-                    info.setText("i")
-                    info.setToolTip(f"About {name}")
-                    info.setAccessibleName(f"Information about {name}")
-                    info.setStyleSheet(
-                        f"color: {_palette_color(QPalette.Link)}; font-weight: bold;"
-                    )
-                    info.clicked.connect(
-                        lambda _checked=False, heading=title, text=description: (
-                            QMessageBox.information(self, heading, text)
-                        )
-                    )
-                    obj.rows[columns[0]].layout().addWidget(info)
+                    self.setHorizontalHeaderItem(column + 1, label)
                 self.objects[name, indices] = obj
                 self.table_rows.append((name, indices, item))
+        _configure_table_columns(self, 0)
         _fit_table_height(self)
         self.installEventFilter(self)
 
@@ -1249,7 +1304,9 @@ class DerivedTable(QTableWidget):
                 shape = array_shape(data)
                 data.assigned = (
                     set(product(*(range(1, n + 1) for n in shape)))
-                    if _seeded(self.schemas[name]) or _contains_default(self.schemas[name]["items"])
+                    if _seeded(self.schemas[name])
+                    or name.lower() in self.required
+                    and _contains_default(self.schemas[name]["items"])
                     else set()
                 )
         for obj in self.objects.values():
@@ -1271,10 +1328,11 @@ class DerivedTable(QTableWidget):
                     schema = self.table_rows[row][2]
                     for column_offset, text in enumerate(line.split("\t")):
                         column = current.column() + column_offset
+                        component = column - 1
                         cell = self.cellWidget(row, column)
-                        if isinstance(cell, FieldRow) and column < len(columns):
+                        if isinstance(cell, FieldRow) and 0 <= component < len(columns):
                             cell.set_value(
-                                _parse_text(text, schema["properties"][columns[column]]),
+                                _parse_text(text, schema["properties"][columns[component]]),
                                 self.sizes,
                             )
                 return True
@@ -1314,17 +1372,16 @@ class ReferencedArrayTable(QTableWidget):
                 *(axis_labels(first, 1, size) or [str(index) for index in range(1, size + 1)]),
             ]
         )
-        cast(QHeaderView, self.horizontalHeader()).setSectionResizeMode(
-            QHeaderView.ResizeToContents
-        )
+        self.verticalHeader().setVisible(False)
         for row_index, (name, schema) in enumerate(schemas.items()):
             item = schema["items"]
             raw = values.get(name, MISSING)
             saved = raw is not MISSING
+            fallback = suggestion(schema, sizes)
             dense = initial_array(
                 schema,
                 sizes,
-                raw if saved else suggestion(schema, sizes),
+                raw if saved else fallback,
                 suggestion(item, sizes),
                 strict=saved and not fit_arrays,
                 resize=saved and fit_arrays,
@@ -1343,20 +1400,17 @@ class ReferencedArrayTable(QTableWidget):
             self.data[name] = dense
             self.assigned[name] = assigned
             self.hinted[name] = hinted
-            label = QTableWidgetItem(name + (" *" if name.lower() in required else ""))
-            label.setToolTip(str(schema.get("description", schema.get("title", name))))
-            self.setItem(row_index, 0, label)
-            description = schema.get("description")
-            if isinstance(description, str) and description.strip():
-                self.setCellWidget(
-                    row_index,
-                    0,
-                    _property_widget(name, schema, name.lower() in required, self),
-                )
+            self.setCellWidget(
+                row_index,
+                0,
+                _property_widget(name, schema, name.lower() in required, self),
+            )
             cells = []
             for index in range(size):
                 position = (index + 1,)
                 cell = FieldRow(name, item, dense[index], sizes, self)
+                if "default" in schema or schema.get("examples"):
+                    cell.field._hint = (fallback[index], "default" in schema)
                 if position in hinted or position not in assigned:
                     cell._provided = False
                     if isinstance(cell.field, ScalarField):
@@ -1367,6 +1421,7 @@ class ReferencedArrayTable(QTableWidget):
                 self.setCellWidget(row_index, index + 1, cell)
                 cells.append(cell)
             self.rows[name] = cells
+        _configure_table_columns(self, 0)
         _fit_table_height(self)
         self.installEventFilter(self)
 
@@ -1378,7 +1433,11 @@ class ReferencedArrayTable(QTableWidget):
             assigned = set(self.assigned[name])
             for index, cell in enumerate(cells, 1):
                 if _field_modified(cell.field):
-                    values[index - 1] = cell.field.value()
+                    value = cell.field.value()
+                    if value is MISSING:
+                        assigned.discard((index,))
+                        continue
+                    values[index - 1] = value
                     assigned.add((index,))
             if assigned:
                 result[name] = InputArray(values, assigned)
@@ -1459,6 +1518,7 @@ class NamelistForm(QWidget):
             if isinstance(name, str) and isinstance(child, Mapping) and "default" in child
         )
         layout = QFormLayout(self)
+        layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.rows: dict[str, FieldRow] = {}
         self.tables: list[DerivedTable | ReferencedArrayTable] = []
         groups: dict[tuple[str, ...], dict[str, Mapping[str, Any]]] = {}
@@ -1482,7 +1542,7 @@ class NamelistForm(QWidget):
             is_required = name.lower() in required
             identity = identities.get(name, ())
             children = groups.get(identity)
-            if children and (identity[0] != "array" or len(children) > 1):
+            if children:
                 if name == next(iter(children)):
                     table_type = (
                         ReferencedArrayTable
@@ -1493,6 +1553,7 @@ class NamelistForm(QWidget):
                         children, source, sizes, required, self, fit_arrays=fit_arrays
                     )
                     layout.addRow(table)
+                    layout.setAlignment(table, Qt.AlignTop)
                     self.tables.append(table)
                 continue
             row = FieldRow(
@@ -1510,6 +1571,9 @@ class NamelistForm(QWidget):
             layout.addRow(row)
             self.rows[name] = row
         _align_field_rows(self.rows)
+        spacer = QWidget(self)
+        spacer.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        layout.addRow(spacer)
 
     def values(self) -> dict[str, Any]:
         """Collect fields and grouped tables in original schema order."""
@@ -1618,7 +1682,7 @@ def _property_widget(
     """Build the Designer property label and information action for a table."""
     widget = QWidget(parent)
     load_ui("field_row.ui", widget)
-    widget.fieldLabel.setText(_field_label(name, schema, required))
+    widget.fieldLabel.setText(name + (" *" if required else ""))
     widget.editorHost.hide()
     description = str(schema.get("description", "")).strip()
     widget.infoButton.setVisible(bool(description))

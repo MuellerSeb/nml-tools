@@ -7,7 +7,6 @@
    <item><widget class="QFrame" name="separatorLine"><property name="frameShape"><enum>QFrame::HLine</enum></property><property name="frameShadow"><enum>QFrame::Sunken</enum></property></widget></item>
    <item><layout class="QHBoxLayout" name="titleLayout"><item><widget class="QLabel" name="titleLabel"><property name="text"><string>Array property</string></property></widget></item><item><spacer name="titleSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item><item><widget class="QToolButton" name="infoButton"><property name="text"><string>i</string></property></widget></item></layout></item>
    <item><widget class="QTableWidget" name="tableWidget"/></item>
-   <item><widget class="QWidget" name="pathControls"><layout class="QHBoxLayout" name="pathLayout"><property name="leftMargin"><number>0</number></property><property name="topMargin"><number>0</number></property><property name="rightMargin"><number>0</number></property><property name="bottomMargin"><number>0</number></property><item><widget class="QLineEdit" name="pathEdit"/></item><item><widget class="QPushButton" name="browsePathButton"><property name="text"><string>…</string></property></widget></item><item><widget class="QPushButton" name="updatePathButton"><property name="text"><string>Update selected</string></property></widget></item></layout></widget></item>
   </layout>
  </widget>
  <resources/><connections/>

@@ -4,7 +4,14 @@ import os
 
 import pytest
 
-from nml_tools.gui.model import MISSING, GuiProfile, GuiProject, GuiProjectProfile, NamelistPage
+from nml_tools.gui.model import (
+    GUI_REF_ORIGIN_KEY,
+    MISSING,
+    GuiProfile,
+    GuiProject,
+    GuiProjectProfile,
+    NamelistPage,
+)
 from nml_tools.schema import resolve_schema
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -12,7 +19,7 @@ pytest.importorskip("qtpy")
 try:
     from qtpy.QtCore import Qt
     from qtpy.QtTest import QTest
-    from qtpy.QtWidgets import QApplication, QMessageBox, QWidget
+    from qtpy.QtWidgets import QApplication, QMessageBox
 except ImportError:
     pytest.skip("Qt binding unavailable", allow_module_level=True)
 
@@ -22,7 +29,6 @@ from nml_tools.gui.fields import (
     FieldRow,
     NamelistForm,
     ObjectField,
-    ReferencedArrayTable,
     ScalarField,
 )
 
@@ -61,6 +67,21 @@ def project(tmp_path):
     page = NamelistPage("run", "run", schema)
     profile = GuiProfile("main", "main", "Main", None, "run.nml", (page,))
     return GuiProject(tmp_path, {}, {"n": 1}, (profile,), namelists=(page,))
+
+
+def _add_project(dialog, key="default"):
+    index = next(
+        (
+            index
+            for index in range(dialog.sourceComboBox_loadProject.count())
+            if dialog.sourceComboBox_loadProject.itemData(index) == ("configured", key)
+        ),
+        -1,
+    )
+    assert index >= 0
+    dialog.sourceComboBox_loadProject.setCurrentIndex(index)
+    dialog._add_selected_project()
+    return dialog
 
 
 def test_singletons_keep_array_values_and_restore_schema_defaults(application):
@@ -128,6 +149,11 @@ def test_inline_array_title_and_hint_styles(application, monkeypatch):
     assert inline.tableWidget.columnCount() == 2
     assert [inline.tableWidget.horizontalHeaderItem(i).text() for i in range(2)] == ["1", "2"]
     assert inline.tableWidget.height() < 100
+    assert inline.tableWidget.height() >= (
+        inline.tableWidget.horizontalHeader().height()
+        + inline.tableWidget.rowHeight(0)
+        + inline.tableWidget.horizontalScrollBar().sizeHint().height()
+    )
     inline.infoButton.click()
     assert messages == [("Body weights", "Weight for each body.")]
 
@@ -148,13 +174,15 @@ def test_inline_array_title_and_hint_styles(application, monkeypatch):
 
     default = FieldRow("label", {"type": "string", "default": "fallback"}, MISSING, {})
     example = FieldRow("note", {"type": "string", "examples": ["sample"]}, MISSING, {})
-    assert "#e6a0a0" in default.field.control.styleSheet()
-    assert "#b8b8b8" in example.field.control.styleSheet()
+    assert default.field.control.placeholderText() == "fallback"
+    assert example.field.control.placeholderText() == "sample"
+    assert "#cc7070" in default.field.control.styleSheet()
+    assert "#888888" in example.field.control.styleSheet()
     default.field.control.setText("changed")
     default.field.control.textEdited.emit("changed")
     default.field.control.clear()
     default.field.control.textEdited.emit("")
-    assert "#e6a0a0" in default.field.control.styleSheet()
+    assert "#cc7070" in default.field.control.styleSheet()
     assert default.value() == "fallback" and example.value() is MISSING
     QTest.keyClick(default.field.control, Qt.Key_Tab)
     QTest.keyClick(example.field.control, Qt.Key_Tab)
@@ -163,6 +191,57 @@ def test_inline_array_title_and_hint_styles(application, monkeypatch):
     count = FieldRow("count", {"type": "integer", "default": 4}, MISSING, {})
     QTest.keyClick(count.field.control, Qt.Key_Tab)
     assert count.field.control.prefix() == "" and count.field.modified
+    count.field.control.lineEdit().selectAll()
+    QTest.keyClick(count.field.control.lineEdit(), Qt.Key_Backspace)
+    assert count.field.control.lineEdit().text() == ""
+    assert count.field.control.lineEdit().placeholderText() == "4"
+    assert count.value() == 4
+
+    optional = FieldRow("optional", {"type": "integer", "minimum": 0}, 5, {})
+    optional.field.control.lineEdit().selectAll()
+    QTest.keyClick(optional.field.control.lineEdit(), Qt.Key_Backspace)
+    assert optional.value() is MISSING
+
+    flag = FieldRow("flag", {"type": "boolean", "default": False}, MISSING, {})
+    assert flag.field.control.checkState() == Qt.Unchecked
+    assert flag.field.control.text() == flag.field.control.toolTip() == "False"
+    flag.field.control.click()
+    assert flag.field.control.isChecked() and not flag.field.control.text()
+    assert flag.field.control.toolTip() == "False" and not flag.field.control.styleSheet()
+
+    default_array = FieldRow(
+        "counts",
+        {
+            "type": "array",
+            "x-fortran-shape": 2,
+            "items": {"type": "integer", "minimum": 0},
+            "default": [1, 2],
+        },
+        [9, 8],
+        {},
+    )
+    default_cell = default_array.field.table_editor.cells[(1,)].field.control
+    default_cell.lineEdit().selectAll()
+    QTest.keyClick(default_cell.lineEdit(), Qt.Key_Backspace)
+    assert default_cell.lineEdit().placeholderText() == "1"
+    assert default_array.value() == [1, 8]
+
+    example_array = FieldRow(
+        "counts",
+        {
+            "type": "array",
+            "x-fortran-shape": 2,
+            "items": {"type": "integer", "minimum": 0},
+            "examples": [[1, 2]],
+        },
+        [9, 8],
+        {},
+    )
+    example_cell = example_array.field.table_editor.cells[(1,)].field.control
+    example_cell.lineEdit().selectAll()
+    QTest.keyClick(example_cell.lineEdit(), Qt.Key_Backspace)
+    assert example_cell.lineEdit().placeholderText() == "1"
+    assert example_array.value().assigned == {(2,)}
 
     labeled = NamelistForm(
         {
@@ -239,9 +318,7 @@ def test_path_and_date_time_fields(application, tmp_path, monkeypatch):
     date_time = form.rows["when"].field
     assert isinstance(date_time, DateTimeField)
     assert date_time.value() == "2025-01-01"
-    date_time.control.setDateTime(
-        QDateTime.fromString("2026-02-03 04:05", "yyyy-MM-dd HH:mm")
-    )
+    date_time.control.setDateTime(QDateTime.fromString("2026-02-03 04:05", "yyyy-MM-dd HH:mm"))
     assert date_time.value() == "2026-02-03 04:05"
     hinted_row = FieldRow(
         "when",
@@ -260,7 +337,9 @@ def test_dialog_load_overlay_save_reload_and_dimension_changes(application, proj
     monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
     path = project.root / "run.nml"
     path.write_text('&run count=8 label="saved" weights(1)=2.0 periods(1)%year=2021 /\n')
-    dialog = ConfigurationDialog(project, initial_values={"main": {"run": {"count": 9}}})
+    dialog = _add_project(
+        ConfigurationDialog(project, initial_values={"main": {"run": {"count": 9}}})
+    )
     editor = dialog.editors[path]
     assert editor.values()["run"]["count"] == 9
     assert editor.values()["run"]["label"] == "saved"
@@ -279,14 +358,14 @@ def test_dialog_load_overlay_save_reload_and_dimension_changes(application, proj
     assert dialog.project_dimensions["default"] == dialog.editors[path].dimensions == {"n": 2}
     assert dialog.editors[path].values()["run"]["weights"] == [2.0, 1.0]
     dialog._save_all()
-    loaded = ConfigurationDialog(project)
+    loaded = _add_project(ConfigurationDialog(project))
     assert loaded.config_tab.dimension_boxes["n"].value() == 2
     loaded.close()
     dialog.config_tab.dimension_boxes["n"].setValue(1)
     dialog.config_tab.run.click()
     assert isinstance(dialog.editors[path].forms["run"].rows["weights"].field.inline, ScalarField)
     dialog._save_all()
-    reloaded = ConfigurationDialog(project)
+    reloaded = _add_project(ConfigurationDialog(project))
     assert reloaded.editors[path].values()["run"]["periods"] == [{"year": 2025}]
     dialog.tabs.setCurrentWidget(dialog.plus_tab)
     builder = dialog.tabs.currentWidget()
@@ -326,6 +405,8 @@ def test_invalid_existing_input_is_reported_and_never_replaced(application, proj
     invalid = '&run count="wrong type" /'
     path.write_text(invalid)
     dialog = ConfigurationDialog(project)
+    assert not errors and not dialog.editors
+    _add_project(dialog)
     assert errors and not dialog.editors
     dialog._save_all()
     assert path.read_text() == invalid
@@ -391,7 +472,7 @@ def test_profile_sources_exclude_namelists_and_include_project_toml(application,
         'namelists = ["run"]\n\n[[project_profiles]]\nname = "external"\n'
         'file_profiles = ["copy"]\n'
     )
-    dialog = ConfigurationDialog(project)
+    dialog = _add_project(ConfigurationDialog(project))
     dialog.tabs.setCurrentWidget(dialog.plus_tab)
     config = dialog.tabs.currentWidget()
     assert config.source_combo.findData(str(path)) < 0
@@ -442,13 +523,19 @@ def test_public_launch_forwards_profile_selection(application, monkeypatch, tmp_
 
 
 def test_active_and_last_config_tabs_close(application, project):
-    dialog = ConfigurationDialog(project)
+    dialog = _add_project(ConfigurationDialog(project))
     assert dialog.projectSourceLayout.stretch(0) == 1
     assert dialog.projectSourceLayout.stretch(1) == 2
     assert dialog.browseButton_addProject.text() == "+"
     assert dialog.treeWidget_projectStructure.maximumWidth() > 275
     assert dialog.tabs.tabText(dialog.tabs.indexOf(dialog.config_tab)) == "⚙️"
     assert next(iter(dialog.editors.values())).label.text() == "Selected Namelist:"
+    editor = next(iter(dialog.editors.values()))
+    dialog.tabs.setCurrentWidget(dialog.config_tab)
+    dialog.tabs.setCurrentWidget(editor)
+    selected = dialog.treeWidget_projectStructure.currentItem()
+    assert selected.data(0, Qt.ItemDataRole.UserRole)[:3] == ("profile", "default", "main")
+    assert selected.isExpanded()
     dialog.tabs.setCurrentWidget(dialog.plus_tab)
     builder = dialog.tabs.currentWidget()
     dialog._close_tab(dialog.tabs.indexOf(builder))
@@ -474,6 +561,11 @@ def test_inactive_projects_stay_hidden_and_tree_fills_splitter(application, proj
         ),
     )
     dialog = ConfigurationDialog(project)
+    assert not dialog.loaded_projects
+    assert dialog.treeWidget_projectStructure.topLevelItemCount() == 0
+    _add_project(dialog, "one")
+    _add_project(dialog, "two")
+    dialog.treeWidget_projectStructure.setCurrentItem(dialog.project_items["one"])
     dialog.show()
     dialog.splitter.setSizes([400, 600])
     application.processEvents()
@@ -509,7 +601,12 @@ def test_shared_reference_table_edit_reset_and_round_trip(application, tmp_path)
                 }
             },
             "properties": {
-                "start": {"$ref": "#/$defs/period", "default": {"year": 2001}},
+                "start": {
+                    "$ref": "#/$defs/period",
+                    "title": "Starting evaluation period",
+                    "description": "First configured period.",
+                    "default": {"year": 2001},
+                },
                 "stop": {"$ref": "#/$defs/period", "default": {"year": 2002}},
                 "periods": {
                     "type": "array",
@@ -520,12 +617,17 @@ def test_shared_reference_table_edit_reset_and_round_trip(application, tmp_path)
         }
     )
     form = NamelistForm(schema, None, {"n": 2})
+    form.resize(800, 600)
     (table,) = form.tables
     form.show()
     application.processEvents()
+    assert table.y() < 50
     assert table.cellWidget(0, 0).isVisible()
-    assert (table.rowCount(), table.columnCount()) == (4, 2)
-    assert table.horizontalHeaderItem(0).text() == "year *"
+    assert (table.rowCount(), table.columnCount()) == (4, 3)
+    assert table.horizontalHeaderItem(0).text() == "Namelist Property"
+    assert table.horizontalHeaderItem(1).text() == "year *"
+    assert table.cellWidget(0, 0).fieldLabel.text() == "start *"
+    assert not table.cellWidget(0, 0).infoButton.isHidden()
     table.objects["periods", (1,)].rows["year"].field.set_value(2025)
     table.objects["periods", (1,)].rows["enabled"].field.set_value(True)
     values = form.values()
@@ -544,8 +646,8 @@ def test_shared_reference_table_edit_reset_and_round_trip(application, tmp_path)
             {**schema, "properties": {name: schema["properties"][name]}}, None, {"n": 1}
         )
         (single_table,) = single.tables
-        assert (single_table.rowCount(), single_table.columnCount()) == (1, 2)
-        assert single_table.horizontalHeaderItem(0).text() == "year *"
+        assert (single_table.rowCount(), single_table.columnCount()) == (1, 3)
+        assert single_table.horizontalHeaderItem(1).text() == "year *"
         defaults = single.values()
         single_table.objects[name, indices].rows["year"].field.set_value(2035)
         edited = {"year": 2035, "enabled": False}
@@ -554,19 +656,79 @@ def test_shared_reference_table_edit_reset_and_round_trip(application, tmp_path)
         assert single.values() == defaults
 
 
-def test_referenced_array_reset_restores_example_hints(application):
+def test_required_derived_array_writes_item_defaults(application, tmp_path):
+    from nml_tools.gui.model import save_profiles
+
+    schema = resolve_schema(
+        {
+            "type": "object",
+            "x-fortran-namelist": "baseflow_1",
+            "$defs": {
+                "parameter": {
+                    "type": "object",
+                    "x-fortran-type": "parameter_t",
+                    "properties": {
+                        "value": {"type": "number"},
+                        "optimize": {"type": "boolean", "default": False},
+                        "min": {"type": "number"},
+                        "max": {"type": "number"},
+                    },
+                    "required": ["value", "min", "max"],
+                }
+            },
+            "properties": {
+                "baseflow_recession": {
+                    "type": "array",
+                    "x-fortran-shape": "n_geo_units",
+                    "items": {
+                        "$ref": "#/$defs/parameter",
+                        "default": {"value": 100.0, "min": 1.0, "max": 1000.0},
+                    },
+                }
+            },
+            "required": ["baseflow_recession"],
+        }
+    )
+    form = NamelistForm(schema, None, {"n_geo_units": 2})
+    values = form.values()
+    assert values["baseflow_recession"].assigned == {(1,), (2,)}
+    page = NamelistPage("baseflow_1", "baseflow_1", schema)
+    profile = GuiProfile("parameters", "parameters", "Parameters", None, "parameters.nml", (page,))
+    project = GuiProject(tmp_path, {}, {"n_geo_units": 2}, (profile,), namelists=(page,))
+    save_profiles(project, [(profile, {"baseflow_1": values}, {"n_geo_units": 2})])
+    text = (tmp_path / "parameters.nml").read_text()
+    assert "baseflow_recession(1)%value = 100.0" in text
+    assert "baseflow_recession(2)%max = 1000.0" in text
+
+
+def test_single_referenced_array_uses_top_aligned_resizable_table(application):
     schema = {
+        "title": "Long descriptive parameter title",
+        "description": "Parameter explanation.",
         "type": "array",
         "x-fortran-shape": 2,
         "items": {"type": "number"},
+        "default": [75.0, 200.0],
         "examples": [[75.0, 200.0]],
+        GUI_REF_ORIGIN_KEY: "parameter.yml#/$defs/parameter",
     }
-    parent = QWidget()
-    table = ReferencedArrayTable(
-        {"factor": schema}, {}, {}, set(), parent, fit_arrays=False
+    form = NamelistForm(
+        {"type": "object", "properties": {"factor": schema}, "required": ["factor"]},
+        None,
+        {},
     )
+    form.show()
+    application.processEvents()
+    (table,) = form.tables
+    assert not form.rows and table.y() < 50
+    assert table.cellWidget(0, 0).fieldLabel.text() == "factor *"
+    assert not table.cellWidget(0, 0).infoButton.isHidden()
+    assert table.horizontalHeaderItem(0).text() == "Namelist Property"
+    assert table.horizontalHeader().sectionResizeMode(0) == table.horizontalHeader().Interactive
+    assert table.horizontalHeader().minimumSectionSize() == 88
+    assert table.columnWidth(0) >= 180 and table.columnWidth(1) >= 88
     table.rows["factor"][0].set_value(12.0, {})
     table.reset()
     control = table.rows["factor"][0].field.control
-    assert control.placeholderText() == "Example: 75.0"
-    assert table.values() == {}
+    assert control.placeholderText() == "75.0"
+    assert table.values()["factor"] == [75.0, 200.0]
