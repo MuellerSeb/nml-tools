@@ -548,6 +548,7 @@ class ConfigurationDialog(QDialog):
         """Create the single reusable Config tab for one loaded project."""
         old = self.project_configs.get(project_key)
         if old is not None:
+            self._detach_tab(old)
             old.deleteLater()
         config = ProfileConfigTab(self.project, self.project_dimensions[project_key], self)
         config.hide()
@@ -591,18 +592,26 @@ class ConfigurationDialog(QDialog):
         button.clicked.connect(lambda: self._remove_tree_item(item))
         self.treeWidget_projectStructure.setItemWidget(item, 1, button)
 
-    def _show_project(self, key: str) -> None:
+    def _detach_tab(self, widget: QWidget) -> None:
+        """Hide and remove a cached page from Qt's internal tab stack."""
+        index = self.tabs.indexOf(widget)
+        if index >= 0:
+            self.tabs.removeTab(index)
+        widget.hide()
+        widget.setParent(self)
+
+    def _show_project(self, key: str, *, force: bool = False) -> None:
         """Show only the selected project's cached tabs."""
         if key not in self.loaded_projects:
+            return
+        if key == self.active_project and not force:
             return
         self.active_project = key
         self.editors = self.project_editors[key]
         self.config_tab = self.project_configs[key]
         with QSignalBlocker(self.tabs):
             while self.tabs.count():
-                widget = self.tabs.widget(0)
-                self.tabs.removeTab(0)
-                widget.hide()
+                self._detach_tab(self.tabs.widget(0))
             self.tabs.addTab(self.config_tab, "⚙️")
             for editor in self.editors.values():
                 self.tabs.addTab(editor, editor.profile.title)
@@ -670,8 +679,7 @@ class ConfigurationDialog(QDialog):
             ):
                 return
         with QSignalBlocker(self.tabs):
-            self.tabs.removeTab(index)
-            widget.hide()
+            self._detach_tab(widget)
         if widget is self.config_tab:
             self.config_tab = None
         if self.tabs.count() == 1:
@@ -840,7 +848,7 @@ class ConfigurationDialog(QDialog):
         self.project_editors[profile.key] = editors
         self.project_configs[profile.key] = config
         self.project_dimensions[profile.key] = dimensions
-        self.active_project = profile.key
+        self.active_project = None
         self._build_tree(profile)
         self.treeWidget_projectStructure.setCurrentItem(self.project_items[profile.key])
 
@@ -889,7 +897,7 @@ class ConfigurationDialog(QDialog):
             self.project_dimensions[key],
         )
         for editor in old.values():
-            self.tabs.removeTab(self.tabs.indexOf(editor))
+            self._detach_tab(editor)
             editor.deleteLater()
         self.project_editors[key] = {}
         for profile in self.loaded_projects[key].profiles:
@@ -915,7 +923,7 @@ class ConfigurationDialog(QDialog):
                 self.project_editors[key][path] = editor
             else:
                 self._ensure_editor(key, profile)
-        self._show_project(key)
+        self._show_project(key, force=True)
 
     def _cancel_profile(self, project_key: str, editor: ProfileTab) -> None:
         """Replace one editor with its last successfully saved state."""
@@ -933,13 +941,15 @@ class ConfigurationDialog(QDialog):
         replacement.save.clicked.connect(lambda: self._save([replacement]))
         replacement.cancel.clicked.connect(lambda: self._cancel_profile(project_key, replacement))
         self.project_editors[project_key][path] = replacement
-        self._show_project(project_key)
+        self._show_project(project_key, force=True)
         self._insert_editor_tab(replacement)
         editor.setParent(None)
         editor.deleteLater()
 
     def _save(self, editors: list[ProfileTab]) -> None:
         """Validate and atomically save supplied profile editors."""
+        if not editors:
+            return
         try:
             unique: dict[Path, tuple[ProfileTab, dict[str, Any]]] = {}
             collected: list[tuple[ProfileTab, dict[str, Any]]] = []
@@ -959,14 +969,23 @@ class ConfigurationDialog(QDialog):
             )
             for editor, values in collected:
                 editor.mark_saved(values)
+            paths = list(unique)
+            if len(paths) == 1:
+                message = f"{paths[0].name} has been saved to:\n{paths[0]}"
+            else:
+                files = "\n".join(f"• {path.name}" for path in paths)
+                message = (
+                    f"The following namelist files have been saved:\n\n{files}"
+                    f"\n\nOutput directory:\n{self.project.output_root}"
+                )
+            title = "Namelist saved" if len(paths) == 1 else "Namelists saved"
+            QMessageBox.information(self, title, message)
         except (OSError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Save namelist", str(exc))
 
     def _save_all(self) -> None:
-        """Save all loaded projects without writing duplicate files twice."""
-        self._save(
-            [editor for editors in self.project_editors.values() for editor in editors.values()]
-        )
+        """Save every file profile in the selected project."""
+        self._save(list(self.editors.values()))
 
     def _restore_all(self) -> None:
         """Restore schema defaults in every editor of the selected project."""
@@ -995,9 +1014,7 @@ class ConfigurationDialog(QDialog):
                     self._show_project(next(iter(self.loaded_projects)))
                 else:
                     while self.tabs.count():
-                        widget = self.tabs.widget(0)
-                        self.tabs.removeTab(0)
-                        widget.hide()
+                        self._detach_tab(self.tabs.widget(0))
                 return
             current = self._customize(self.loaded_projects[project_key])
             profiles = list(current.profiles)

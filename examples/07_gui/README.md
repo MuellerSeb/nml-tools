@@ -104,6 +104,15 @@ The project selector can also browse an additional project-profile TOML file.
 Selecting `<new>` lets you compose a custom project from configured schemas and
 file profiles; saved custom projects can be loaded again later.
 
+The `n_bodies` dimension is linked to `run%body_count`. To test dimension
+references and array resizing, open **Full simulation**, select the **⚙️** tab,
+reduce `n_bodies`, and click **Run**. The body tables and the read-only
+`body_count` field follow the new size. **Save all** writes both the source value
+and the resized arrays, and reopening the project recovers the saved dimension.
+Dimension-dependent defaults use one-element repeat seeds so they remain valid
+for every positive `n_bodies` value; the three-body examples remain available
+as hints and in the supplied sample namelists.
+
 Applications may open a project directly through the public API:
 
 ```python

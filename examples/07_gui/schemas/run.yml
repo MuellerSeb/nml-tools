@@ -2,8 +2,15 @@ title: Run configuration
 description: General controls for the gravity simulation.
 x-fortran-namelist: run
 type: object
-required: [run_id, start_time, time_step_seconds]
+required: [body_count, run_id, start_time, time_step_seconds]
 properties:
+  body_count:
+    title: Number of falling bodies
+    description: Supplies the n_bodies runtime dimension.
+    type: integer
+    x-fortran-kind: i4
+    minimum: 1
+    default: 3
   run_id:
     title: Run identifier
     description: Positive identifier for this simulation run.

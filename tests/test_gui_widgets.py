@@ -38,6 +38,11 @@ def application():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def dismiss_information_dialogs(monkeypatch):
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: QMessageBox.Ok)
+
+
 @pytest.fixture
 def project(tmp_path):
     schema = {
@@ -398,6 +403,60 @@ def test_dialog_load_overlay_save_reload_and_dimension_changes(application, proj
     reloaded.close()
 
 
+def test_example_dimension_source_resize_and_config_tab(application, tmp_path, monkeypatch):
+    from pathlib import Path
+    from shutil import copytree, rmtree
+
+    from nml_tools.gui.model import load_project
+
+    source = Path(__file__).resolve().parents[1] / "examples" / "07_gui"
+    root = tmp_path / "07_gui"
+    copytree(source, root)
+    rmtree(root / "out")
+    (root / "out").mkdir()
+    project = load_project(root, root / "out")
+    dialog = _add_project(ConfigurationDialog(project), "simulation")
+    assert dialog.config_tab.dimension_boxes["n_bodies"].value() == 3
+    assert dialog.config_tab.autoFillBackground()
+    assert all(editor.autoFillBackground() for editor in dialog.editors.values())
+    detached = []
+    detach = dialog._detach_tab
+    monkeypatch.setattr(
+        dialog, "_detach_tab", lambda widget: detached.append(widget) or detach(widget)
+    )
+    root_item = dialog.project_items["simulation"]
+    dialog.treeWidget_projectStructure.setCurrentItem(root_item.child(1))
+    dialog.treeWidget_projectStructure.setCurrentItem(root_item.child(0))
+    assert not detached
+    dialog.show()
+    for index in (1, 2, 0, 2, 1, 0):
+        dialog.tabs.setCurrentIndex(index)
+        application.processEvents()
+        current = dialog.tabs.currentWidget()
+        visible = [editor for editor in dialog.editors.values() if editor.isVisibleTo(dialog)]
+        assert visible == ([current] if isinstance(current, ProfileTab) else [])
+    old_editors = tuple(dialog.editors.values())
+
+    dialog.config_tab.dimension_boxes["n_bodies"].setValue(2)
+    dialog.config_tab.run.click()
+    assert all(dialog.tabs.indexOf(editor) < 0 and editor.isHidden() for editor in old_editors)
+    dialog.tabs.setCurrentWidget(dialog.config_tab)
+    application.processEvents()
+    assert dialog.config_tab.isVisibleTo(dialog)
+    assert not any(editor.isVisibleTo(dialog) for editor in dialog.editors.values())
+
+    dialog._save_all()
+    bodies = (root / "out" / "bodies.nml").read_text()
+    setup = (root / "out" / "setup.nml").read_text()
+    assert "body_ids(2)" in bodies and "body_ids(3)" not in bodies
+    assert "body_count = 2" in setup
+    dialog.close()
+
+    reloaded = _add_project(ConfigurationDialog(load_project(root, root / "out")), "simulation")
+    assert reloaded.config_tab.dimension_boxes["n_bodies"].value() == 2
+    reloaded.close()
+
+
 def test_invalid_existing_input_is_reported_and_never_replaced(application, project, monkeypatch):
     errors = []
     monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))
@@ -410,6 +469,49 @@ def test_invalid_existing_input_is_reported_and_never_replaced(application, proj
     assert errors and not dialog.editors
     dialog._save_all()
     assert path.read_text() == invalid
+    dialog.close()
+
+
+def test_save_notifications_and_active_project_scope(application, project, monkeypatch):
+    from dataclasses import replace
+
+    from nml_tools.gui import app
+
+    main = project.profiles[0]
+    second = replace(main, name="second", key="second", default_file="second.nml")
+    outside = replace(main, name="outside", key="outside", default_file="outside.nml")
+    project = replace(
+        project,
+        profiles=(main, second, outside),
+        project_profiles=(
+            GuiProjectProfile("one", "one", "One", None, (main, second)),
+            GuiProjectProfile("two", "two", "Two", None, (outside,)),
+        ),
+    )
+    notices = []
+    errors = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: notices.append(args[-1]))
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))
+    dialog = ConfigurationDialog(project)
+    _add_project(dialog, "one")
+    _add_project(dialog, "two")
+    dialog._show_project("one")
+
+    dialog._save_all()
+    assert (project.root / "run.nml").is_file()
+    assert (project.root / "second.nml").is_file()
+    assert not (project.root / "outside.nml").exists()
+    assert "run.nml" in notices[-1] and notices[-1].count(str(project.output_root)) == 1
+    assert "second.nml" in notices[-1] and "outside.nml" not in notices[-1]
+
+    notices.clear()
+    dialog._save([next(iter(dialog.editors.values()))])
+    assert str(project.root / "run.nml") in notices[-1] and "second.nml" not in notices[-1]
+
+    notices.clear()
+    monkeypatch.setattr(app, "save_profiles", lambda *args: (_ for _ in ()).throw(OSError("fail")))
+    dialog._save([next(iter(dialog.editors.values()))])
+    assert errors == ["fail"] and not notices
     dialog.close()
 
 

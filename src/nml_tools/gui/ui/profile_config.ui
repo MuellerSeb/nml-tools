@@ -2,6 +2,9 @@
 <ui version="4.0">
  <class>ProfileConfigTab</class>
  <widget class="QWidget" name="ProfileConfigTab">
+  <property name="autoFillBackground">
+   <bool>true</bool>
+  </property>
   <layout class="QVBoxLayout" name="rootLayout">
    <item><layout class="QHBoxLayout" name="sourceLayout">
     <item><widget class="QLabel" name="sourceLabel_loadProfile"><property name="text"><string>Load file profile</string></property></widget></item>

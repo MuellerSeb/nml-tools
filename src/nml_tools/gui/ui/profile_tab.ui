@@ -2,6 +2,9 @@
 <ui version="4.0">
  <class>ProfileTab</class>
  <widget class="QWidget" name="ProfileTab">
+  <property name="autoFillBackground">
+   <bool>true</bool>
+  </property>
   <property name="geometry">
    <rect>
     <x>0</x>

@@ -7,6 +7,7 @@ map = { i4 = "int32", dp = "real64" }
 [dimensions.n_bodies]
 default = 3
 doc = "Number of falling bodies."
+source = { namelist = "run", property = "body_count" }
 
 [dimensions.n_snapshots]
 default = 2
