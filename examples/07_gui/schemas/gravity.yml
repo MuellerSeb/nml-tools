@@ -6,6 +6,7 @@ required: [gravity_vector]
 properties:
   spatial_dimensions:
     title: Number of spatial dimensions
+    description: Number of spatial coordinates used by the simulation.
     type: integer
     x-fortran-kind: i4
     minimum: 1
@@ -20,6 +21,7 @@ properties:
     default: 6.6743e-11
   axis_codes:
     title: Axis identifiers
+    description: Integer identifier assigned to each spatial axis.
     type: array
     x-fortran-shape: 3
     items:

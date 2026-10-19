@@ -6,6 +6,7 @@ required: [body_ids, masses, initial_state_files, release_times]
 properties:
   body_ids:
     title: Body identifiers
+    description: Positive identifiers used to distinguish the simulated bodies.
     type: array
     x-fortran-shape: n_bodies
     items:
@@ -16,6 +17,7 @@ properties:
     x-fortran-default-repeat: true
   masses:
     title: Masses in kilograms
+    description: Mass of each body in kilograms.
     type: array
     x-fortran-shape: n_bodies
     items:
@@ -26,6 +28,7 @@ properties:
     x-fortran-default-repeat: true
   names:
     title: Body names
+    description: Optional display name for each body.
     type: array
     x-fortran-shape: n_bodies
     items:
@@ -34,6 +37,7 @@ properties:
     examples: [[light, medium, heavy]]
   active:
     title: Active bodies
+    description: Enables or disables each body without removing its inputs.
     type: array
     x-fortran-shape: n_bodies
     items:
@@ -41,6 +45,7 @@ properties:
     examples: [[true, true, true]]
   initial_state_files:
     title: Initial-state files
+    description: File containing the initial state of each body.
     type: array
     x-fortran-shape: n_bodies
     items:
@@ -51,6 +56,7 @@ properties:
     x-fortran-default-repeat: true
   release_times:
     title: Release times
+    description: Date and time at which each body enters the simulation.
     type: array
     x-fortran-shape: n_bodies
     items:
