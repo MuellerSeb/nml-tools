@@ -15,17 +15,51 @@
   </property>
   <layout class="QVBoxLayout" name="rootLayout">
    <item>
+    <layout class="QHBoxLayout" name="schemasConfigLayout" stretch="1,2,0,0">
+     <item>
+      <widget class="QLabel" name="sourceLabel_loadSchemasConfigDirectory">
+       <property name="maximumSize">
+        <size>
+         <width>16777215</width>
+         <height>16777215</height>
+        </size>
+       </property>
+       <property name="text">
+        <string>Load Schemas Config Directory:</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="lineEdit_pathSchemasConfigDirectory"/>
+     </item>
+     <item>
+      <widget class="QPushButton" name="browseButton_browseSchemasConfigDirectory">
+       <property name="text">
+        <string>Browse…</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="browseButton_scanSchemasConfigDirectory">
+       <property name="text">
+        <string>➤</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
     <layout class="QHBoxLayout" name="projectSourceLayout" stretch="1,2,0,0">
      <item>
       <widget class="QLabel" name="sourceLabel_loadProject">
        <property name="maximumSize">
         <size>
-         <width>120</width>
+         <width>16777215</width>
          <height>16777215</height>
         </size>
        </property>
        <property name="text">
-        <string>Project</string>
+        <string>Select Project Type:</string>
        </property>
       </widget>
      </item>
@@ -57,7 +91,7 @@
       </sizepolicy>
      </property>
      <property name="orientation">
-      <enum>Qt::Horizontal</enum>
+      <enum>Qt::Orientation::Horizontal</enum>
      </property>
      <widget class="QTreeWidget" name="treeWidget_projectStructure">
       <property name="sizePolicy">
@@ -98,7 +132,7 @@
      <item>
       <spacer name="actionSpacer">
        <property name="orientation">
-        <enum>Qt::Horizontal</enum>
+        <enum>Qt::Orientation::Horizontal</enum>
        </property>
        <property name="sizeHint" stdset="0">
         <size>
