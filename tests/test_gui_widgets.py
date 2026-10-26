@@ -27,6 +27,7 @@ from nml_tools.gui.app import ConfigurationDialog, ProfileConfigTab, ProfileTab
 from nml_tools.gui.fields import (
     ArrayField,
     FieldRow,
+    InlineArrayTable,
     NamelistForm,
     ObjectField,
     ScalarField,
@@ -750,6 +751,40 @@ def test_unopened_page_repeats_array_defaults(application, tmp_path):
     assert (tmp_path / "parameters.nml").read_text().count("GeoParam(") == 10
 
 
+def test_unopened_required_derived_array_uses_component_defaults(application, tmp_path):
+    first = NamelistPage(
+        "first",
+        "first",
+        {"type": "object", "properties": {"enabled": {"type": "boolean"}}},
+    )
+    derived = NamelistPage(
+        "parameters",
+        "parameters",
+        {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "x-fortran-shape": "n",
+                    "items": {
+                        "type": "object",
+                        "x-fortran-type": "item_t",
+                        "properties": {"value": {"type": "number", "default": 2.5}},
+                    },
+                }
+            },
+            "required": ["items"],
+        },
+    )
+    profile = GuiProfile("main", "main", "Main", None, "main.nml", (first, derived))
+    project = GuiProject(tmp_path, {}, {"n": 2}, (profile,), namelists=(first, derived))
+    tab = ProfileTab(project, profile, {}, {"n": 2})
+    assert "parameters" not in tab.forms
+    value = tab.values()["parameters"]["items"]
+    assert value == [{"value": 2.5}, {"value": 2.5}]
+    assert value.assigned == {(1,), (2,)}
+
+
 def test_shared_reference_table_edit_reset_and_round_trip(application, tmp_path):
     from nml_tools.gui.model import load_profile, recover_dimensions, save_profiles
 
@@ -900,3 +935,100 @@ def test_single_referenced_array_uses_top_aligned_resizable_table(application):
     control = table.rows["factor"][0].field.control
     assert control.placeholderText() == "75.0"
     assert table.values()["factor"] == [75.0, 200.0]
+
+
+def test_project_output_roots_are_isolated(application, project, tmp_path):
+    from dataclasses import replace
+
+    profile = project.profiles[0]
+    project = replace(
+        project,
+        project_profiles=(
+            GuiProjectProfile(
+                "one", "one", "One", None, (profile,), output_dir=tmp_path / "one"
+            ),
+            GuiProjectProfile(
+                "two", "two", "Two", None, (profile,), output_dir=tmp_path / "two"
+            ),
+        ),
+    )
+    dialog = ConfigurationDialog(project, preload_projects=True)
+    for key, count in (("one", 11), ("two", 22)):
+        dialog._show_project(key, force=True)
+        editor = next(iter(dialog.project_editors[key].values()))
+        editor.forms["run"].rows["count"].field.set_value(count)
+        dialog._save_all()
+    assert "count = 11" in (tmp_path / "one" / "run.nml").read_text()
+    assert "count = 22" in (tmp_path / "two" / "run.nml").read_text()
+    dialog.close()
+
+
+def test_mixed_resize_rejects_fixed_axis(application, monkeypatch):
+    from nml_tools.gui import fields
+    from nml_tools.gui.arrays import array_shape
+
+    field = ArrayField(
+        "values",
+        {
+            "type": "array",
+            "x-fortran-shape": [2, ":"],
+            "items": {"type": "integer"},
+        },
+        [[1, 2], [3, 4]],
+        {},
+    )
+    errors = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))
+    monkeypatch.setattr(fields.QInputDialog, "getText", lambda *args, **kwargs: ("3,2", True))
+    field._edit()
+    assert array_shape(field.value()) == (2, 2) and errors
+    monkeypatch.setattr(fields.QInputDialog, "getText", lambda *args, **kwargs: ("2,3", True))
+    field._edit()
+    assert array_shape(field.value()) == (2, 3)
+
+
+def test_long_string_dtype_and_atomic_paste(application, monkeypatch):
+    np = pytest.importorskip("numpy")
+    long = "x" * 1100
+    field = ArrayField(
+        "names",
+        {
+            "type": "array",
+            "x-fortran-shape": [1, 1, 1],
+            "items": {"type": "string", "x-fortran-len": 2048},
+        },
+        [[[long]]],
+        {},
+    )
+    assert field._intrinsic_array(np).item() == long
+
+    row = FieldRow(
+        "counts",
+        {"type": "array", "x-fortran-shape": 2, "items": {"type": "integer"}},
+        [1, 2],
+        {},
+    )
+    assert isinstance(row.field.table_editor, InlineArrayTable)
+    table = row.field.table_editor.tableWidget
+    table.setCurrentCell(0, 0)
+    QApplication.clipboard().setText("3\tbad")
+    errors = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))
+    QTest.keyClick(table, Qt.Key_V, Qt.ControlModifier)
+    assert row.value() == [1, 2] and errors
+
+
+def test_final_project_removal_and_dirty_close_guard(application, project, monkeypatch):
+    dialog = _add_project(ConfigurationDialog(project))
+    editor = next(iter(dialog.editors.values()))
+    editor.forms["run"].rows["count"].field.set_value(9)
+    answers = iter((QMessageBox.No, QMessageBox.Yes, QMessageBox.Yes))
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: next(answers))
+    dialog.show()
+    dialog.reject()
+    assert dialog.isVisible()
+    root = dialog.project_items["default"]
+    dialog._remove_tree_item(root)
+    assert not dialog.loaded_projects
+    assert dialog.active_project is None and not dialog.editors and dialog.config_tab is None
+    dialog.reject()

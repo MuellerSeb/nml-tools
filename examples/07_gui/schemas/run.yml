@@ -49,4 +49,4 @@ properties:
     type: string
     format: file-path
     x-fortran-len: 256
-    default: ../input/restart_state.dat
+    default: ../../input/restart_state.dat

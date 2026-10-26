@@ -1,10 +1,13 @@
 """Direct namelist persistence and profile selection checks."""
 
+import os
+from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
 
 import pytest
 
+from nml_tools._dimensions import DimensionSource
 from nml_tools.gui.model import (
     GUI_REF_ORIGIN_KEY,
     create_virtual_project,
@@ -13,8 +16,10 @@ from nml_tools.gui.model import (
     load_project_profile_file,
     overlay_values,
     recover_dimensions,
+    save_project_profile,
     save_profiles,
     suggestion,
+    validate_project_name,
 )
 
 
@@ -331,3 +336,44 @@ def test_save_rejects_strings_that_fortran_would_truncate(tmp_path):
             ],
         )
     assert not (tmp_path / "main.nml").exists()
+
+
+def test_mixed_dimension_sources_recover_unsourced_extents(tmp_path):
+    _write_project(tmp_path)
+    project = replace(
+        load_project(tmp_path),
+        default_dimensions={"n_items": 2, "n_source": 1},
+        dimension_sources={"n_source": DimensionSource("alpha", "count")},
+    )
+    (tmp_path / "main.nml").write_text("&alpha count=4 weights(5)=1.0 /\n")
+    assert recover_dimensions(project) == {"n_items": 5, "n_source": 4}
+
+
+def test_sparse_derived_components_round_trip_without_suggestions(tmp_path):
+    _write_project(tmp_path)
+    project = load_project(tmp_path)
+    profile = project.profile("main")
+    path = tmp_path / "main.nml"
+    path.write_text("&alpha count=1 settings(1)%enabled=.true. /\n")
+    values = load_profile(project, profile, {"n_items": 2})
+    save_profiles(project, [(profile, values, {"n_items": 2})])
+    text = path.read_text()
+    assert "settings(1)%enabled = .true." in text
+    assert "settings(1)%name" not in text
+
+
+def test_custom_project_ownership_names_and_file_mode(tmp_path):
+    _write_project(tmp_path)
+    project = load_project(tmp_path)
+    profile = project.project_profiles[0]
+    custom = replace(profile, name="my-project_1", key="my-project_1", custom=True, source=None)
+    assert validate_project_name(custom.name) == custom.name
+    path = save_project_profile(project, custom)
+    owned = replace(custom, source=path)
+    os.chmod(path, 0o640)
+    save_project_profile(project, owned)
+    assert path.stat().st_mode & 0o777 == 0o640
+    with pytest.raises(ValueError, match="unowned"):
+        save_project_profile(project, replace(owned, source=None))
+    with pytest.raises(ValueError, match="may contain"):
+        validate_project_name("bad/name")

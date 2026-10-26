@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 import math
 import os
+import re
+import stat
 import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
@@ -34,6 +36,15 @@ from .arrays import initial_array, resolve_shape
 
 MISSING = object()
 GUI_REF_ORIGIN_KEY = "_nml_tools_gui_ref_origin"
+_PROJECT_NAME = re.compile(r"[A-Za-z0-9_-]+\Z")
+
+
+def validate_project_name(name: str) -> str:
+    """Return a safe project name accepted by every GUI creation boundary."""
+    clean = name.strip() if isinstance(name, str) else ""
+    if _PROJECT_NAME.fullmatch(clean) is None:
+        raise ValueError("project name may contain only letters, numbers, '-' and '_'")
+    return clean
 
 
 def _mark_referenced_arrays(loaded: Iterable[Any]) -> None:
@@ -123,6 +134,36 @@ def suggestion(schema: Mapping[str, Any], sizes: Mapping[str, int]) -> Any:
     raise ValueError(f"unsupported schema type '{kind}'")
 
 
+def persistence_default(schema: Mapping[str, Any], sizes: Mapping[str, int]) -> Any:
+    """Return only real schema defaults, never editable suggestions."""
+    kind = schema.get("type")
+    if kind == "array":
+        if "default" in schema:
+            return suggestion(schema, sizes)
+        items = schema.get("items")
+        if not isinstance(items, Mapping):
+            return MISSING
+        item_default = persistence_default(items, sizes)
+        return (
+            MISSING
+            if item_default is MISSING
+            else initial_array(schema, sizes, None, item_default)
+        )
+    if kind == "object":
+        raw = schema.get("default", {})
+        result = copy.deepcopy(dict(raw)) if isinstance(raw, Mapping) else {}
+        properties = schema.get("properties", {})
+        if isinstance(properties, Mapping):
+            for name, child in properties.items():
+                if name in result or not isinstance(child, Mapping):
+                    continue
+                value = persistence_default(child, sizes)
+                if value is not MISSING:
+                    result[name] = value
+        return result if result else MISSING
+    return copy.deepcopy(schema["default"]) if "default" in schema else MISSING
+
+
 @dataclass(frozen=True)
 class NamelistPage:
     """A configured namelist and its resolved schema."""
@@ -156,6 +197,7 @@ class GuiProjectProfile:
     profiles: tuple[GuiProfile, ...]
     source: Path | None = None
     custom: bool = False
+    output_dir: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -193,7 +235,7 @@ class GuiProject:
 
 def load_project(
     schemas_dir: Path | str | None = None,
-    output_dir: Path | str | None = None,
+    output_dir: Path | str | Mapping[str, Path | str] | None = None,
     project_profiles: str
     | Mapping[str, Mapping[str, list[str]]]
     | Mapping[str, list[str]]
@@ -208,7 +250,19 @@ def load_project(
         project_profiles = file_profiles
     root = Path.cwd() if schemas_dir is None else Path(schemas_dir)
     root = root.resolve()
-    output_root = root if output_dir is None else Path(output_dir).resolve()
+    output_dirs: dict[str, Path] | None = None
+    if isinstance(output_dir, Mapping):
+        output_dirs = {}
+        for name, path in output_dir.items():
+            if not isinstance(name, str) or not isinstance(path, (str, Path)):
+                raise ValueError("output_dir must map project names to directory paths")
+            key = name.lower()
+            if key in output_dirs:
+                raise ValueError(f"duplicate output directory project '{name}'")
+            output_dirs[key] = Path(path).resolve()
+        output_root = root
+    else:
+        output_root = root if output_dir is None else Path(output_dir).resolve()
     config_path = root / "nml-config.toml"
     if not config_path.is_file():
         raise RuntimeError(f"nml-config.toml was not found in {root}")
@@ -230,21 +284,7 @@ def load_project(
     namelists = tuple(NamelistPage(item.name, item.key, item.schema) for item in loaded)
     pages_by_key = {page.key: page for page in namelists}
     profiles: list[GuiProfile] = []
-    output_paths: dict[Path, str] = {}
     for configured in configured_profiles.values():
-        target = (output_root / configured.default_file).resolve()
-        try:
-            target.relative_to(output_root)
-        except ValueError as exc:
-            raise RuntimeError(
-                f"file profile '{configured.name}' writes outside the output directory"
-            ) from exc
-        previous = output_paths.get(target)
-        if previous is not None:
-            raise RuntimeError(
-                f"file profiles '{previous}' and '{configured.name}' both write {target}"
-            )
-        output_paths[target] = configured.name
         pages = tuple(pages_by_key[key] for key in configured.namelists)
         profiles.append(
             GuiProfile(
@@ -267,12 +307,23 @@ def load_project(
             configured.description,
             tuple(by_key[key] for key in configured.file_profiles),
             config_path,
+            False,
+            output_dirs.get(configured.key) if output_dirs is not None else output_root,
         )
         for configured in metadata.project_profiles.values()
     )
     if not configured_projects:
         configured_projects = (
-            GuiProjectProfile("default", "default", "Default", None, tuple(profiles), config_path),
+            GuiProjectProfile(
+                "default",
+                "default",
+                "Default",
+                None,
+                tuple(profiles),
+                config_path,
+                False,
+                output_dirs.get("default") if output_dirs is not None else output_root,
+            ),
         )
     project = GuiProject(
         root,
@@ -285,6 +336,10 @@ def load_project(
         metadata.dimension_sources,
     )
     if project_profiles is None or project_profiles == {}:
+        if output_dirs is not None:
+            unknown = set(output_dirs) - {item.key for item in project.project_profiles}
+            if unknown:
+                raise ValueError(f"unknown output directory projects: {', '.join(sorted(unknown))}")
         return project
     if isinstance(project_profiles, str):
         try:
@@ -294,7 +349,7 @@ def load_project(
         return replace(
             project,
             profiles=selected_project.profiles,
-            project_profiles=(selected_project,),
+            project_profiles=(_project_output(selected_project, output_dirs, output_root),),
         )
     if not isinstance(project_profiles, Mapping):
         raise ValueError("project_profiles must be a name or mapping")
@@ -303,8 +358,16 @@ def load_project(
             project, cast(Mapping[str, list[str]], project_profiles)
         )
         implicit = GuiProjectProfile(
-            "default", "default", "Default", None, selected_profiles, custom=True
+            "default",
+            "default",
+            "Default",
+            None,
+            selected_profiles,
+            custom=True,
+            output_dir=(output_dirs or {}).get("default", output_root),
         )
+        if output_dirs is not None and set(output_dirs) != {"default"}:
+            raise ValueError("flat file-profile selection uses output directory key 'default'")
         return replace(project, profiles=selected_profiles, project_profiles=(implicit,))
     if not all(isinstance(value, Mapping) for value in project_profiles.values()):
         raise ValueError("project_profiles must map project names to file-profile mappings")
@@ -331,12 +394,26 @@ def load_project(
             chosen,
             configured_project.source if configured_project else None,
             configured_project is None,
+            (output_dirs or {}).get(project_name.lower(), output_root),
         )
         selected_projects.append(item)
         union.update((profile.key, profile) for profile in chosen)
+    if len(selected_projects) > 1 and output_dirs is None:
+        raise ValueError("multiple project profiles require an output_dir mapping")
+    if output_dirs is not None and set(output_dirs) != {item.key for item in selected_projects}:
+        raise ValueError("output_dir must contain exactly the selected project profiles")
     return replace(
         project, profiles=tuple(union.values()), project_profiles=tuple(selected_projects)
     )
+
+
+def _project_output(
+    profile: GuiProjectProfile, output_dirs: Mapping[str, Path] | None, default: Path
+) -> GuiProjectProfile:
+    """Attach the runtime output root selected for one project profile."""
+    if output_dirs is not None and set(output_dirs) != {profile.key}:
+        raise ValueError(f"output_dir must contain only project '{profile.name}'")
+    return replace(profile, output_dir=(output_dirs or {}).get(profile.key, default))
 
 
 def _select_profiles(
@@ -370,6 +447,7 @@ def create_virtual_project(
     name: str,
     default_file: str,
     namelist_keys: Iterable[str],
+    output_root: Path | None = None,
 ) -> GuiProject:
     """Return one user-defined file profile using registered namelists."""
     if not isinstance(name, str):
@@ -383,12 +461,13 @@ def create_virtual_project(
     if not clean_default:
         raise ValueError("default file name must not be empty")
 
-    target = (project.output_root / clean_default).resolve()
+    root = (output_root or project.output_root).resolve()
+    target = (root / clean_default).resolve()
     try:
-        relative = target.relative_to(project.output_root)
+        relative = target.relative_to(root)
     except ValueError as exc:
         raise ValueError("default file must be inside the output directory") from exc
-    if target == project.output_root:
+    if target == root:
         raise ValueError("default file must name a file")
 
     available = {page.key: page for page in project.namelists}
@@ -419,19 +498,24 @@ def create_virtual_project(
     return replace(project, profiles=(profile,))
 
 
-def discover_project_files(project: GuiProject) -> tuple[Path, ...]:
+def discover_project_files(
+    project: GuiProject, output_roots: Iterable[Path] = ()
+) -> tuple[Path, ...]:
     """Find additional project-profile TOML files in input and output roots."""
     config = (project.root / "nml-config.toml").resolve()
     paths = {
         path.resolve()
-        for root in {project.root, project.output_root}
+        for root in {project.root, project.output_root, *output_roots}
+        if root.is_dir()
         for path in root.glob("*.toml")
         if path.name != "nml-config.toml" and path.resolve() != config
     }
     return tuple(sorted(paths))
 
 
-def load_project_profile_file(project: GuiProject, path: Path) -> GuiProjectProfile:
+def load_project_profile_file(
+    project: GuiProject, path: Path, output_root: Path | None = None
+) -> GuiProjectProfile:
     """Load one custom project profile against the configured schema registry."""
     data = _load_toml(path)
     available = {profile.key: profile for profile in project.profiles}
@@ -485,7 +569,7 @@ def load_project_profile_file(project: GuiProject, path: Path) -> GuiProjectProf
             tuple(pages[item] for item in member_keys),
             tuple(required_keys),
         )
-        _profile_path(project, profile)
+        _profile_path(project, profile, output_root)
         available[key] = profile
     raw_projects = data.get("project_profiles")
     if not isinstance(raw_projects, list) or len(raw_projects) != 1:
@@ -536,15 +620,12 @@ def save_project_profile(project: GuiProject, profile: GuiProjectProfile) -> Pat
     """Persist one custom project profile in the schema directory."""
     if not profile.custom:
         raise ValueError("configured project profiles are read-only")
-    if not profile.key.replace("-", "_").isalnum():
-        raise ValueError("project name may contain only letters, numbers, '-' and '_'")
+    validate_project_name(profile.key)
     path = (project.root / f"{profile.key}.toml").resolve()
     if project.root not in path.parents:
         raise ValueError("custom project file must remain inside the schema directory")
     if path.exists() and (profile.source is None or path != profile.source.resolve()):
-        existing = load_project_profile_file(project, path)
-        if existing.key != profile.key:
-            raise ValueError(f"refusing to overwrite unrelated TOML file '{path.name}'")
+        raise ValueError(f"refusing to overwrite unowned TOML file '{path.name}'")
     lines: list[str] = []
     for item in profile.profiles:
         lines.extend(
@@ -643,8 +724,17 @@ def _evaluated_array(
         used = [coordinates[axis] for coordinates, _, _ in states if coordinates]
         if used:
             shape[axis] = max(used)
-    result = cast(list[Any], suggestion({**schema, "x-fortran-shape": shape}, sizes))
     components = _component_names(items) if items.get("type") == "object" else {}
+    if components:
+        seed = persistence_default(items, sizes)
+        result = initial_array(
+            {**schema, "x-fortran-shape": shape},
+            sizes,
+            None,
+            {} if seed is MISSING else seed,
+        )
+    else:
+        result = cast(list[Any], suggestion({**schema, "x-fortran-shape": shape}, sizes))
     for coordinates, component, state in states:
         target = result
         for coordinate in coordinates[:-1]:
@@ -829,11 +919,16 @@ def overlay_values(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict
     return result
 
 
-def _profile_path(project: GuiProject, profile: GuiProfile) -> Path:
+def _profile_path(
+    project: GuiProject, profile: GuiProfile, output_root: Path | None = None
+) -> Path:
     """Resolve and confine a profile's file beneath the output directory."""
-    path = (project.output_root / profile.default_file).resolve()
-    if path == project.output_root or project.output_root not in path.parents:
+    root = (output_root or project.output_root).resolve()
+    path = (root / profile.default_file).resolve()
+    if path == root or root not in path.parents:
         raise ValueError("profile output must be a file inside the output directory")
+    if path.exists() and path.is_dir():
+        raise ValueError("profile output must name a file, not a directory")
     return path
 
 
@@ -856,20 +951,21 @@ def recover_dimensions(
     project: GuiProject,
     paths: Iterable[Path] | None = None,
     overrides: Mapping[str, int] | None = None,
+    output_root: Path | None = None,
 ) -> dict[str, int]:
     """Infer editable sizes from saved indices before evaluating the namelists."""
     if paths is None:
-        paths = (_profile_path(project, profile) for profile in project.profiles)
+        paths = (_profile_path(project, profile, output_root) for profile in project.profiles)
     pages = project.namelists or tuple(page for p in project.profiles for page in p.pages)
     schemas = {page.key: page.schema for page in pages}
     unique_paths = tuple(dict.fromkeys(paths))
-    if project.dimension_sources:
-        parsed = [
-            parse_namelist(path.read_text(encoding="utf-8"), source=str(path))
-            for path in unique_paths
-            if path.exists()
-        ]
-        return infer_runtime_dimensions(
+    parsed = [
+        parse_namelist(path.read_text(encoding="utf-8"), source=str(path))
+        for path in unique_paths
+        if path.exists()
+    ]
+    inferred = (
+        infer_runtime_dimensions(
             parsed,
             sources=project.dimension_sources,
             schemas=schemas,
@@ -877,6 +973,9 @@ def recover_dimensions(
             overrides=overrides,
             constants=project.constants,
         )
+        if project.dimension_sources
+        else _normalize_dimensions(overrides or {}, project)
+    )
     extents: dict[str, int] = {}
     explicit: dict[str, int] = {}
     # Compatibility for older configs which predate explicit dimension sources.
@@ -896,6 +995,7 @@ def recover_dimensions(
                 prop = properties.get(name, {})
                 if (
                     name in project.default_dimensions
+                    and name not in project.dimension_sources
                     and prop.get("type") == "integer"
                     and len(assignment.designator.parts) == 1
                     and not part.selectors
@@ -914,7 +1014,10 @@ def recover_dimensions(
                     count = (count + len(items["properties"]) - 1) // len(items["properties"])
                 for axis, token in enumerate(shape):
                     dimension = str(token).lower()
-                    if dimension not in project.default_dimensions:
+                    if (
+                        dimension not in project.default_dimensions
+                        or dimension in project.dimension_sources
+                    ):
                         continue
                     selector = selectors[axis] if axis < len(selectors) else None
                     extent = 0
@@ -939,7 +1042,12 @@ def recover_dimensions(
     _normalize_dimensions(overrides or {}, project)
     # ponytail: sparse external files give lower bounds, not declared capacities.
     dimensions = _normalize_dimensions(
-        {**extents, **explicit, **{name.lower(): size for name, size in (overrides or {}).items()}},
+        {
+            **inferred,
+            **extents,
+            **explicit,
+            **{name.lower(): size for name, size in (overrides or {}).items()},
+        },
         project,
     )
     for name, extent in extents.items():
@@ -953,7 +1061,6 @@ def ensure_dimension_sources(
 ) -> tuple[GuiProfile, ...]:
     """Ensure every configured dimension source occurs in exactly one file."""
     result = list(profiles)
-    pages = {page.key: page for page in project.namelists}
     used = set().union(*(_schema_dimensions(page.schema) for item in result for page in item.pages))
     for dimension, source in project.dimension_sources.items():
         if dimension not in used:
@@ -968,18 +1075,11 @@ def ensure_dimension_sources(
                 f"dimension '{dimension}' source namelist '{source.namelist}' "
                 "must occur in exactly one file profile"
             )
-        if occurrences:
-            continue
-        source_page = pages.get(source.namelist)
-        if source_page is None:
+        if not occurrences:
             raise ValueError(
-                f"dimension '{dimension}' source namelist '{source.namelist}' is unavailable"
+                f"dimension '{dimension}' source namelist '{source.namelist}' "
+                "must occur in exactly one file profile"
             )
-        if not result:
-            raise ValueError(
-                f"add a file profile for dimension source namelist '{source.namelist}'"
-            )
-        result[0] = replace(result[0], pages=(*result[0].pages, source_page))
     return tuple(result)
 
 
@@ -1038,12 +1138,13 @@ def load_profile(
     profile: GuiProfile,
     dimensions: Mapping[str, int],
     path: Path | None = None,
+    output_root: Path | None = None,
 ) -> dict[str, Any]:
     """Read selected groups; absent fields are supplied by the form's defaults."""
     dimensions = _normalize_dimensions(dimensions, project)
     for page in profile.pages:
         validate_schema_defaults(page.schema, constants=project.constants, dimensions=dimensions)
-    path = _profile_path(project, profile) if path is None else path
+    path = _profile_path(project, profile, output_root) if path is None else path
     if not path.exists():
         return {}
     _, groups = _parsed_groups(path)
@@ -1119,11 +1220,12 @@ def render_profile(
 def save_profiles(
     project: GuiProject,
     updates: Iterable[tuple[GuiProfile, Mapping[str, Any], Mapping[str, int]]],
+    output_root: Path | None = None,
 ) -> None:
     """Validate all updates, then replace files without removing unselected groups."""
     outputs: dict[Path, str] = {}
     for profile, values, dimensions in updates:
-        path = _profile_path(project, profile)
+        path = _profile_path(project, profile, output_root)
         if path in outputs:
             raise ValueError(f"multiple open profiles write to '{path}'")
         rendered = render_profile(project, profile, values, dimensions)
@@ -1142,11 +1244,14 @@ def save_profiles(
 def _atomic_write(path: Path, content: str) -> None:
     """Replace a namelist file atomically after writing beside the target."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(content)
+        if mode is not None:
+            os.chmod(temporary, mode)
         os.replace(temporary, path)
     except Exception:
         temporary.unlink(missing_ok=True)

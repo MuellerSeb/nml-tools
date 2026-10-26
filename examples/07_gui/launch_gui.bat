@@ -1,5 +1,4 @@
 @echo off
 cd /d "%~dp0"
-if not exist out mkdir out
-nml-tools gui -i ./ -o ./out
+nml-tools gui
 if errorlevel 1 pause

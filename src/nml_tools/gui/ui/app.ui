@@ -91,7 +91,7 @@
       </sizepolicy>
      </property>
      <property name="orientation">
-      <enum>Qt::Orientation::Horizontal</enum>
+      <enum>Qt::Horizontal</enum>
      </property>
      <widget class="QTreeWidget" name="treeWidget_projectStructure">
       <property name="sizePolicy">
@@ -132,7 +132,7 @@
      <item>
       <spacer name="actionSpacer">
        <property name="orientation">
-        <enum>Qt::Orientation::Horizontal</enum>
+        <enum>Qt::Horizontal</enum>
        </property>
        <property name="sizeHint" stdset="0">
         <size>

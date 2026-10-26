@@ -54,8 +54,8 @@ properties:
       type: string
       format: file-path
       x-fortran-len: 256
-    default: [../input/body_1.csv]
-    examples: [[../input/body_1.csv, ../input/body_2.csv, ../input/body_3.csv]]
+    default: [../../input/body_1.csv]
+    examples: [[../../input/body_1.csv, ../../input/body_2.csv, ../../input/body_3.csv]]
     x-fortran-default-repeat: true
   release_times:
     title: Release times

@@ -16,8 +16,9 @@ The configured project profiles are:
 - `simulation`: `setup` and `bodies`
 - `report_preview`: `setup` and `reporting`
 
-This shows how two projects can share the same setup while exposing only their
-relevant namelist files.
+Both projects use the `setup` definition, but each owns a separate physical
+`setup.nml` in its output directory. Editing one project therefore cannot
+overwrite the other project's settings.
 
 ## Install the GUI
 
@@ -55,16 +56,19 @@ binding per environment. The GUI extra installs QtPy, guidata, and NumPy.
 │   ├── body_1.csv
 │   ├── body_2.csv
 │   └── body_3.csv
-└── out/                  # sample and newly saved namelist files
-    ├── setup.nml
-    ├── bodies.nml
-    └── reporting.nml
+└── out/                  # one independent directory per project
+    ├── simulation/
+    │   ├── setup.nml
+    │   └── bodies.nml
+    └── report_preview/
+        ├── setup.nml
+        └── reporting.nml
 ```
 
-The schema directory supplied with `-i` must contain `nml-config.toml`. Schema
-paths are resolved from that directory. The directory supplied with `-o` must
-be writable. Existing profile namelists are read from it when a project is
-loaded; otherwise the GUI starts with schema defaults and example hints.
+The schema directory must contain `nml-config.toml`. Each loaded project also
+needs its own writable output directory. Existing namelists are read from that
+project's directory; otherwise its forms start with schema defaults and example
+hints.
 
 ## Open the example
 
@@ -74,23 +78,24 @@ After installation, double-click the launcher for your platform:
 - macOS: `launch_gui.command`.
 - Windows: `launch_gui.bat`.
 
-Linux and macOS launchers must remain executable. All launchers change to this
-directory and run:
+Linux and macOS launchers must remain executable. Each launcher changes to this
+example directory and runs:
 
 ```bash
-nml-tools gui -i ./ -o ./out
+nml-tools gui
 ```
 
-The `nml-tools` executable must be available on the desktop session's `PATH`.
-You can always run the same command in a terminal from this directory.
+With no options, the current directory is both the schema/config directory and
+the initial namelist output directory. Select a project with **+**, then use its
+**⚙️** tab to choose a different output directory when needed.
 
 ## GUI workflow
 
-1. Select `Full simulation` or `Reporting preview` in **Load project**, then
-   click **+** to add it to the project tree.
+1. Select a project under **Load project** and add it with **+**.
 2. Expand the project and select a file profile or namelist. The matching tab
    and namelist page are selected automatically.
-3. Use the **⚙️** tab to change dimensions or compose a custom file profile.
+3. Use the **⚙️** tab to select that project's output directory, change
+   dimensions, or compose a custom file profile.
 4. Edit values. Descriptions are available from the blue information buttons;
    default and example hints can be accepted with **Tab**.
 5. Use **Save** for one file profile or **Save all** for the loaded project.
@@ -113,7 +118,7 @@ Dimension-dependent defaults use one-element repeat seeds so they remain valid
 for every positive `n_bodies` value; the three-body examples remain available
 as hints and in the supplied sample namelists.
 
-Applications may open a project directly through the public API:
+Applications may still open one project with a scalar output path:
 
 ```python
 from nml_tools.gui import launch_gui
@@ -131,9 +136,12 @@ be tried immediately. Saving both configured projects produces or updates:
 
 ```text
 out/
-├── setup.nml
-├── bodies.nml
-└── reporting.nml
+├── simulation/
+│   ├── setup.nml
+│   └── bodies.nml
+└── report_preview/
+    ├── setup.nml
+    └── reporting.nml
 ```
 
 Arrays use indexed assignments such as:
@@ -149,5 +157,6 @@ Arrays use indexed assignments such as:
 /
 ```
 
-Only files belonging to loaded projects are changed. Reopening the example
-loads values already present in each profile's namelist file.
+Only files belonging to the active project are saved. Reopening the example
+loads each project's values from its own directory, including its independent
+copy of `setup.nml`.

@@ -11,7 +11,7 @@ __all__ = ["launch_gui"]
 
 def launch_gui(
     schemas_dir: Path | str | None = None,
-    output_dir: Path | str | None = None,
+    output_dir: Path | str | Mapping[str, Path | str] | None = None,
     project_profiles: str
     | Mapping[str, Mapping[str, list[str]]]
     | Mapping[str, list[str]]
@@ -24,7 +24,8 @@ def launch_gui(
     Explicit project-profile selections are loaded into the tree. None exposes
     every configured project in the dropdown without loading it. The legacy
     flat file-profile mapping is still accepted. Values remain keyed by file
-    profile and override existing namelist input. Output defaults to schemas_dir.
+    profile and override existing namelist input. Output defaults to schemas_dir;
+    multiple preloaded projects use a mapping from project name to output path.
     """
     from .app import launch_gui as _launch_gui
 

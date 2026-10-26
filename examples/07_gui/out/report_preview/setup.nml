@@ -1,11 +1,11 @@
 &run
-  body_count = 2
-  run_id = 1
-  label = "gravity-demo"
+  body_count = 3
+  run_id = 2
+  label = "report-preview"
   start_time = "2026-01-01 00:00"
   time_step_seconds = 0.1
-  enabled = .true.
-  restart_file = "../input/restart_state.dat"
+  enabled = .false.
+  restart_file = "../../input/restart_state.dat"
 /
 &gravity
   spatial_dimensions = 3

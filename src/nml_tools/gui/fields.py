@@ -44,8 +44,16 @@ from .arrays import (
     initial_array,
     resolve_shape,
     table_axes,
+    validate_array_shape,
 )
-from .model import GUI_REF_ORIGIN_KEY, MISSING, InputArray, overlay_values, suggestion
+from .model import (
+    GUI_REF_ORIGIN_KEY,
+    MISSING,
+    InputArray,
+    overlay_values,
+    persistence_default,
+    suggestion,
+)
 from .ui import load_ui
 
 
@@ -71,6 +79,7 @@ def _derived_array_editor(editor_type: type[Any], parent: QWidget) -> Any:
     class DerivedArrayEditor(editor_type):
         def accept(self) -> None:
             """Commit structured edits before accepting the dialog."""
+            self.nml_changed_components = set(self._data.current_changes)
             for (name, *indices), value in self._data.current_changes.items():
                 self._data.get_array()[name][tuple(indices)] = value
             self._data.current_changes.clear()
@@ -188,6 +197,24 @@ def _contains_default(schema: Mapping[str, Any]) -> bool:
     return isinstance(properties, Mapping) and any(
         _contains_default(child) for child in properties.values() if isinstance(child, Mapping)
     )
+
+
+def _nested_scalars(value: Any) -> Any:
+    """Yield scalar leaves from nested array values."""
+    if isinstance(value, list):
+        for item in value:
+            yield from _nested_scalars(item)
+    else:
+        yield value
+
+
+def _string_dtype(schema: Mapping[str, Any], sizes: Mapping[str, int], values: Any) -> str:
+    """Choose a lossless NumPy Unicode width from schema and current values."""
+    declared = schema.get("x-fortran-len", 1)
+    if isinstance(declared, str):
+        declared = sizes.get(declared.lower(), 1)
+    width = int(declared) if isinstance(declared, int) else 1
+    return f"U{max(width, *(len(str(value)) for value in _nested_scalars(values)))}"
 
 
 class OptionalSpinBox(QSpinBox):
@@ -706,14 +733,7 @@ class InlineArrayTable(QWidget):
                     )
                 return True
             if event.matches(QKeySequence.Paste):
-                current = self.tableWidget.currentIndex()
-                for row_offset, line in enumerate(QApplication.clipboard().text().splitlines()):
-                    for column_offset, text in enumerate(line.split("\t")):
-                        cell = self.tableWidget.cellWidget(
-                            current.row() + row_offset, current.column() + column_offset
-                        )
-                        if isinstance(cell, FieldRow):
-                            cell.set_value(_parse_text(text, self.items), self.sizes)
+                _paste_table(self.tableWidget, self.sizes, lambda _row, _column: self.items)
                 return True
         return bool(super().eventFilter(watched, event))
 
@@ -845,16 +865,26 @@ class ArrayField(QWidget):
                 if not accepted:
                     return
                 shape = tuple(int(part.strip()) for part in text.split(","))
-                if len(shape) != len(array_shape(self._value)) or any(size <= 0 for size in shape):
+                current_shape = resolve_shape(self.schema, self.sizes, self._value)
+                if len(shape) != len(current_shape) or any(size <= 0 for size in shape):
                     raise ValueError("shape must contain one positive size per array axis")
+                raw = self.schema.get("x-fortran-shape")
+                raw = raw if isinstance(raw, list) else [raw]
+                if any(
+                    token != ":" and size != current_shape[axis]
+                    for axis, (token, size) in enumerate(zip(raw, shape))
+                ):
+                    raise ValueError("only deferred ':' array axes may be resized")
                 old = self.value()
-                self._value = initial_array(
+                resized = initial_array(
                     {**self.schema, "x-fortran-shape": list(shape)},
                     self.sizes,
                     old,
                     suggestion(self.items, self.sizes),
                     resize=True,
                 )
+                validate_array_shape(self.schema, self.sizes, resized)
+                self._value = resized
                 self.assigned = {
                     indices
                     for indices in old.assigned
@@ -867,7 +897,6 @@ class ArrayField(QWidget):
             from guidata.widgets.arrayeditor import ArrayEditor
 
             before = self.value()
-            self._value = before
             rank = len(resolve_shape(self.schema, self.sizes, self._value))
             derived = self.items.get("type") == "object"
             canonical = self._structured_array(np) if derived else self._intrinsic_array(np)
@@ -892,10 +921,17 @@ class ArrayField(QWidget):
                 return
             edited = editor.get_value()
             if derived:
-                self._value = self._objects_from_structured(edited, rank, np)
+                candidate = self._objects_from_structured(
+                    edited,
+                    rank,
+                    np,
+                    getattr(editor, "nml_changed_components", set()),
+                )
             else:
-                self._value = canonical_array(edited, self.schema, rank)
-            shape = array_shape(self._value)
+                candidate = canonical_array(edited, self.schema, rank)
+            validate_array_shape(self.schema, self.sizes, candidate)
+            self._value = candidate
+            shape = array_shape(candidate)
             old_shape = array_shape(before)
             self.assigned = {
                 indices
@@ -920,7 +956,7 @@ class ArrayField(QWidget):
             "integer": np.int64,
             "number": np.float64,
             "boolean": np.bool_,
-            "string": "U1024",
+            "string": _string_dtype(self.items, self.sizes, self._value),
         }.get(kind)
         if dtype is None:
             raise ValueError(f"unsupported array item type '{kind}'")
@@ -938,11 +974,16 @@ class ArrayField(QWidget):
             child_kind = child.get("type")
             if not isinstance(child_kind, str):
                 raise ValueError("derived components must define a string type")
+            values = [
+                item.get(name, "")
+                for item in _nested_scalars(self._value)
+                if isinstance(item, Mapping)
+            ]
             dtype = {
                 "integer": np.int64,
                 "number": np.float64,
                 "boolean": np.bool_,
-                "string": "U1024",
+                "string": _string_dtype(child, self.sizes, values),
             }.get(child_kind)
             if dtype is None:
                 raise ValueError(f"unsupported derived component type '{child_kind}'")
@@ -959,7 +1000,9 @@ class ArrayField(QWidget):
                 result[index][name] = item.get(name, defaults[name])
         return result
 
-    def _objects_from_structured(self, value: Any, rank: int, np: Any) -> list[Any]:
+    def _objects_from_structured(
+        self, value: Any, rank: int, np: Any, changed: set[tuple[Any, ...]]
+    ) -> list[Any]:
         """Convert an edited structured array back to derived-value mappings."""
         data = np.asarray(value)
         if rank == 1:
@@ -970,7 +1013,7 @@ class ArrayField(QWidget):
                 data = np.transpose(data, np.argsort(axes))
         edited = _structured_to_objects(data)
         defaults = suggestion(self.items, self.sizes)
-        return cast(list[Any], _preserve_omissions(edited, self._value, defaults))
+        return cast(list[Any], _preserve_omissions(edited, self._value, defaults, changed))
 
     def _display_labels(
         self, displayed_shape: tuple[int, ...], rank: int
@@ -1195,19 +1238,17 @@ class DerivedTable(QTableWidget):
             is_array = schema["type"] == "array"
             item = schema["items"] if is_array else schema
             if is_array:
+                item_default = persistence_default(item, sizes)
+                array_default = persistence_default(schema, sizes)
                 dense = initial_array(
                     schema,
                     sizes,
-                    suggestion(schema, sizes) if value is MISSING else value,
-                    suggestion(item, sizes),
+                    None if value is MISSING and array_default is MISSING else (
+                        array_default if value is MISSING else value
+                    ),
+                    {} if item_default is MISSING else item_default,
                     strict=value is not MISSING and not fit_arrays,
                     resize=value is not MISSING and fit_arrays,
-                    defaults=suggestion(
-                        {**schema, "x-fortran-shape": list(resolve_shape(schema, sizes, value))},
-                        sizes,
-                    )
-                    if value is not MISSING and fit_arrays
-                    else None,
                 )
                 shape = array_shape(dense)
                 positions = set(product(*(range(1, n + 1) for n in shape)))
@@ -1218,13 +1259,18 @@ class DerivedTable(QTableWidget):
                     if value is not MISSING
                     else set()
                 ) & positions
-                seeded = _seeded(schema) or (name.lower() in required and _contains_default(item))
+                seeded = array_default is not MISSING or (
+                    name.lower() in required and item_default is not MISSING
+                )
                 if seeded:
                     source_positions.update(positions)
                 self.data[name] = InputArray(dense, source_positions)
             else:
-                self.data[name] = {} if value is MISSING else value
-                if value is not MISSING or _seeded(schema) or name.lower() in required:
+                default = persistence_default(schema, sizes)
+                self.data[name] = (
+                    {} if default is MISSING else default
+                ) if value is MISSING else value
+                if value is not MISSING or default is not MISSING or name.lower() in required:
                     self.present.add(name)
                 if value is MISSING and not _seeded(schema) and schema.get("examples"):
                     self.example_only.add(name)
@@ -1319,22 +1365,16 @@ class DerivedTable(QTableWidget):
                 _copy_table_selection(self)
                 return True
             if event.matches(QKeySequence.Paste):
-                current = self.currentIndex()
                 columns = list(next(iter(self.table_rows))[2]["properties"])
-                for row_offset, line in enumerate(QApplication.clipboard().text().splitlines()):
-                    row = current.row() + row_offset
-                    if row >= self.rowCount():
-                        break
-                    schema = self.table_rows[row][2]
-                    for column_offset, text in enumerate(line.split("\t")):
-                        column = current.column() + column_offset
-                        component = column - 1
-                        cell = self.cellWidget(row, column)
-                        if isinstance(cell, FieldRow) and 0 <= component < len(columns):
-                            cell.set_value(
-                                _parse_text(text, schema["properties"][columns[component]]),
-                                self.sizes,
-                            )
+                _paste_table(
+                    self,
+                    self.sizes,
+                    lambda row, column: self.table_rows[row][2]["properties"][
+                        columns[column - 1]
+                    ]
+                    if 0 < column <= len(columns)
+                    else None,
+                )
                 return True
         return bool(super().eventFilter(watched, event))
 
@@ -1475,16 +1515,11 @@ class ReferencedArrayTable(QTableWidget):
                 _copy_table_selection(self)
                 return True
             if event.matches(QKeySequence.Paste):
-                current = self.currentIndex()
-                for row_offset, line in enumerate(QApplication.clipboard().text().splitlines()):
-                    row = current.row() + row_offset
-                    if row >= self.rowCount():
-                        break
-                    item_schema = self.schemas[self.row_names[row]]["items"]
-                    for column_offset, text in enumerate(line.split("\t")):
-                        cell = self.cellWidget(row, current.column() + column_offset)
-                        if isinstance(cell, FieldRow):
-                            cell.set_value(_parse_text(text, item_schema), self.sizes)
+                _paste_table(
+                    self,
+                    self.sizes,
+                    lambda row, _column: self.schemas[self.row_names[row]]["items"],
+                )
                 return True
         return bool(super().eventFilter(watched, event))
 
@@ -1639,18 +1674,54 @@ def _parse_text(text: str, schema: Mapping[str, Any]) -> Any:
     """Convert pasted table text to the intrinsic schema type."""
     kind = schema.get("type")
     if kind == "integer":
-        return int(text)
-    if kind == "number":
+        value: Any = int(text)
+    elif kind == "number":
         value = float(text)
         if not math.isfinite(value):
             raise ValueError(f"'{text}' is not a valid number")
-        return value
-    if kind == "boolean":
+    elif kind == "boolean":
         normalized = text.strip().lower().strip(".")
         if normalized not in {"true", "false"}:
             raise ValueError(f"'{text}' is not a valid boolean")
-        return normalized == "true"
-    return text
+        value = normalized == "true"
+    else:
+        if schema.get("format") == "date-time":
+            _parse_date_time(text)
+        value = text
+    enum = schema.get("enum")
+    if isinstance(enum, list) and value not in enum:
+        raise ValueError(f"'{text}' is not an allowed value")
+    return value
+
+
+def _paste_table(
+    table: QTableWidget,
+    sizes: Mapping[str, int],
+    schema_at: Any,
+) -> None:
+    """Validate a complete bounded clipboard paste before changing any cell."""
+    current = table.currentIndex()
+    if not current.isValid():
+        return
+    staged: list[tuple[FieldRow, Any]] = []
+    try:
+        for row_offset, line in enumerate(QApplication.clipboard().text().splitlines()):
+            row = current.row() + row_offset
+            if row >= table.rowCount():
+                break
+            for column_offset, text in enumerate(line.split("\t")):
+                column = current.column() + column_offset
+                if column >= table.columnCount():
+                    break
+                cell = table.cellWidget(row, column)
+                schema = schema_at(row, column)
+                if isinstance(cell, FieldRow) and isinstance(schema, Mapping):
+                    staged.append((cell, _parse_text(text, schema)))
+    except (TypeError, ValueError) as exc:
+        QMessageBox.critical(table, "Paste error", str(exc))
+        return
+    for cell, value in staged:
+        cell.set_value(value, sizes)
 
 
 def _copy_table_selection(table: QTableWidget) -> None:
@@ -1719,17 +1790,28 @@ def _numpy_scalar(value: Any) -> Any:
     return value.item() if hasattr(value, "item") else value
 
 
-def _preserve_omissions(edited: Any, original: Any, defaults: Any) -> Any:
+def _preserve_omissions(
+    edited: Any,
+    original: Any,
+    defaults: Any,
+    changed: set[tuple[Any, ...]] | None = None,
+    indices: tuple[int, ...] = (),
+) -> Any:
     """Drop untouched default components that were absent from saved input."""
     if isinstance(edited, list) and isinstance(original, list):
         return [
-            _preserve_omissions(item, original[index], defaults) if index < len(original) else item
+            _preserve_omissions(item, original[index], defaults, changed, (*indices, index))
+            if index < len(original)
+            else item
             for index, item in enumerate(edited)
         ]
     if isinstance(edited, Mapping) and isinstance(original, Mapping):
         return {
             name: value
             for name, value in edited.items()
-            if name in original or not isinstance(defaults, Mapping) or value != defaults.get(name)
+            if name in original
+            or (name, *indices) in (changed or set())
+            or not isinstance(defaults, Mapping)
+            or value != defaults.get(name)
         }
     return edited

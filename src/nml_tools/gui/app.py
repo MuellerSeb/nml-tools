@@ -7,6 +7,7 @@ import copy
 import sys
 from collections.abc import Mapping
 from dataclasses import replace
+from itertools import product
 from pathlib import Path
 from typing import Any
 
@@ -31,10 +32,13 @@ from qtpy.QtWidgets import (
 )
 
 from .fields import NamelistForm, _exec
+from .arrays import array_shape
 from .model import (
     GuiProfile,
     GuiProject,
     GuiProjectProfile,
+    InputArray,
+    MISSING,
     _normalize_dimensions,
     _normalize_profile_values,
     _profile_path,
@@ -46,10 +50,12 @@ from .model import (
     load_project,
     load_project_profile_file,
     overlay_values,
+    persistence_default,
     recover_dimensions,
     save_profiles,
     save_project_profile,
     suggestion,
+    validate_project_name,
 )
 from .ui import load_ui
 
@@ -101,6 +107,17 @@ def _untouched_value(
         source = overlay_values(base, value) if isinstance(base, Mapping) else dict(value)
     elif "default" in schema:
         return suggestion(schema, sizes) if kind == "array" else copy.deepcopy(schema["default"])
+    elif kind == "array":
+        default = persistence_default(schema, sizes)
+        if default is _UNSET or default is MISSING:
+            if required:
+                raise ValueError(f"required field '{name}' has no value")
+            return _UNSET
+        shape = array_shape(default)
+        return InputArray(
+            default,
+            set(product(*(range(1, size + 1) for size in shape))),
+        )
     elif kind != "object":
         if required:
             raise ValueError(f"required field '{name}' has no value")
@@ -141,6 +158,8 @@ class ProfileTab(QWidget):
         parent: QWidget | None = None,
         *,
         fit_arrays: bool = False,
+        output_root: Path | None = None,
+        source_values: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(parent)
         load_ui("profile_tab.ui", self)
@@ -151,6 +170,8 @@ class ProfileTab(QWidget):
         self._values = copy.deepcopy(dict(values))
         self._sizes = {**project.constants, **dimensions}
         self._fit_arrays = fit_arrays
+        self.output_root = (output_root or project.output_root).resolve()
+        self.source_values = copy.deepcopy(dict(source_values or {}))
         self.forms: dict[str, NamelistForm] = {}
         self.form_saved: dict[str, dict[str, Any]] = {}
         self.selector: QComboBox = self.namelistComboBox
@@ -187,6 +208,10 @@ class ProfileTab(QWidget):
                 if form is not None or self._fit_arrays
                 else _untouched_page_values(page.schema, self._values.get(page.name), self._sizes)
             )
+            if page.name in self.source_values:
+                result[page.name] = overlay_values(
+                    result[page.name], self.source_values[page.name]
+                )
         return result
 
     def is_dirty(self) -> bool:
@@ -209,12 +234,16 @@ class ProfileTab(QWidget):
         """Restore the active namelist page."""
         index = self.selector.currentIndex()
         if index >= 0:
-            self._ensure_form(index).reset()
+            form = self._ensure_form(index)
+            form.reset()
+            self._apply_sources(self.profile.pages[index], form)
 
     def restore_all(self) -> None:
         """Restore every page in this file profile."""
         for index in range(len(self.profile.pages)):
-            self._ensure_form(index).reset()
+            form = self._ensure_form(index)
+            form.reset()
+            self._apply_sources(self.profile.pages[index], form)
 
     def select_page(self, key: str) -> None:
         """Select a namelist page by normalized name."""
@@ -245,9 +274,10 @@ class ProfileTab(QWidget):
             self._values.get(page.name),
             self._sizes,
             fit_arrays=self._fit_arrays,
-            output_root=self.project.output_root,
+            output_root=self.output_root,
             read_only=read_only,
         )
+        self._apply_sources(page, form)
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setWidget(form)
@@ -261,6 +291,14 @@ class ProfileTab(QWidget):
         except ValueError:
             self.form_saved[page.name] = copy.deepcopy(dict(self._values.get(page.name, {})))
         return form
+
+    def _apply_sources(self, page: Any, form: NamelistForm) -> None:
+        """Project current dimensions back into read-only source fields."""
+        for name, value in self.source_values.get(page.name, {}).items():
+            row = form.rows.get(name)
+            if row is not None:
+                row.set_value(value, self._sizes)
+                row.field.setEnabled(False)
 
     def _update_navigation(self, index: int) -> None:
         """Update Back/Next availability for the active page."""
@@ -277,9 +315,11 @@ class ProfileConfigTab(QWidget):
         project: GuiProject,
         dimensions: Mapping[str, int],
         parent: QWidget,
+        output_root: Path | None = None,
     ) -> None:
         super().__init__(parent)
         load_ui("profile_config.ui", self)
+        self.setAutoFillBackground(True)
         self.project = project
         self.source_profile: GuiProfile | None = None
         self.source_profiles: dict[str, GuiProfile] = {}
@@ -290,6 +330,9 @@ class ProfileConfigTab(QWidget):
         self.selected_schemas: QListWidget = self.selectedSchemasList
         self.profile_name = self.profileNameEdit
         self.default_filename = self.defaultFileEdit
+        self.output_path = self.lineEdit_pathSchemasConfigDirectory
+        self.output_browse = self.browseButton_browseSchemasConfigDirectory
+        self.output_path.setText(str((output_root or project.output_root).resolve()))
         self.dimension_boxes: dict[str, QSpinBox] = {}
         mode = QAbstractItemView.ExtendedSelection
         self.available_schemas.setSelectionMode(mode)
@@ -330,7 +373,8 @@ class ProfileConfigTab(QWidget):
         self.source_combo.clear()
         self.source_combo.addItem("<new>", ("new", ""))
         self.source_profiles = {profile.key: profile for profile in self.project.profiles}
-        for path in discover_project_files(self.project):
+        output = Path(self.output_path.text()).resolve() if self.output_path.text() else None
+        for path in discover_project_files(self.project, (output,) if output else ()):
             try:
                 discovered = load_project_profile_file(self.project, path)
             except (OSError, ValueError):
@@ -382,7 +426,15 @@ class ConfigurationDialog(QDialog):
             self.initial_values[profile.key] = values
         self.dimension_overrides = initial_dimensions or {}
         profiles = project.project_profiles or (
-            GuiProjectProfile("default", "default", "Default", None, project.profiles, custom=True),
+            GuiProjectProfile(
+                "default",
+                "default",
+                "Default",
+                None,
+                project.profiles,
+                custom=True,
+                output_dir=project.output_root,
+            ),
         )
         self.available_projects = {profile.key: profile for profile in profiles}
         self.loaded_projects: dict[str, GuiProjectProfile] = {}
@@ -394,6 +446,10 @@ class ConfigurationDialog(QDialog):
         self.editors: dict[Path, ProfileTab] = {}
         self.config_tab: ProfileConfigTab | None = None
         self.plus_tab = QWidget(self.tabs)
+        self.schemas_path = self.lineEdit_pathSchemasConfigDirectory
+        self.schemas_browse = self.browseButton_browseSchemasConfigDirectory
+        self.schemas_scan = self.browseButton_scanSchemasConfigDirectory
+        self.schemas_path.setText(str(project.root))
         self.tabs.setTabsClosable(True)
         self.splitter.setSizes([self.width(), self.width() * 3])
         self.treeWidget_projectStructure.setColumnCount(2)
@@ -405,6 +461,8 @@ class ConfigurationDialog(QDialog):
         header.setSectionResizeMode(1, QHeaderView.Fixed)
         self.treeWidget_projectStructure.setColumnWidth(1, 28)
         self._populate_project_sources()
+        self.schemas_browse.clicked.connect(self._browse_schemas)
+        self.schemas_scan.clicked.connect(self._scan_schemas)
         self.browseButton_loadProject.clicked.connect(self._browse_project)
         self.browseButton_addProject.clicked.connect(self._add_selected_project)
         self.treeWidget_projectStructure.currentItemChanged.connect(self._tree_selected)
@@ -441,14 +499,83 @@ class ConfigurationDialog(QDialog):
         while source.count():
             target.addItem(source.takeItem(0))
 
+    def _project_root(self, profile: GuiProjectProfile) -> Path:
+        """Return the resolved namelist directory owned by a project profile."""
+        return (profile.output_dir or self.project.output_root).resolve()
+
+    def _available_root(self, profile: GuiProjectProfile) -> Path:
+        """Choose a non-overlapping default root for a newly added project."""
+        root = self._project_root(profile)
+        if any(
+            self._roots_overlap(root, self._project_root(item))
+            for item in self.loaded_projects.values()
+        ):
+            root = self.project.output_root.with_name(
+                f"{self.project.output_root.name}-{profile.key}"
+            ).resolve()
+        return root
+
+    @staticmethod
+    def _roots_overlap(left: Path, right: Path) -> bool:
+        """Return whether two roots could address the same namelist file."""
+        return left == right or left in right.parents or right in left.parents
+
+    def _validate_project_root(self, key: str, root: Path) -> None:
+        """Reject output roots shared or nested across loaded projects."""
+        for other_key, other in self.loaded_projects.items():
+            if other_key != key and self._roots_overlap(root, self._project_root(other)):
+                raise ValueError(
+                    f"projects '{other.name}' and '{key}' must use separate output directories"
+                )
+
     def _populate_project_sources(self) -> None:
         """List configured and discoverable project-profile sources."""
         combo = self.sourceComboBox_loadProject
+        combo.clear()
         combo.addItem("<new>", ("new", ""))
         for profile in self.available_projects.values():
             combo.addItem(profile.title, ("configured", profile.key))
-        for path in discover_project_files(self.project):
+        roots = [self._project_root(item) for item in self.loaded_projects.values()]
+        for path in discover_project_files(self.project, roots):
             combo.addItem(path.name, ("path", str(path)))
+
+    def _browse_schemas(self) -> None:
+        """Select a directory containing nml-config.toml without loading it yet."""
+        path = QFileDialog.getExistingDirectory(
+            self, "Load schemas and configuration", self.schemas_path.text()
+        )
+        if path:
+            self.schemas_path.setText(path)
+
+    def _scan_schemas(self) -> None:
+        """Replace the schema catalog atomically after validating a selected root."""
+        try:
+            replacement = load_project(self.schemas_path.text(), self.project.output_root)
+            if self._has_dirty() and QMessageBox.question(
+                self,
+                "Unsaved changes",
+                "Changing the schema directory will discard unsaved changes. Continue?",
+            ) != QMessageBox.Yes:
+                return
+            self._clear_projects()
+            self.project = replacement
+            self.available_projects = {
+                profile.key: profile for profile in replacement.project_profiles
+            }
+            self.initial_values = {}
+            self.dimension_overrides = {}
+            self.schemas_path.setText(str(replacement.root))
+            self._populate_project_sources()
+        except (OSError, RuntimeError, ValueError) as exc:
+            QMessageBox.critical(self, "Invalid schema directory", str(exc))
+
+    def _has_dirty(self) -> bool:
+        """Return whether any loaded project contains unsaved editor changes."""
+        return any(
+            editor.is_dirty()
+            for editors in self.project_editors.values()
+            for editor in editors.values()
+        )
 
     def _browse_project(self) -> None:
         """Add a browsed TOML path to the source chooser without loading it."""
@@ -476,11 +603,9 @@ class ConfigurationDialog(QDialog):
             kind, value = self.sourceComboBox_loadProject.currentData()
             if kind == "new":
                 name, accepted = QInputDialog.getText(self, "New project", "Project name")
-                name = name.strip()
                 if not accepted:
                     return
-                if not name or not name.replace("-", "_").isalnum():
-                    raise ValueError("project name may contain only letters, numbers, '-' and '_'")
+                name = validate_project_name(name)
                 profile = GuiProjectProfile(name, name.lower(), name, None, (), custom=True)
                 if profile.key in self.loaded_projects:
                     raise ValueError(f"project '{name}' is already loaded")
@@ -488,6 +613,7 @@ class ConfigurationDialog(QDialog):
                 profile = self.available_projects[value]
             else:
                 profile = load_project_profile_file(self.project, Path(value))
+            profile = replace(profile, output_dir=self._available_root(profile))
             self._register_project(profile)
             self.treeWidget_projectStructure.setCurrentItem(self.project_items[profile.key])
         except (OSError, ValueError, KeyError, TypeError) as exc:
@@ -497,25 +623,24 @@ class ConfigurationDialog(QDialog):
         """Validate and add one project profile without duplicating it."""
         if profile.key in self.loaded_projects:
             return
+        if profile.output_dir is None:
+            profile = replace(profile, output_dir=self._available_root(profile))
+        root = self._project_root(profile)
+        self._validate_project_root(profile.key, root)
+        profile = replace(profile, output_dir=root)
         profiles = ensure_dimension_sources(self.project, profile.profiles)
         profile = replace(profile, profiles=profiles)
-        paths = [_profile_path(self.project, item) for item in profiles]
-        for loaded in self.loaded_projects.values():
-            for left in loaded.profiles:
-                for right in profiles:
-                    if left.default_file == right.default_file and left != right:
-                        raise ValueError(
-                            f"projects '{loaded.name}' and '{profile.name}' define "
-                            f"'{left.default_file}' differently"
-                        )
+        paths = [_profile_path(self.project, item, root) for item in profiles]
         if len(paths) != len(set(paths)):
             raise ValueError(f"project '{profile.name}' writes more than one profile to one file")
-        dimensions = recover_dimensions(self.project, paths, self.dimension_overrides)
+        dimensions = recover_dimensions(
+            self.project, paths, self.dimension_overrides, output_root=root
+        )
         source_values = dimension_source_values(self.project, profiles, dimensions)
         prepared: dict[Path, ProfileTab] = {}
         try:
             for item, path in zip(profiles, paths):
-                values = load_profile(self.project, item, dimensions)
+                values = load_profile(self.project, item, dimensions, output_root=root)
                 supplied = self.initial_values.get(item.key, {})
                 if supplied:
                     values = overlay_values(
@@ -527,7 +652,15 @@ class ConfigurationDialog(QDialog):
                         ),
                     )
                 values = overlay_values(values, source_values.get(item.key, {}))
-                prepared[path] = ProfileTab(self.project, item, values, dimensions, self)
+                prepared[path] = ProfileTab(
+                    self.project,
+                    item,
+                    values,
+                    dimensions,
+                    self,
+                    output_root=root,
+                    source_values=source_values.get(item.key),
+                )
                 prepared[path].hide()
         except Exception:
             for editor in prepared.values():
@@ -543,6 +676,7 @@ class ConfigurationDialog(QDialog):
             )
         self._new_config(profile.key)
         self._build_tree(profile)
+        self._populate_project_sources()
 
     def _new_config(self, project_key: str) -> ProfileConfigTab:
         """Create the single reusable Config tab for one loaded project."""
@@ -550,10 +684,16 @@ class ConfigurationDialog(QDialog):
         if old is not None:
             self._detach_tab(old)
             old.deleteLater()
-        config = ProfileConfigTab(self.project, self.project_dimensions[project_key], self)
+        config = ProfileConfigTab(
+            self.project,
+            self.project_dimensions[project_key],
+            self,
+            self._project_root(self.loaded_projects[project_key]),
+        )
         config.hide()
         config.reset_builder(self.loaded_projects[project_key].profiles)
         config.browse.clicked.connect(lambda: self._browse_profile(config))
+        config.output_browse.clicked.connect(lambda: self._browse_output(config))
         config.source_combo.currentIndexChanged.connect(lambda: self._select_profile_source(config))
         config.run.clicked.connect(lambda: self._run_configuration(config))
         self.project_configs[project_key] = config
@@ -717,6 +857,86 @@ class ConfigurationDialog(QDialog):
             except (OSError, ValueError) as exc:
                 QMessageBox.critical(self, "Invalid profile", str(exc))
 
+    def _browse_output(self, config: ProfileConfigTab) -> None:
+        """Select the namelist output directory for one project settings tab."""
+        path = QFileDialog.getExistingDirectory(
+            self, "Namelist output directory", config.output_path.text()
+        )
+        if path:
+            config.output_path.setText(path)
+
+    def _configured_output(self, config: ProfileConfigTab) -> Path:
+        """Resolve a settings-tab output path relative to the schema directory."""
+        text = config.output_path.text().strip()
+        if not text:
+            raise ValueError("namelist output directory must not be empty")
+        path = Path(text).expanduser()
+        return (path if path.is_absolute() else self.project.root / path).resolve()
+
+    def _reload_project_output(
+        self,
+        key: str,
+        output_root: Path,
+        overrides: Mapping[str, int],
+    ) -> None:
+        """Reload one project transactionally after its output directory changes."""
+        self._validate_project_root(key, output_root)
+        current = replace(self.loaded_projects[key], output_dir=output_root)
+        profiles = ensure_dimension_sources(self.project, current.profiles)
+        paths = [_profile_path(self.project, profile, output_root) for profile in profiles]
+        if len(paths) != len(set(paths)):
+            raise ValueError(f"project '{current.name}' writes more than one profile to one file")
+        dimensions = recover_dimensions(
+            self.project, paths, overrides, output_root=output_root
+        )
+        sources = dimension_source_values(self.project, profiles, dimensions)
+        prepared: dict[Path, ProfileTab] = {}
+        try:
+            for profile, path in zip(profiles, paths):
+                values = load_profile(
+                    self.project, profile, dimensions, output_root=output_root
+                )
+                supplied = self.initial_values.get(profile.key, {})
+                if supplied:
+                    values = overlay_values(
+                        values,
+                        _normalize_profile_values(
+                            supplied,
+                            profile,
+                            {**self.project.constants, **dimensions},
+                        ),
+                    )
+                values = overlay_values(values, sources.get(profile.key, {}))
+                editor = ProfileTab(
+                    self.project,
+                    profile,
+                    values,
+                    dimensions,
+                    self,
+                    output_root=output_root,
+                    source_values=sources.get(profile.key),
+                )
+                editor.hide()
+                editor.save.clicked.connect(
+                    lambda _checked=False, item=editor: self._save([item])
+                )
+                editor.cancel.clicked.connect(
+                    lambda _checked=False, item=editor: self._cancel_profile(key, item)
+                )
+                prepared[path] = editor
+        except Exception:
+            for editor in prepared.values():
+                editor.deleteLater()
+            raise
+        old = self.project_editors[key]
+        self.loaded_projects[key] = replace(current, profiles=profiles)
+        self.project_dimensions[key] = dimensions
+        self.project_editors[key] = prepared
+        for editor in old.values():
+            self._detach_tab(editor)
+            editor.deleteLater()
+        self._show_project(key, force=True)
+
     def _select_profile_source(self, config: ProfileConfigTab) -> None:
         """Populate builder values from a reusable file profile."""
         data = config.source_combo.currentData()
@@ -749,13 +969,28 @@ class ConfigurationDialog(QDialog):
             return
         try:
             dimensions = _normalize_dimensions(config.dimensions(), self.project)
+            current = self.loaded_projects[self.active_project]
+            output_root = self._configured_output(config)
+            if output_root != self._project_root(current):
+                dirty = any(
+                    editor.is_dirty()
+                    for editor in self.project_editors[current.key].values()
+                )
+                if dirty and QMessageBox.question(
+                    self,
+                    "Unsaved changes",
+                    "Changing the output directory will discard unsaved changes. Continue?",
+                ) != QMessageBox.Yes:
+                    return
+                self._reload_project_output(current.key, output_root, dimensions)
+                current = self.loaded_projects[current.key]
+                config.output_path.setText(str(output_root))
             imported: Mapping[str, Any] | None = None
             if (
                 config.source_profile is None
                 and not config.profile_name.text().strip()
                 and not config.schema_keys()
             ):
-                current = self.loaded_projects[self.active_project]
                 self.project_dimensions[current.key] = dimensions
                 self._rebuild_project_editors(current.key, fit_arrays=True)
                 return
@@ -764,6 +999,7 @@ class ConfigurationDialog(QDialog):
                 config.profile_name.text(),
                 config.default_filename.text(),
                 config.schema_keys(),
+                output_root,
             ).profiles[0]
             source = config.source_profile
             if source is not None:
@@ -774,7 +1010,6 @@ class ConfigurationDialog(QDialog):
                     description=source.description,
                     required=tuple(name for name in source.required if name in selected),
                 )
-            current = self.loaded_projects[self.active_project]
             replace_index = next(
                 (
                     index
@@ -786,7 +1021,9 @@ class ConfigurationDialog(QDialog):
             for index, item in enumerate(current.profiles):
                 if index != replace_index and item.key == profile.key:
                     raise ValueError(f"file profile '{profile.name}' already exists")
-                if index != replace_index and item.default_file == profile.default_file:
+                if index != replace_index and _profile_path(
+                    self.project, item, output_root
+                ) == _profile_path(self.project, profile, output_root):
                     raise ValueError(f"output file '{profile.default_file}' is already used")
             if replace_index is None:
                 profiles = (*current.profiles, profile)
@@ -796,13 +1033,15 @@ class ConfigurationDialog(QDialog):
                 profiles_list[replace_index] = profile
                 profiles = tuple(profiles_list)
                 if old.default_file != profile.default_file:
-                    old_path = _profile_path(self.project, old)
+                    old_path = _profile_path(self.project, old, output_root)
                     imported = self.project_editors[current.key][old_path].values()
             profiles = ensure_dimension_sources(self.project, profiles)
             current = self._customize(current)
             current = replace(current, profiles=profiles)
-            save_project_profile(self.project, current)
-            self._replace_project(current)
+            saved_path = save_project_profile(self.project, current)
+            current = replace(current, source=saved_path)
+            old_key = self.active_project
+            self._replace_project(old_key, current)
             self.project_dimensions[current.key] = dimensions
             if imported is not None:
                 self.initial_values = {
@@ -823,20 +1062,18 @@ class ConfigurationDialog(QDialog):
         name, accepted = QInputDialog.getText(
             self, "Custom project", "Save structural changes as", text=f"{profile.name}-custom"
         )
-        name = name.strip()
         if not accepted:
             raise ValueError("structural change cancelled")
-        if not name or not name.replace("-", "_").isalnum():
-            raise ValueError("project name may contain only letters, numbers, '-' and '_'")
+        name = validate_project_name(name)
         if name.lower() in self.loaded_projects and name.lower() != profile.key:
             raise ValueError(f"project '{name}' is already loaded")
         return replace(profile, name=name, key=name.lower(), title=name, source=None, custom=True)
 
-    def _replace_project(self, profile: GuiProjectProfile) -> None:
-        """Replace the active project model and rebuild its tree branch."""
-        old_key = self.active_project
-        if old_key is None:
+    def _replace_project(self, old_key: str | None, profile: GuiProjectProfile) -> None:
+        """Replace one explicit project model and preserve unrelated active state."""
+        if old_key is None or old_key not in self.loaded_projects:
             return
+        was_active = old_key == self.active_project
         item = self.project_items.pop(old_key)
         index = self.treeWidget_projectStructure.indexOfTopLevelItem(item)
         self.treeWidget_projectStructure.takeTopLevelItem(index)
@@ -848,18 +1085,21 @@ class ConfigurationDialog(QDialog):
         self.project_editors[profile.key] = editors
         self.project_configs[profile.key] = config
         self.project_dimensions[profile.key] = dimensions
-        self.active_project = None
+        if was_active:
+            self.active_project = None
         self._build_tree(profile)
-        self.treeWidget_projectStructure.setCurrentItem(self.project_items[profile.key])
+        if was_active:
+            self.treeWidget_projectStructure.setCurrentItem(self.project_items[profile.key])
 
     def _ensure_editor(self, project_key: str, profile: GuiProfile) -> ProfileTab:
         """Return a cached editor, loading its direct namelist file once."""
-        path = _profile_path(self.project, profile)
+        root = self._project_root(self.loaded_projects[project_key])
+        path = _profile_path(self.project, profile, root)
         editors = self.project_editors[project_key]
         if path in editors:
             return editors[path]
         dimensions = self.project_dimensions[project_key]
-        values = load_profile(self.project, profile, dimensions)
+        values = load_profile(self.project, profile, dimensions, output_root=root)
         supplied = self.initial_values.get(profile.key, {})
         if supplied:
             values = overlay_values(
@@ -872,7 +1112,15 @@ class ConfigurationDialog(QDialog):
             self.project, self.loaded_projects[project_key].profiles, dimensions
         )
         values = overlay_values(values, sources.get(profile.key, {}))
-        editor = ProfileTab(self.project, profile, values, dimensions, self)
+        editor = ProfileTab(
+            self.project,
+            profile,
+            values,
+            dimensions,
+            self,
+            output_root=root,
+            source_values=sources.get(profile.key),
+        )
         editor.hide()
         editor.save.clicked.connect(lambda: self._save([editor]))
         editor.cancel.clicked.connect(lambda: self._cancel_profile(project_key, editor))
@@ -889,6 +1137,7 @@ class ConfigurationDialog(QDialog):
 
     def _rebuild_project_editors(self, key: str, *, fit_arrays: bool = False) -> None:
         """Rebuild a project's editors after dimensions or membership change."""
+        root = self._project_root(self.loaded_projects[key])
         old = self.project_editors[key]
         old_values = {path: editor.values() for path, editor in old.items()}
         sources = dimension_source_values(
@@ -901,7 +1150,7 @@ class ConfigurationDialog(QDialog):
             editor.deleteLater()
         self.project_editors[key] = {}
         for profile in self.loaded_projects[key].profiles:
-            path = _profile_path(self.project, profile)
+            path = _profile_path(self.project, profile, root)
             if path in old_values:
                 previous = old[path]
                 values = overlay_values(old_values[path], sources.get(profile.key, {}))
@@ -912,6 +1161,8 @@ class ConfigurationDialog(QDialog):
                     self.project_dimensions[key],
                     self,
                     fit_arrays=fit_arrays,
+                    output_root=root,
+                    source_values=sources.get(profile.key),
                 )
                 editor.hide()
                 editor.save.clicked.connect(lambda _checked=False, item=editor: self._save([item]))
@@ -923,19 +1174,29 @@ class ConfigurationDialog(QDialog):
                 self.project_editors[key][path] = editor
             else:
                 self._ensure_editor(key, profile)
-        self._show_project(key, force=True)
+        if key == self.active_project:
+            self._show_project(key, force=True)
 
     def _cancel_profile(self, project_key: str, editor: ProfileTab) -> None:
         """Replace one editor with its last successfully saved state."""
-        path = _profile_path(self.project, editor.profile)
+        root = self._project_root(self.loaded_projects[project_key])
+        path = _profile_path(self.project, editor.profile, root)
         dimensions = self.project_dimensions[project_key]
+        sources = dimension_source_values(
+            self.project, self.loaded_projects[project_key].profiles, dimensions
+        )
+        saved = overlay_values(
+            editor.saved_values, sources.get(editor.profile.key, {})
+        )
         replacement = ProfileTab(
             self.project,
             editor.profile,
-            editor.saved_values,
+            saved,
             dimensions,
             self,
             fit_arrays=dimensions != editor.saved_dimensions,
+            output_root=root,
+            source_values=sources.get(editor.profile.key),
         )
         replacement.hide()
         replacement.save.clicked.connect(lambda: self._save([replacement]))
@@ -951,10 +1212,14 @@ class ConfigurationDialog(QDialog):
         if not editors:
             return
         try:
+            roots = {editor.output_root for editor in editors}
+            if len(roots) != 1:
+                raise ValueError("one save operation cannot mix project output directories")
+            output_root = roots.pop()
             unique: dict[Path, tuple[ProfileTab, dict[str, Any]]] = {}
             collected: list[tuple[ProfileTab, dict[str, Any]]] = []
             for editor in editors:
-                path = _profile_path(self.project, editor.profile)
+                path = _profile_path(self.project, editor.profile, output_root)
                 values = editor.values()
                 collected.append((editor, values))
                 previous = unique.get(path)
@@ -966,6 +1231,7 @@ class ConfigurationDialog(QDialog):
             save_profiles(
                 self.project,
                 [(editor.profile, values, editor.dimensions) for editor, values in unique.values()],
+                output_root,
             )
             for editor, values in collected:
                 editor.mark_saved(values)
@@ -976,7 +1242,7 @@ class ConfigurationDialog(QDialog):
                 files = "\n".join(f"• {path.name}" for path in paths)
                 message = (
                     f"The following namelist files have been saved:\n\n{files}"
-                    f"\n\nOutput directory:\n{self.project.output_root}"
+                    f"\n\nOutput directory:\n{output_root}"
                 )
             title = "Namelist saved" if len(paths) == 1 else "Namelists saved"
             QMessageBox.information(self, title, message)
@@ -985,12 +1251,35 @@ class ConfigurationDialog(QDialog):
 
     def _save_all(self) -> None:
         """Save every file profile in the selected project."""
-        self._save(list(self.editors.values()))
+        if self.active_project is not None:
+            self._save(list(self.project_editors[self.active_project].values()))
 
     def _restore_all(self) -> None:
         """Restore schema defaults in every editor of the selected project."""
-        for editor in self.editors.values():
-            editor.restore_all()
+        if self.active_project is not None:
+            for editor in self.project_editors[self.active_project].values():
+                editor.restore_all()
+
+    def _clear_projects(self) -> None:
+        """Dispose every project cache and reset all active aliases."""
+        widgets = [
+            *self.project_configs.values(),
+            *(editor for editors in self.project_editors.values() for editor in editors.values()),
+        ]
+        with QSignalBlocker(self.tabs):
+            while self.tabs.count():
+                self._detach_tab(self.tabs.widget(0))
+        for widget in widgets:
+            widget.deleteLater()
+        self.treeWidget_projectStructure.clear()
+        self.loaded_projects.clear()
+        self.project_items.clear()
+        self.project_editors.clear()
+        self.project_configs.clear()
+        self.project_dimensions.clear()
+        self.active_project = None
+        self.editors = {}
+        self.config_tab = None
 
     def _remove_tree_item(self, item: QTreeWidgetItem) -> None:
         """Confirm and apply a project, file-profile, or namelist removal."""
@@ -1002,19 +1291,23 @@ class ConfigurationDialog(QDialog):
             return
         try:
             if kind == "project":
+                was_active = project_key == self.active_project
                 root = self.project_items.pop(project_key)
                 self.treeWidget_projectStructure.takeTopLevelItem(
                     self.treeWidget_projectStructure.indexOfTopLevelItem(root)
                 )
                 self.loaded_projects.pop(project_key)
-                self.project_editors.pop(project_key)
-                self.project_configs.pop(project_key)
+                editors = self.project_editors.pop(project_key)
+                config = self.project_configs.pop(project_key)
                 self.project_dimensions.pop(project_key)
-                if self.loaded_projects:
+                for widget in (*editors.values(), config):
+                    self._detach_tab(widget)
+                    widget.deleteLater()
+                if self.loaded_projects and was_active:
                     self._show_project(next(iter(self.loaded_projects)))
-                else:
-                    while self.tabs.count():
-                        self._detach_tab(self.tabs.widget(0))
+                elif not self.loaded_projects:
+                    self._clear_projects()
+                self._populate_project_sources()
                 return
             current = self._customize(self.loaded_projects[project_key])
             profiles = list(current.profiles)
@@ -1038,16 +1331,39 @@ class ConfigurationDialog(QDialog):
             if checked != tuple(profiles):
                 raise ValueError("this item supplies a runtime dimension used by the project")
             current = replace(current, profiles=tuple(profiles))
-            save_project_profile(self.project, current)
-            self._replace_project(current)
+            saved_path = save_project_profile(self.project, current)
+            current = replace(current, source=saved_path)
+            self._replace_project(project_key, current)
             self._rebuild_project_editors(current.key)
         except (OSError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Remove item", str(exc))
 
+    def _confirm_close(self) -> bool:
+        """Protect unsaved editor state for every loaded project."""
+        return not self._has_dirty() or QMessageBox.question(
+            self,
+            "Unsaved changes",
+            "Close and discard all unsaved namelist changes?",
+        ) == QMessageBox.Yes
+
+    def accept(self) -> None:
+        """Close from the button only after the shared dirty-state guard."""
+        if self._confirm_close():
+            super().accept()
+
+    def reject(self) -> None:
+        """Close from Escape only after the shared dirty-state guard."""
+        if self._confirm_close():
+            super().reject()
+
+    def closeEvent(self, event: Any) -> None:
+        """Protect dirty state when the window manager closes the dialog."""
+        event.accept() if self._confirm_close() else event.ignore()
+
 
 def launch_gui(
     schemas_dir: Path | str | None = None,
-    output_dir: Path | str | None = None,
+    output_dir: Path | str | Mapping[str, Path | str] | None = None,
     project_profiles: str
     | Mapping[str, Mapping[str, list[str]]]
     | Mapping[str, list[str]]
