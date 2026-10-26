@@ -31,15 +31,15 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from .fields import NamelistForm, _exec
 from .arrays import array_shape
+from .fields import NamelistForm, _exec
 from .model import (
+    MISSING,
     GuiProfile,
     GuiProject,
     GuiProjectProfile,
     GuiProjectRequest,
     InputArray,
-    MISSING,
     _normalize_dimensions,
     _normalize_profile_values,
     _profile_path,

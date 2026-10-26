@@ -16,8 +16,8 @@ from nml_tools.gui.model import (
     load_project_profile_file,
     overlay_values,
     recover_dimensions,
-    save_project_profile,
     save_profiles,
+    save_project_profile,
     suggestion,
     validate_project_name,
 )
