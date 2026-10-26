@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import copy
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from itertools import product
 from pathlib import Path
@@ -37,6 +37,7 @@ from .model import (
     GuiProfile,
     GuiProject,
     GuiProjectProfile,
+    GuiProjectRequest,
     InputArray,
     MISSING,
     _normalize_dimensions,
@@ -404,27 +405,11 @@ class ConfigurationDialog(QDialog):
         self,
         project: GuiProject,
         parent: QWidget | None = None,
-        initial_values: Mapping[str, Any] | None = None,
-        initial_dimensions: Mapping[str, int] | None = None,
-        preload_projects: bool = False,
+        project_requests: Sequence[GuiProjectRequest] = (),
     ) -> None:
         super().__init__(parent)
         load_ui("app.ui", self)
         self.project = project
-        if initial_values is not None and not isinstance(initial_values, Mapping):
-            raise ValueError("initial_values must map file profiles to namelist values")
-        self.initial_values: dict[str, Any] = {}
-        for name, values in (initial_values or {}).items():
-            if not isinstance(name, str):
-                raise ValueError("initial value profile names must be strings")
-            try:
-                profile = project.profile(name)
-            except KeyError as exc:
-                raise ValueError(f"unknown initial value profile '{name}'") from exc
-            if profile.key in self.initial_values:
-                raise ValueError(f"duplicate initial value profile '{name}'")
-            self.initial_values[profile.key] = values
-        self.dimension_overrides = initial_dimensions or {}
         profiles = project.project_profiles or (
             GuiProjectProfile(
                 "default",
@@ -437,6 +422,44 @@ class ConfigurationDialog(QDialog):
             ),
         )
         self.available_projects = {profile.key: profile for profile in profiles}
+        self.project_initial_values: dict[str, dict[str, Any]] = {}
+        self.project_initial_dimensions: dict[str, dict[str, int]] = {}
+        requested_keys: list[str] = []
+        for request in project_requests:
+            if not isinstance(request, GuiProjectRequest):
+                raise ValueError("projects must contain GuiProjectRequest objects")
+            if not isinstance(request.project_profile, str):
+                raise ValueError("project_profile must be a string")
+            key = request.project_profile.strip().lower()
+            if key not in self.available_projects:
+                raise ValueError(f"unknown project profile '{request.project_profile}'")
+            if key in requested_keys:
+                raise ValueError(f"duplicate project profile '{request.project_profile}'")
+            if not isinstance(request.output_dir, (str, Path)):
+                raise ValueError("project output_dir must be a directory path")
+            profile = replace(
+                self.available_projects[key], output_dir=Path(request.output_dir).resolve()
+            )
+            self.available_projects[key] = profile
+            available = {item.key: item for item in profile.profiles}
+            values: dict[str, Any] = {}
+            if not isinstance(request.initial_values, Mapping):
+                raise ValueError("initial_values must map file profiles to namelist values")
+            for name, supplied in request.initial_values.items():
+                if not isinstance(name, str) or name.lower() not in available:
+                    raise ValueError(f"unknown initial value profile '{name}'")
+                profile_key = name.lower()
+                if profile_key in values:
+                    raise ValueError(f"duplicate initial value profile '{name}'")
+                values[profile_key] = copy.deepcopy(supplied)
+            if not isinstance(request.initial_dimensions, Mapping):
+                raise ValueError("initial_dimensions must map dimension names to sizes")
+            _normalize_dimensions(request.initial_dimensions, project)
+            self.project_initial_values[key] = values
+            self.project_initial_dimensions[key] = {
+                str(name).lower(): size for name, size in request.initial_dimensions.items()
+            }
+            requested_keys.append(key)
         self.loaded_projects: dict[str, GuiProjectProfile] = {}
         self.project_items: dict[str, QTreeWidgetItem] = {}
         self.project_editors: dict[str, dict[Path, ProfileTab]] = {}
@@ -471,11 +494,11 @@ class ConfigurationDialog(QDialog):
         self.restoreAllButton.clicked.connect(self._restore_all)
         self.saveAllButton.clicked.connect(self._save_all)
         self.closeButton.clicked.connect(self.accept)
-        if preload_projects:
+        if requested_keys:
             try:
-                for project_profile in self.available_projects.values():
-                    self._register_project(project_profile)
-                first = next(iter(self.loaded_projects))
+                for key in requested_keys:
+                    self._register_project(self.available_projects[key])
+                first = requested_keys[0]
                 self.treeWidget_projectStructure.setCurrentItem(self.project_items[first])
             except (OSError, ValueError, KeyError) as exc:
                 QMessageBox.critical(self, "Invalid configuration", str(exc))
@@ -562,8 +585,6 @@ class ConfigurationDialog(QDialog):
             self.available_projects = {
                 profile.key: profile for profile in replacement.project_profiles
             }
-            self.initial_values = {}
-            self.dimension_overrides = {}
             self.schemas_path.setText(str(replacement.root))
             self._populate_project_sources()
         except (OSError, RuntimeError, ValueError) as exc:
@@ -634,14 +655,18 @@ class ConfigurationDialog(QDialog):
         if len(paths) != len(set(paths)):
             raise ValueError(f"project '{profile.name}' writes more than one profile to one file")
         dimensions = recover_dimensions(
-            self.project, paths, self.dimension_overrides, output_root=root
+            self.project,
+            paths,
+            self.project_initial_dimensions.get(profile.key, {}),
+            output_root=root,
         )
+        initial_values = self.project_initial_values.get(profile.key, {})
         source_values = dimension_source_values(self.project, profiles, dimensions)
         prepared: dict[Path, ProfileTab] = {}
         try:
             for item, path in zip(profiles, paths):
                 values = load_profile(self.project, item, dimensions, output_root=root)
-                supplied = self.initial_values.get(item.key, {})
+                supplied = initial_values.get(item.key, {})
                 if supplied:
                     values = overlay_values(
                         values,
@@ -890,13 +915,14 @@ class ConfigurationDialog(QDialog):
             self.project, paths, overrides, output_root=output_root
         )
         sources = dimension_source_values(self.project, profiles, dimensions)
+        initial_values = self.project_initial_values.get(key, {})
         prepared: dict[Path, ProfileTab] = {}
         try:
             for profile, path in zip(profiles, paths):
                 values = load_profile(
                     self.project, profile, dimensions, output_root=output_root
                 )
-                supplied = self.initial_values.get(profile.key, {})
+                supplied = initial_values.get(profile.key, {})
                 if supplied:
                     values = overlay_values(
                         values,
@@ -1044,9 +1070,8 @@ class ConfigurationDialog(QDialog):
             self._replace_project(old_key, current)
             self.project_dimensions[current.key] = dimensions
             if imported is not None:
-                self.initial_values = {
-                    **self.initial_values,
-                    profile.key: {page.name: imported.get(page.name, {}) for page in profile.pages},
+                self.project_initial_values.setdefault(current.key, {})[profile.key] = {
+                    page.name: imported.get(page.name, {}) for page in profile.pages
                 }
             self._rebuild_project_editors(current.key, fit_arrays=True)
             config.reset_builder(current.profiles)
@@ -1080,11 +1105,15 @@ class ConfigurationDialog(QDialog):
         editors = self.project_editors.pop(old_key)
         config = self.project_configs.pop(old_key)
         dimensions = self.project_dimensions.pop(old_key)
+        initial_values = self.project_initial_values.pop(old_key, {})
+        initial_dimensions = self.project_initial_dimensions.pop(old_key, {})
         self.loaded_projects.pop(old_key)
         self.loaded_projects[profile.key] = profile
         self.project_editors[profile.key] = editors
         self.project_configs[profile.key] = config
         self.project_dimensions[profile.key] = dimensions
+        self.project_initial_values[profile.key] = initial_values
+        self.project_initial_dimensions[profile.key] = initial_dimensions
         if was_active:
             self.active_project = None
         self._build_tree(profile)
@@ -1100,7 +1129,7 @@ class ConfigurationDialog(QDialog):
             return editors[path]
         dimensions = self.project_dimensions[project_key]
         values = load_profile(self.project, profile, dimensions, output_root=root)
-        supplied = self.initial_values.get(profile.key, {})
+        supplied = self.project_initial_values.get(project_key, {}).get(profile.key, {})
         if supplied:
             values = overlay_values(
                 values,
@@ -1277,6 +1306,8 @@ class ConfigurationDialog(QDialog):
         self.project_editors.clear()
         self.project_configs.clear()
         self.project_dimensions.clear()
+        self.project_initial_values.clear()
+        self.project_initial_dimensions.clear()
         self.active_project = None
         self.editors = {}
         self.config_tab = None
@@ -1300,6 +1331,8 @@ class ConfigurationDialog(QDialog):
                 editors = self.project_editors.pop(project_key)
                 config = self.project_configs.pop(project_key)
                 self.project_dimensions.pop(project_key)
+                self.project_initial_values.pop(project_key, None)
+                self.project_initial_dimensions.pop(project_key, None)
                 for widget in (*editors.values(), config):
                     self._detach_tab(widget)
                     widget.deleteLater()
@@ -1363,27 +1396,56 @@ class ConfigurationDialog(QDialog):
 
 def launch_gui(
     schemas_dir: Path | str | None = None,
-    output_dir: Path | str | Mapping[str, Path | str] | None = None,
-    project_profiles: str
-    | Mapping[str, Mapping[str, list[str]]]
-    | Mapping[str, list[str]]
-    | None = None,
-    initial_values: Mapping[str, Any] | None = None,
-    initial_dimensions: Mapping[str, int] | None = None,
+    projects: Sequence[GuiProjectRequest] = (),
+    *,
+    default_output_dir: Path | str | None = None,
 ) -> int:
     """Launch independently or reuse the caller's QApplication."""
-    project = load_project(schemas_dir, output_dir, project_profiles)
+    requests = tuple(projects)
+    selections: dict[str, dict[str, list[str]]] = {}
+    output_dirs: dict[str, Path | str] = {}
+    seen: set[str] = set()
+    for request in requests:
+        if not isinstance(request, GuiProjectRequest):
+            raise ValueError("projects must contain GuiProjectRequest objects")
+        if not isinstance(request.project_profile, str):
+            raise ValueError("project_profile must be a string")
+        name = request.project_profile.strip()
+        key = name.lower()
+        if not name:
+            raise ValueError("project_profile must not be empty")
+        if key in seen:
+            raise ValueError(f"duplicate project profile '{name}'")
+        if not isinstance(request.output_dir, (str, Path)):
+            raise ValueError("project output_dir must be a directory path")
+        selected: dict[str, list[str]] = {}
+        if request.file_profiles is not None:
+            if not isinstance(request.file_profiles, Mapping):
+                raise ValueError("file_profiles must map profile names to namelist names")
+            for profile, namelists in request.file_profiles.items():
+                if (
+                    not isinstance(profile, str)
+                    or isinstance(namelists, (str, bytes))
+                    or not isinstance(namelists, Sequence)
+                ):
+                    raise ValueError("file_profiles must map profile names to namelist names")
+                selected[profile] = list(namelists)
+        selections[name] = selected
+        output_dirs[name] = request.output_dir
+        seen.add(key)
+    project = load_project(
+        schemas_dir,
+        output_dirs if requests else default_output_dir,
+        selections if requests else None,
+    )
+    if requests and default_output_dir is not None:
+        project = replace(project, output_dir=Path(default_output_dir).resolve())
     application = QApplication.instance()
     owns_application = application is None
     if application is None:
         application = QApplication(sys.argv[:1])
         application.setApplicationName("nml-tools")
-    dialog = ConfigurationDialog(
-        project,
-        initial_values=initial_values,
-        initial_dimensions=initial_dimensions,
-        preload_projects=bool(project_profiles),
-    )
+    dialog = ConfigurationDialog(project, project_requests=requests)
     if not owns_application:
         _exec(dialog)
         return 0

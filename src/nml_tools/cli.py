@@ -1401,7 +1401,7 @@ def gui(input_path: Path | None, output_path: Path | None) -> None:
     try:
         from .gui import launch_gui
 
-        exit_code = launch_gui(input_path, output_path)
+        exit_code = launch_gui(input_path, default_output_dir=output_path)
     except ImportError as exc:
         raise click.ClickException(
             "GUI dependencies are unavailable; install 'nml-tools[gui]' "

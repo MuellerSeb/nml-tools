@@ -8,7 +8,7 @@ import os
 import re
 import stat
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import product
 from pathlib import Path
@@ -65,6 +65,17 @@ class InputArray(list[Any]):
     def __init__(self, values: list[Any], assigned: set[tuple[int, ...]]):
         super().__init__(values)
         self.assigned = assigned
+
+
+@dataclass(frozen=True)
+class GuiProjectRequest:
+    """Runtime inputs for one project preloaded into the GUI."""
+
+    project_profile: str
+    output_dir: Path | str
+    file_profiles: Mapping[str, Sequence[str]] | None = None
+    initial_values: Mapping[str, Any] = field(default_factory=dict)
+    initial_dimensions: Mapping[str, int] = field(default_factory=dict)
 
 
 def suggestion(schema: Mapping[str, Any], sizes: Mapping[str, int]) -> Any:

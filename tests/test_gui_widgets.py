@@ -10,6 +10,7 @@ from nml_tools.gui.model import (
     GuiProfile,
     GuiProject,
     GuiProjectProfile,
+    GuiProjectRequest,
     NamelistPage,
 )
 from nml_tools.schema import resolve_schema
@@ -343,8 +344,15 @@ def test_dialog_load_overlay_save_reload_and_dimension_changes(application, proj
     monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
     path = project.root / "run.nml"
     path.write_text('&run count=8 label="saved" weights(1)=2.0 periods(1)%year=2021 /\n')
-    dialog = _add_project(
-        ConfigurationDialog(project, initial_values={"main": {"run": {"count": 9}}})
+    dialog = ConfigurationDialog(
+        project,
+        project_requests=(
+            GuiProjectRequest(
+                "default",
+                project.root,
+                initial_values={"main": {"run": {"count": 9}}},
+            ),
+        ),
     )
     editor = dialog.editors[path]
     assert editor.values()["run"]["count"] == 9
@@ -614,15 +622,41 @@ def test_browsed_project_source_loads(application, project, monkeypatch):
     dialog.close()
 
 
-def test_public_launch_forwards_profile_selection(application, monkeypatch, tmp_path):
-    from nml_tools.gui import app, launch_gui
+def test_public_launch_forwards_profile_selection(application, project, monkeypatch, tmp_path):
+    from nml_tools.gui import GuiProjectRequest, app, launch_gui
 
-    calls = []
-    monkeypatch.setattr(app, "launch_gui", lambda *args: calls.append(args) or 0)
-    selected = {"main": ["run"]}
+    calls = {}
+    monkeypatch.setattr(
+        app,
+        "load_project",
+        lambda *args: calls.setdefault("load", args) and project,
+    )
+    dialog = object()
+    monkeypatch.setattr(
+        app,
+        "ConfigurationDialog",
+        lambda loaded, project_requests: calls.setdefault(
+            "dialog", (loaded, project_requests)
+        )
+        and dialog,
+    )
+    monkeypatch.setattr(app, "_exec", lambda loaded: calls.setdefault("exec", loaded))
     values = {"main": {"run": {"count": 8}}}
-    assert launch_gui(tmp_path, tmp_path / "out", selected, values, {"n": 1}) == 0
-    assert calls == [(tmp_path, tmp_path / "out", selected, values, {"n": 1})]
+    request = GuiProjectRequest(
+        "default",
+        tmp_path / "out",
+        {"main": ["run"]},
+        values,
+        {"n": 1},
+    )
+    assert launch_gui(tmp_path, [request]) == 0
+    assert calls["load"] == (
+        tmp_path,
+        {"default": tmp_path / "out"},
+        {"default": {"main": ["run"]}},
+    )
+    assert calls["dialog"] == (project, (request,))
+    assert calls["exec"] is dialog
 
 
 def test_active_and_last_config_tabs_close(application, project):
@@ -696,7 +730,13 @@ def test_explicit_project_profiles_are_preloaded(application, project):
             GuiProjectProfile("two", "two", "Two", None, (profile,)),
         ),
     )
-    dialog = ConfigurationDialog(project, preload_projects=True)
+    dialog = ConfigurationDialog(
+        project,
+        project_requests=(
+            GuiProjectRequest("one", project.root / "one"),
+            GuiProjectRequest("two", project.root / "two"),
+        ),
+    )
     assert list(dialog.loaded_projects) == ["one", "two"]
     assert dialog.treeWidget_projectStructure.topLevelItemCount() == 2
     assert dialog.active_project == "one"
@@ -952,11 +992,28 @@ def test_project_output_roots_are_isolated(application, project, tmp_path):
             ),
         ),
     )
-    dialog = ConfigurationDialog(project, preload_projects=True)
-    for key, count in (("one", 11), ("two", 22)):
+    dialog = ConfigurationDialog(
+        project,
+        project_requests=(
+            GuiProjectRequest(
+                "one",
+                tmp_path / "one",
+                initial_values={"main": {"run": {"count": 11}}},
+                initial_dimensions={"n": 1},
+            ),
+            GuiProjectRequest(
+                "two",
+                tmp_path / "two",
+                initial_values={"main": {"run": {"count": 22}}},
+                initial_dimensions={"n": 2},
+            ),
+        ),
+    )
+    for key, count, size in (("one", 11, 1), ("two", 22, 2)):
         dialog._show_project(key, force=True)
         editor = next(iter(dialog.project_editors[key].values()))
-        editor.forms["run"].rows["count"].field.set_value(count)
+        assert editor.values()["run"]["count"] == count
+        assert dialog.project_dimensions[key]["n"] == size
         dialog._save_all()
     assert "count = 11" in (tmp_path / "one" / "run.nml").read_text()
     assert "count = 22" in (tmp_path / "two" / "run.nml").read_text()

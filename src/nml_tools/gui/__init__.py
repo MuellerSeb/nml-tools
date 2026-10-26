@@ -2,33 +2,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
-__all__ = ["launch_gui"]
+from .model import GuiProjectRequest
+
+__all__ = ["GuiProjectRequest", "launch_gui"]
 
 
 def launch_gui(
     schemas_dir: Path | str | None = None,
-    output_dir: Path | str | Mapping[str, Path | str] | None = None,
-    project_profiles: str
-    | Mapping[str, Mapping[str, list[str]]]
-    | Mapping[str, list[str]]
-    | None = None,
-    initial_values: Mapping[str, Any] | None = None,
-    initial_dimensions: Mapping[str, int] | None = None,
+    projects: Sequence[GuiProjectRequest] = (),
+    *,
+    default_output_dir: Path | str | None = None,
 ) -> int:
-    """Edit selected projects; nested mappings select their files/namelists.
+    """Edit zero or more independently configured projects.
 
-    Explicit project-profile selections are loaded into the tree. None exposes
-    every configured project in the dropdown without loading it. The legacy
-    flat file-profile mapping is still accepted. Values remain keyed by file
-    profile and override existing namelist input. Output defaults to schemas_dir;
-    multiple preloaded projects use a mapping from project name to output path.
+    With no project requests, configured projects remain available in the GUI
+    without being preloaded. The default output directory is used for projects
+    added interactively and otherwise defaults to ``schemas_dir``.
     """
     from .app import launch_gui as _launch_gui
 
-    return _launch_gui(
-        schemas_dir, output_dir, project_profiles, initial_values, initial_dimensions
-    )
+    return _launch_gui(schemas_dir, projects, default_output_dir=default_output_dir)

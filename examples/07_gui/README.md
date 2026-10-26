@@ -118,16 +118,18 @@ Dimension-dependent defaults use one-element repeat seeds so they remain valid
 for every positive `n_bodies` value; the three-body examples remain available
 as hints and in the supplied sample namelists.
 
-Applications may still open one project with a scalar output path:
+Applications may preload a project with its complete runtime configuration:
 
 ```python
-from nml_tools.gui import launch_gui
+from nml_tools.gui import GuiProjectRequest, launch_gui
 
-launch_gui("examples/07_gui", "examples/07_gui/out", "simulation")
+launch_gui(
+    "examples/07_gui",
+    [GuiProjectRequest("simulation", "examples/07_gui/out/simulation")],
+)
 ```
 
-Passing the project-profile name preloads it into the project tree. Omitting the
-third argument leaves the tree empty so the user can choose a project.
+Omitting project requests leaves the tree empty so the user can choose a project.
 
 ## Expected output
 
