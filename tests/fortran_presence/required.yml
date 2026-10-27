@@ -1,0 +1,9 @@
+type: object
+x-fortran-namelist: required
+required: [values]
+properties:
+  values:
+    type: array
+    x-fortran-shape: [3]
+    items:
+      type: integer
