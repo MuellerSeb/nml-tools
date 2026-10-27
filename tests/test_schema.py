@@ -909,7 +909,7 @@ def test_referenced_derived_type_rejects_invalid_property_forms(
                 "x-fortran-flex-tail-dims": 1,
                 "items": {"$ref": "#/$defs/period"},
             },
-            "derived-type arrays must not define 'x-fortran-flex-tail-dims'",
+            "x-fortran-flex-tail-dims.*was removed",
         ),
     ],
 )

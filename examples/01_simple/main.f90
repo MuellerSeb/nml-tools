@@ -48,6 +48,10 @@ program main
   else
     write(*,*) "filled shape of mcmc_error_params: ", shp
   end if
+  if (any(shp == 0) .or. shp(1) /= size(cfg%mcmc_error_params, 1)) then
+    write(error_unit, '(a)') "mcmc_error_params requires a nonempty prefix with all three parameters"
+    stop 1
+  end if
 
   allocate(try_methods(size(cfg%try_methods)))
   allocate(complex_sizes(size(cfg%complex_sizes)))

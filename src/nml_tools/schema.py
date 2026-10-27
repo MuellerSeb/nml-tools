@@ -26,7 +26,6 @@ _REPRESENTATION_KEYS = {
     "x-fortran-kind",
     "x-fortran-len",
     "x-fortran-shape",
-    "x-fortran-flex-tail-dims",
     "x-fortran-type",
     "x-fortran-module",
 }
@@ -120,6 +119,7 @@ class SchemaResolver:
         path = Path(source_path).resolve() if source_path is not None else None
         mapping_identity = f"<mapping:{next(_MAPPING_IDENTITY_COUNTER)}>" if path is None else None
         document = _Document(data, path, mapping_identity)
+        reject_removed_schema_keywords(data, source=document.label)
         if path is not None:
             self._documents[path] = document
         _reject_reserved_marker(data, document, "")
@@ -147,6 +147,7 @@ class SchemaResolver:
         if not isinstance(data, dict):
             raise ValueError(f"schema root must be an object: {canonical_path}")
         document = _Document(data, canonical_path)
+        reject_removed_schema_keywords(data, source=document.label)
         _validate_format_annotations(data, document, "")
         self._documents[canonical_path] = document
         return document
@@ -173,6 +174,7 @@ class SchemaResolver:
         position: str,
         allow_derived_definition: bool = False,
     ) -> dict[str, Any]:
+        reject_removed_schema_keywords(raw, source=document.label, pointer=pointer)
         _reject_unsupported_reference_keywords(raw, document, pointer)
         ref = raw.get("$ref")
         if ref is not None:
@@ -380,6 +382,33 @@ def get_string_format(schema: Mapping[str, Any]) -> str | None:
     if not isinstance(value, str):
         raise ValueError("'format' must be a string")
     return value
+
+
+def reject_removed_schema_keywords(
+    schema: Mapping[str, Any], *, source: str = "<mapping>", pointer: str = ""
+) -> None:
+    """Reject removed extensions at schema nodes, including unused definitions."""
+    if "x-fortran-flex-tail-dims" in schema:
+        raise ValueError(
+            f"{source}#{pointer}: 'x-fortran-flex-tail-dims' was removed; delete the "
+            "keyword and use runtime dimensions for exact extents, or optional arrays "
+            "with set_mask(), filled_shape(), or indexed is_set() for item presence"
+        )
+    for keyword in ("properties", "$defs", "definitions"):
+        children = schema.get(keyword)
+        if isinstance(children, Mapping):
+            for name, child in children.items():
+                if isinstance(name, str) and isinstance(child, Mapping):
+                    reject_removed_schema_keywords(
+                        child,
+                        source=source,
+                        pointer=_child_pointer(_child_pointer(pointer, keyword), name),
+                    )
+    items = schema.get("items")
+    if isinstance(items, Mapping):
+        reject_removed_schema_keywords(
+            items, source=source, pointer=_child_pointer(pointer, "items")
+        )
 
 
 def _contains_reachable_ref(raw: Mapping[str, Any], *, position: str) -> bool:
@@ -791,10 +820,6 @@ def _validate_effective_node(schema: dict[str, Any], *, position: str) -> None:
             raise ValueError("array x-fortran-default-* options require an array-level default")
         items = schema.get("items")
         if isinstance(items, Mapping) and items.get("type") == "object":
-            if "x-fortran-flex-tail-dims" in schema:
-                raise ValueError(
-                    "derived-type arrays must not define 'x-fortran-flex-tail-dims'"
-                )
             if "default" in schema or _DEFAULT_CONTROL_KEYS.intersection(schema):
                 raise ValueError("derived-type arrays must not define defaults")
         return

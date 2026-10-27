@@ -150,7 +150,9 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'count'"
         return
       end if
-      if (this%count == -huge(this%count)) status = NML_ERR_NOT_SET
+      if (this%count == -huge(this%count)) then
+        status = NML_ERR_NOT_SET
+      end if
     case default
       status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)

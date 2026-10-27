@@ -589,7 +589,7 @@ def test_generate_fortran_rejects_flex_dim_on_scalar(tmp_path: Path) -> None:
     generate_fortran = _import_generate_fortran()
     with pytest.raises(
         ValueError,
-        match=r".*x-fortran-flex-tail-dims is only supported for arrays",
+        match=r".*x-fortran-flex-tail-dims.*was removed",
     ):
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
@@ -611,7 +611,7 @@ def test_generate_fortran_rejects_flex_dim_with_default(tmp_path: Path) -> None:
     }
 
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match=r".*flex arrays cannot define defaults"):
+    with pytest.raises(ValueError, match=r".*x-fortran-flex-tail-dims.*was removed"):
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
@@ -687,7 +687,7 @@ def test_generate_fortran_rejects_flex_dim_boolean_array(tmp_path: Path) -> None
     }
 
     generate_fortran = _import_generate_fortran()
-    with pytest.raises(ValueError, match=r".*flex arrays cannot use boolean elements"):
+    with pytest.raises(ValueError, match=r".*x-fortran-flex-tail-dims.*was removed"):
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
@@ -709,7 +709,7 @@ def test_generate_fortran_rejects_flex_dim_exceeds_rank(tmp_path: Path) -> None:
     generate_fortran = _import_generate_fortran()
     with pytest.raises(
         ValueError,
-        match=r".*x-fortran-flex-tail-dims must not exceed",
+        match=r".*x-fortran-flex-tail-dims.*was removed",
     ):
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
@@ -730,7 +730,9 @@ def test_generate_fortran_rejects_case_insensitive_duplicates(tmp_path: Path) ->
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
-@pytest.mark.parametrize("name", ["is_configured", "init", "set", "from_file", "is_valid"])
+@pytest.mark.parametrize(
+    "name", ["is_configured", "init", "set", "from_file", "is_valid", "SeT_MaSk"]
+)
 def test_generate_fortran_rejects_property_names_conflicting_with_type_members(
     tmp_path: Path,
     name: str,
@@ -749,7 +751,7 @@ def test_generate_fortran_rejects_property_names_conflicting_with_type_members(
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
-@pytest.mark.parametrize("name", ["is_configured", "init", "set_dims", "filled_shape"])
+@pytest.mark.parametrize("name", ["is_configured", "init", "set_dims", "filled_shape", "SeT_MaSk"])
 def test_generate_fortran_rejects_runtime_dimensions_conflicting_with_type_members(
     tmp_path: Path,
     name: str,
@@ -808,7 +810,7 @@ def test_generate_fortran_rejects_required_unknown_property(tmp_path: Path) -> N
         generate_fortran(schema, tmp_path / "nml_test.f90", kind_module="mo_kind")
 
 
-def test_generate_fortran_emits_filled_shape_for_flex_arrays(tmp_path: Path) -> None:
+def test_generate_fortran_emits_filled_shape_for_arrays(tmp_path: Path) -> None:
     schema = {
         "title": "Flex arrays",
         "x-fortran-namelist": "test_nml",
@@ -818,7 +820,6 @@ def test_generate_fortran_emits_filled_shape_for_flex_arrays(tmp_path: Path) -> 
             "values": {
                 "type": "array",
                 "x-fortran-shape": [2, 3],
-                "x-fortran-flex-tail-dims": 1,
                 "items": {"type": "integer", "x-fortran-kind": "i4"},
             }
         },

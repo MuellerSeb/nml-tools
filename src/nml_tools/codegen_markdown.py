@@ -179,7 +179,6 @@ def render_docs(
             default_label = _get_default_value(prop, type_info, shape_constants)
             enum_label = _get_enum_values(prop, type_info, shape_constants)
             example_values = _get_example_values(prop, type_info)
-            flex_tail_dims = _get_flex_tail_dims(prop, type_info)
             title = _get_title(prop)
             description_text = _get_description(prop)
 
@@ -203,8 +202,6 @@ def render_docs(
             format_label = _get_format_label(prop, type_info)
             if format_label is not None:
                 lines.append(format_label)
-            if type_info.category == "array" and flex_tail_dims > 0:
-                lines.append(f"- Flexible tail dims: {flex_tail_dims}")
             lines.append(f"- Declared required: {'yes' if declared_required else 'no'}")
             lines.append(f"- Input required: {'yes' if requirement.requires_input else 'no'}")
             if default_label is not None:
@@ -568,28 +565,6 @@ def _get_bounds_labels(
         literal = _format_scalar_default(max_value, None, category)
         labels.append(f"- Maximum: `{op} {literal}`")
     return labels
-
-
-def _get_flex_tail_dims(
-    prop: dict[str, Any],
-    type_info: FieldTypeInfo,
-) -> int:
-    flex_raw = prop.get("x-fortran-flex-tail-dims")
-    if flex_raw is None:
-        flex_value = 0
-    else:
-        if isinstance(flex_raw, bool) or not isinstance(flex_raw, int):
-            raise ValueError("property flex tail dims must be an integer")
-        flex_value = flex_raw
-    if flex_value < 0:
-        raise ValueError("property flex tail dims must be >= 0")
-    if flex_value == 0:
-        return 0
-    if type_info.category != "array":
-        raise ValueError("flex tail dims only apply to arrays")
-    if flex_value > len(type_info.dimensions):
-        raise ValueError("flex tail dims must not exceed array rank")
-    return flex_value
 
 
 def _escape_table_cell(value: str) -> str:

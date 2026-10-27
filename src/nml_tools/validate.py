@@ -13,7 +13,7 @@ from ._utils import (
     reject_constant_dimension_overlap,
     validate_user_fortran_identifier,
 )
-from .schema import _is_intrinsic_scalar_schema
+from .schema import _is_intrinsic_scalar_schema, reject_removed_schema_keywords
 
 
 @dataclass(frozen=True)
@@ -46,6 +46,7 @@ def validate_schema_defaults(
     dimensions: dict[str, int] | None = None,
 ) -> None:
     """Validate operational defaults against each property's constraints."""
+    reject_removed_schema_keywords(schema)
     if _has_reachable_reference(schema, position="root"):
         raise ValueError(
             "schema contains unresolved '$ref'; use load_schema() or resolve_schema() "
@@ -155,10 +156,6 @@ def _validate_property_defaults(
     if items.get("type") == "object":
         if "default" in prop or controls.intersection(prop):
             raise ValueError(f"derived array property '{name}' must not define defaults")
-        if "x-fortran-flex-tail-dims" in prop:
-            raise ValueError(
-                f"derived array property '{name}' must not define x-fortran-flex-tail-dims"
-            )
         _validate_property_defaults(
             f"{name}[]",
             items,
@@ -170,12 +167,9 @@ def _validate_property_defaults(
         raise ValueError(
             f"array property '{name}' default must be defined on property or items, not both"
         )
-    has_default = "default" in prop or "default" in items
-    if has_default:
+    if "default" in prop or "default" in items:
         shape_constants = {**(constants or {}), **(dimensions or {})}
-        shape = _parse_shape(prop.get("x-fortran-shape"), shape_constants, name)
-        if _parse_flex_tail_dims(prop, len(shape), name, shape) > 0:
-            raise ValueError(f"array property '{name}' flex arrays cannot define defaults")
+        _parse_shape(prop.get("x-fortran-shape"), shape_constants, name)
 
     if "default" in prop:
         default = prop["default"]
@@ -805,30 +799,6 @@ def _parse_shape(
             continue
         raise ValueError(f"array property '{name}' shape entries must be int or str")
     return parsed
-
-
-def _parse_flex_tail_dims(
-    prop: Mapping[str, Any],
-    rank: int,
-    name: str,
-    dimensions: Iterable[int | None],
-) -> int:
-    raw = prop.get("x-fortran-flex-tail-dims")
-    if raw is None:
-        flex = 0
-    else:
-        if isinstance(raw, bool) or not isinstance(raw, int):
-            raise ValueError(f"array property '{name}' flex tail dims must be an integer")
-        flex = raw
-    if flex < 0:
-        raise ValueError(f"array property '{name}' flex tail dims must be >= 0")
-    if flex == 0:
-        return 0
-    if flex > rank:
-        raise ValueError(f"array property '{name}' flex tail dims must not exceed rank")
-    if any(dim is None for dim in dimensions):
-        raise ValueError(f"array property '{name}' flex tail dims require concrete shape")
-    return flex
 
 
 def _iter_scalars(value: Any) -> Iterable[Any]:
