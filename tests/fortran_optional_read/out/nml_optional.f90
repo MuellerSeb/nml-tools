@@ -180,9 +180,7 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'label'"
         return
       end if
-      if (this%label == achar(0)) then
-        status = NML_ERR_NOT_SET
-      end if
+      if (this%label == achar(0)) status = NML_ERR_NOT_SET
     case default
       status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)

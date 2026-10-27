@@ -265,6 +265,12 @@ Both use the same configuration state and per-item presence rules as indexed
 `is_set(name, idx=...)`. Names are case-insensitive and derived component paths
 use `%`, for example `entries%start_year`.
 
+Generated array storage and returned masks use one-based indexing in every
+dimension. Setter arguments may use other lower bounds; their elements are
+copied into a prefix starting at index 1.
+The generated helper `idx_check(idx, shp, field, errmsg)` checks indices against
+these one-based bounds, with `shp` containing the extent in each dimension.
+
 ```fortran
 logical, allocatable :: mask(:,:)
 integer :: status, filled(2)
@@ -284,8 +290,8 @@ An incomplete derived element returns `NML_ERR_PARTLY_SET` and leaves the mask
 unallocated; component paths remain independently queryable.
 
 `filled_shape` requires an integer vector of size equal to the array rank. It
-returns the smallest lower-bound-anchored rectangular prefix containing all set
-elements, across every dimension. An all-missing array returns zero extents,
+returns the smallest rectangular prefix containing all set elements, anchored
+at index 1 in every dimension. An all-missing array returns zero extents,
 and a fully present array returns its full shape. Holes inside the prefix return
 `NML_ERR_PARTLY_SET` while retaining the computed extents. Incomplete derived
 elements also return `NML_ERR_PARTLY_SET`, but with zero extents.

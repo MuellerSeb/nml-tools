@@ -432,7 +432,6 @@ def _build_context(
     presence_cases: list[PresenceSpec] = []
     required_scalar_names: set[str] = set()
     required_array_by_name: dict[str, dict[str, Any]] = {}
-    array_bound_vars: set[str] = set()
     default_parameters: list[str] = []
     enum_parameters: list[str] = []
     enum_functions: list[dict[str, Any]] = []
@@ -884,29 +883,16 @@ def _build_context(
                     doc=title,
                 )
                 local_init_assignments.append(f"{name} = this%{name}")
-                derived_partial_bounds: list[dict[str, Any]] = []
                 set_present_assignment: str | None = None
-                if type_info.category == "array":
-                    for array_dim_index in range(1, len(type_info.dimensions) + 1):
-                        lb_var, ub_var = _array_bound_vars(array_dim_index)
-                        derived_partial_bounds.append(
-                            {"dim": array_dim_index, "lb_var": lb_var, "ub_var": ub_var}
-                        )
-                        array_bound_vars.add(lb_var)
-                        array_bound_vars.add(ub_var)
                 if requires_input:
                     if type_info.category == "array":
                         set_required_assignments.append(
-                            _render_partial_set_block(
-                                name, len(type_info.dimensions), derived_partial_bounds
-                            )
+                            _render_partial_set_block(name, len(type_info.dimensions))
                         )
                     else:
                         set_required_assignments.append(f"this%{name} = {name}")
                 elif type_info.category == "array":
-                    block = _render_partial_set_block(
-                        name, len(type_info.dimensions), derived_partial_bounds
-                    )
+                    block = _render_partial_set_block(name, len(type_info.dimensions))
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
                         f"if (present({name})) then\n{indented_block}\nend if"
@@ -1091,18 +1077,6 @@ def _build_context(
                 if uses_ieee:
                     requires_ieee = True
 
-            partial_bounds: list[dict[str, Any]] | None = None
-            if type_info.category == "array":
-                rank = len(type_info.dimensions)
-                all_bounds = []
-                for array_dim_index in range(1, rank + 1):
-                    lb_var, ub_var = _array_bound_vars(array_dim_index)
-                    all_bounds.append(
-                        {"dim": array_dim_index, "lb_var": lb_var, "ub_var": ub_var}
-                    )
-                    array_bound_vars.add(lb_var)
-                    array_bound_vars.add(ub_var)
-                partial_bounds = all_bounds
             default_assignment: str | None = None
             set_default_assignment: str | None = None
             if has_default:
@@ -1415,11 +1389,7 @@ def _build_context(
                     # Match namelist-buffer semantics: set assigns the provided
                     # leading subsection and leaves completeness checks to is_valid.
                     set_required_assignments.append(
-                        _render_partial_set_block(
-                            name,
-                            len(type_info.dimensions),
-                            partial_bounds or [],
-                        )
+                        _render_partial_set_block(name, len(type_info.dimensions))
                     )
                 else:
                     set_required_assignments.append(f"this%{name} = {name}")
@@ -1428,11 +1398,7 @@ def _build_context(
                 if is_array:
                     # Match namelist-buffer semantics: set assigns the provided
                     # leading subsection and leaves completeness checks to is_valid.
-                    block = _render_partial_set_block(
-                        name,
-                        len(type_info.dimensions),
-                        partial_bounds or [],
-                    )
+                    block = _render_partial_set_block(name, len(type_info.dimensions))
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
                         f"if (present({name})) then\n{indented_block}\nend if"
@@ -1661,7 +1627,6 @@ def _build_context(
         "helper_module": helper_module,
         "helper_imports": helper_imports,
         "presence_cases": presence_cases,
-        "array_bound_vars": _sort_bound_vars(array_bound_vars),
         "f2py_handle_helpers": f2py_handle_helpers,
     }
 
@@ -2326,39 +2291,10 @@ def _array_missing_conditions(
     return f"all({missing_expr})", f"any({missing_expr})", uses_ieee
 
 
-def _array_bound_vars(dim: int) -> tuple[str, str]:
-    return _generated_name("lb", str(dim)), _generated_name("ub", str(dim))
-
-
-def _slice_ref_bounds(
-    name: str,
-    rank: int,
-    selected_dims: list[int],
-    lb_vars: dict[int, str],
-    ub_vars: dict[int, str],
-) -> str:
-    dims: list[str] = []
-    for dim in range(1, rank + 1):
-        if dim in selected_dims:
-            dims.append(f"{lb_vars[dim]}:{ub_vars[dim]}")
-        else:
-            dims.append(":")
-    return f"this%{name}({', '.join(dims)})"
-
-
-def _render_partial_set_block(
-    name: str,
-    rank: int,
-    bounds: list[dict[str, Any]],
-) -> str:
-    lb_vars = {entry["dim"]: entry["lb_var"] for entry in bounds}
-    ub_vars = {entry["dim"]: entry["ub_var"] for entry in bounds}
-    dims_all = [entry["dim"] for entry in bounds]
+def _render_partial_set_block(name: str, rank: int) -> str:
+    # Generated storage and assumed-shape setter dummies both use lower bound 1.
     lines: list[str] = []
-    for entry in bounds:
-        dim = entry["dim"]
-        lb_var = entry["lb_var"]
-        ub_var = entry["ub_var"]
+    for dim in range(1, rank + 1):
         lines.append(f"if (size({name}, {dim}) > size(this%{name}, {dim})) then")
         lines.append("  status = NML_ERR_INVALID_INDEX")
         lines.append(
@@ -2366,22 +2302,18 @@ def _render_partial_set_block(
         )
         lines.append("  return")
         lines.append("end if")
-        lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
-        lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
-    target_ref = _slice_ref_bounds(name, rank, dims_all, lb_vars, ub_vars)
-    lines.append(f"{target_ref} = {name}")
+    sections = [f"1:size({name}, {dim})" for dim in range(1, rank + 1)]
+    assignment = f"this%{name}({', '.join(sections)}) = {name}"
+    # Optional setter blocks add six spaces of indentation in the template.
+    if len(assignment) + 6 <= 132:
+        lines.append(assignment)
+    else:
+        lines.append(f"this%{name}( &")
+        for index, section in enumerate(sections):
+            suffix = ", &" if index < rank - 1 else " &"
+            lines.append(f"  {section}{suffix}")
+        lines.append(f") = {name}")
     return "\n".join(lines)
-
-
-def _sort_bound_vars(values: set[str]) -> list[str]:
-    def sort_key(name: str) -> tuple[str, int]:
-        prefix, _, suffix = name.partition("__")
-        try:
-            return prefix, int(suffix)
-        except ValueError:
-            return prefix, 0
-
-    return sorted(values, key=sort_key)
 
 
 def _format_reshape_assignment(name: str, arguments: list[str]) -> str:

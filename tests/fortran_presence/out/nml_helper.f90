@@ -172,20 +172,19 @@ contains
     end do
   end function to_lower
 
-  !> \brief Validate index bounds for array access
-  integer function idx_check(idx, lower, upper, field, errmsg) result(status)
+  !> \brief Validate one-based indices against array extents
+  integer function idx_check(idx, shp, field, errmsg) result(status)
     integer, intent(in) :: idx(:)
-    integer, intent(in) :: lower(:)
-    integer, intent(in) :: upper(:)
+    integer, intent(in) :: shp(:)
     character(len=*), intent(in) :: field
     character(len=*), intent(out), optional :: errmsg
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
-    if (size(idx) /= size(lower)) then
+    if (size(idx) /= size(shp)) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "index rank mismatch for '" // trim(field) // "'"
-    else if (any(idx < lower) .or. any(idx > upper)) then
+    else if (any(idx < 1) .or. any(idx > shp)) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "index out of bounds for '" // trim(field) // "'"
     end if

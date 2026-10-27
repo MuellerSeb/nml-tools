@@ -257,13 +257,6 @@ contains
     integer, dimension(:), intent(in), optional :: defaulted !< defaulted
     logical, dimension(:), intent(in), optional :: flags !< flags
     real, dimension(:, :), intent(in), optional :: runtime !< runtime
-    integer :: &
-      lb__1, &
-      lb__2, &
-      lb__3, &
-      ub__1, &
-      ub__2, &
-      ub__3
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -277,9 +270,7 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'counts'"
         return
       end if
-      lb__1 = lbound(this%counts, 1)
-      ub__1 = lb__1 + size(counts, 1) - 1
-      this%counts(lb__1:ub__1) = counts
+      this%counts(1:size(counts, 1)) = counts
     end if
     if (present(matrix)) then
       if (size(matrix, 1) > size(this%matrix, 1)) then
@@ -287,16 +278,12 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'matrix'"
         return
       end if
-      lb__1 = lbound(this%matrix, 1)
-      ub__1 = lb__1 + size(matrix, 1) - 1
       if (size(matrix, 2) > size(this%matrix, 2)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'matrix'"
         return
       end if
-      lb__2 = lbound(this%matrix, 2)
-      ub__2 = lb__2 + size(matrix, 2) - 1
-      this%matrix(lb__1:ub__1, lb__2:ub__2) = matrix
+      this%matrix(1:size(matrix, 1), 1:size(matrix, 2)) = matrix
     end if
     if (present(cube)) then
       if (size(cube, 1) > size(this%cube, 1)) then
@@ -304,23 +291,17 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'cube'"
         return
       end if
-      lb__1 = lbound(this%cube, 1)
-      ub__1 = lb__1 + size(cube, 1) - 1
       if (size(cube, 2) > size(this%cube, 2)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'cube'"
         return
       end if
-      lb__2 = lbound(this%cube, 2)
-      ub__2 = lb__2 + size(cube, 2) - 1
       if (size(cube, 3) > size(this%cube, 3)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 3 exceeds bounds for 'cube'"
         return
       end if
-      lb__3 = lbound(this%cube, 3)
-      ub__3 = lb__3 + size(cube, 3) - 1
-      this%cube(lb__1:ub__1, lb__2:ub__2, lb__3:ub__3) = cube
+      this%cube(1:size(cube, 1), 1:size(cube, 2), 1:size(cube, 3)) = cube
     end if
     if (present(labels)) then
       if (size(labels, 1) > size(this%labels, 1)) then
@@ -328,9 +309,7 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'labels'"
         return
       end if
-      lb__1 = lbound(this%labels, 1)
-      ub__1 = lb__1 + size(labels, 1) - 1
-      this%labels(lb__1:ub__1) = labels
+      this%labels(1:size(labels, 1)) = labels
     end if
     if (present(defaulted)) then
       if (size(defaulted, 1) > size(this%defaulted, 1)) then
@@ -338,9 +317,7 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'defaulted'"
         return
       end if
-      lb__1 = lbound(this%defaulted, 1)
-      ub__1 = lb__1 + size(defaulted, 1) - 1
-      this%defaulted(lb__1:ub__1) = defaulted
+      this%defaulted(1:size(defaulted, 1)) = defaulted
     end if
     if (present(flags)) then
       if (size(flags, 1) > size(this%flags, 1)) then
@@ -348,9 +325,7 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'flags'"
         return
       end if
-      lb__1 = lbound(this%flags, 1)
-      ub__1 = lb__1 + size(flags, 1) - 1
-      this%flags(lb__1:ub__1) = flags
+      this%flags(1:size(flags, 1)) = flags
     end if
     if (present(runtime)) then
       if (size(runtime, 1) > size(this%runtime, 1)) then
@@ -358,16 +333,12 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'runtime'"
         return
       end if
-      lb__1 = lbound(this%runtime, 1)
-      ub__1 = lb__1 + size(runtime, 1) - 1
       if (size(runtime, 2) > size(this%runtime, 2)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'runtime'"
         return
       end if
-      lb__2 = lbound(this%runtime, 2)
-      ub__2 = lb__2 + size(runtime, 2) - 1
-      this%runtime(lb__1:ub__1, lb__2:ub__2) = runtime
+      this%runtime(1:size(runtime, 1), 1:size(runtime, 2)) = runtime
     end if
 
     ! mark as configured
@@ -381,6 +352,7 @@ contains
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    intrinsic :: shape
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -398,69 +370,45 @@ contains
       end if
     case ("counts")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%counts), &
-          ubound(this%counts), "counts", errmsg)
+        status = idx_check(idx, shape(this%counts), "counts", errmsg)
         if (status /= NML_OK) return
-        if (this%counts(idx(1)) == -huge(this%counts(idx(1)))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (this%counts(idx(1)) == -huge(this%counts(idx(1)))) status = NML_ERR_NOT_SET
       else
-        if (all(this%counts == -huge(this%counts))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (all(this%counts == -huge(this%counts))) status = NML_ERR_NOT_SET
       end if
     case ("matrix")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%matrix), &
-          ubound(this%matrix), "matrix", errmsg)
+        status = idx_check(idx, shape(this%matrix), "matrix", errmsg)
         if (status /= NML_OK) return
-        if (ieee_is_nan(this%matrix(idx(1), idx(2)))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (ieee_is_nan(this%matrix(idx(1), idx(2)))) status = NML_ERR_NOT_SET
       else
-        if (all(ieee_is_nan(this%matrix))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (all(ieee_is_nan(this%matrix))) status = NML_ERR_NOT_SET
       end if
     case ("cube")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%cube), &
-          ubound(this%cube), "cube", errmsg)
+        status = idx_check(idx, shape(this%cube), "cube", errmsg)
         if (status /= NML_OK) return
-        if (this%cube(idx(1), idx(2), idx(3)) == -huge(this%cube(idx(1), idx(2), idx(3)))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (this%cube(idx(1), idx(2), idx(3)) == -huge(this%cube(idx(1), idx(2), idx(3)))) status = NML_ERR_NOT_SET
       else
-        if (all(this%cube == -huge(this%cube))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (all(this%cube == -huge(this%cube))) status = NML_ERR_NOT_SET
       end if
     case ("labels")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%labels), &
-          ubound(this%labels), "labels", errmsg)
+        status = idx_check(idx, shape(this%labels), "labels", errmsg)
         if (status /= NML_OK) return
-        if (this%labels(idx(1)) == achar(0)) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (this%labels(idx(1)) == achar(0)) status = NML_ERR_NOT_SET
       else
-        if (all(this%labels == achar(0))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (all(this%labels == achar(0))) status = NML_ERR_NOT_SET
       end if
     case ("defaulted")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%defaulted), &
-          ubound(this%defaulted), "defaulted", errmsg)
+        status = idx_check(idx, shape(this%defaulted), "defaulted", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case ("flags")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%flags), &
-          ubound(this%flags), "flags", errmsg)
+        status = idx_check(idx, shape(this%flags), "flags", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case ("runtime")
       if (.not. allocated(this%runtime)) then
@@ -469,16 +417,11 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%runtime), &
-          ubound(this%runtime), "runtime", errmsg)
+        status = idx_check(idx, shape(this%runtime), "runtime", errmsg)
         if (status /= NML_OK) return
-        if (ieee_is_nan(this%runtime(idx(1), idx(2)))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (ieee_is_nan(this%runtime(idx(1), idx(2)))) status = NML_ERR_NOT_SET
       else
-        if (all(ieee_is_nan(this%runtime))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (all(ieee_is_nan(this%runtime))) status = NML_ERR_NOT_SET
       end if
     case default
       status = NML_ERR_INVALID_NAME
@@ -496,6 +439,7 @@ contains
     logical, allocatable, intent(out) :: mask(:) !< item presence
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: idx__1
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -508,18 +452,15 @@ contains
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "array query not supported for scalar: scalar"
     case ("counts")
-
       allocate(mask( &
         size(this%counts, 1)))
       do idx__1 = 1, size(this%counts, 1)
-
         if (this%counts(idx__1) == -huge(this%counts(idx__1))) then
           mask(idx__1) = .false.
         else
           mask(idx__1) = .true.
         end if
       end do
-
     case ("matrix")
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for 'matrix'"
@@ -527,25 +468,20 @@ contains
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for 'cube'"
     case ("labels")
-
       allocate(mask( &
         size(this%labels, 1)))
       do idx__1 = 1, size(this%labels, 1)
-
         if (this%labels(idx__1) == achar(0)) then
           mask(idx__1) = .false.
         else
           mask(idx__1) = .true.
         end if
       end do
-
     case ("defaulted")
-
       allocate(mask( &
         size(this%defaulted, 1)))
       mask = .true.
     case ("flags")
-
       allocate(mask( &
         size(this%flags, 1)))
       mask = .true.
@@ -566,6 +502,7 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: idx__1
     integer :: idx__2
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -581,13 +518,11 @@ contains
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for 'counts'"
     case ("matrix")
-
       allocate(mask( &
         size(this%matrix, 1), &
         size(this%matrix, 2)))
       do idx__2 = 1, size(this%matrix, 2)
         do idx__1 = 1, size(this%matrix, 1)
-
           if (ieee_is_nan(this%matrix(idx__1, idx__2))) then
             mask(idx__1, idx__2) = .false.
           else
@@ -595,7 +530,6 @@ contains
           end if
         end do
       end do
-
     case ("cube")
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for 'cube'"
@@ -614,13 +548,11 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: runtime"
         return
       end if
-
       allocate(mask( &
         size(this%runtime, 1), &
         size(this%runtime, 2)))
       do idx__2 = 1, size(this%runtime, 2)
         do idx__1 = 1, size(this%runtime, 1)
-
           if (ieee_is_nan(this%runtime(idx__1, idx__2))) then
             mask(idx__1, idx__2) = .false.
           else
@@ -628,7 +560,6 @@ contains
           end if
         end do
       end do
-
     case default
       status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)
@@ -644,6 +575,7 @@ contains
     integer :: idx__1
     integer :: idx__2
     integer :: idx__3
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -662,7 +594,6 @@ contains
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for 'matrix'"
     case ("cube")
-
       allocate(mask( &
         size(this%cube, 1), &
         size(this%cube, 2), &
@@ -670,7 +601,6 @@ contains
       do idx__3 = 1, size(this%cube, 3)
         do idx__2 = 1, size(this%cube, 2)
           do idx__1 = 1, size(this%cube, 1)
-
             if (this%cube(idx__1, idx__2, idx__3) == -huge(this%cube(idx__1, idx__2, idx__3))) then
               mask(idx__1, idx__2, idx__3) = .false.
             else
@@ -679,7 +609,6 @@ contains
           end do
         end do
       end do
-
     case ("labels")
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for 'labels'"
@@ -698,7 +627,7 @@ contains
     end select
   end function nml_presence_set_mask__rank__3
 
-  !> \brief Determine the smallest complete lower-bound-anchored populated prefix
+  !> \brief Determine the smallest complete populated prefix starting at index 1
   integer function nml_presence_filled_shape(this, name, filled, errmsg) result(status)
     class(nml_presence_t), intent(in) :: this !< namelist instance
     character(len=*), intent(in) :: name !< field or derived component path
@@ -726,41 +655,32 @@ contains
         if (present(errmsg)) errmsg = "shape rank mismatch for 'counts'"
         return
       end if
-
       do idx__1 = 1, size(this%counts, 1)
-
         if (this%counts(idx__1) == -huge(this%counts(idx__1))) cycle
         if (idx__1 > filled(1)) filled(1) = idx__1
       end do
-
       do idx__1 = 1, filled(1)
-
         if (this%counts(idx__1) == -huge(this%counts(idx__1))) then
           status = NML_ERR_PARTLY_SET
           if (present(errmsg)) errmsg = "array partly set: counts"
           return
         end if
       end do
-
     case ("matrix")
       if (size(filled) /= 2) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "shape rank mismatch for 'matrix'"
         return
       end if
-
       do idx__2 = 1, size(this%matrix, 2)
         do idx__1 = 1, size(this%matrix, 1)
-
           if (ieee_is_nan(this%matrix(idx__1, idx__2))) cycle
           if (idx__1 > filled(1)) filled(1) = idx__1
           if (idx__2 > filled(2)) filled(2) = idx__2
         end do
       end do
-
       do idx__2 = 1, filled(2)
         do idx__1 = 1, filled(1)
-
           if (ieee_is_nan(this%matrix(idx__1, idx__2))) then
             status = NML_ERR_PARTLY_SET
             if (present(errmsg)) errmsg = "array partly set: matrix"
@@ -768,18 +688,15 @@ contains
           end if
         end do
       end do
-
     case ("cube")
       if (size(filled) /= 3) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "shape rank mismatch for 'cube'"
         return
       end if
-
       do idx__3 = 1, size(this%cube, 3)
         do idx__2 = 1, size(this%cube, 2)
           do idx__1 = 1, size(this%cube, 1)
-
             if (this%cube(idx__1, idx__2, idx__3) == -huge(this%cube(idx__1, idx__2, idx__3))) cycle
             if (idx__1 > filled(1)) filled(1) = idx__1
             if (idx__2 > filled(2)) filled(2) = idx__2
@@ -787,11 +704,9 @@ contains
           end do
         end do
       end do
-
       do idx__3 = 1, filled(3)
         do idx__2 = 1, filled(2)
           do idx__1 = 1, filled(1)
-
             if (this%cube(idx__1, idx__2, idx__3) == -huge(this%cube(idx__1, idx__2, idx__3))) then
               status = NML_ERR_PARTLY_SET
               if (present(errmsg)) errmsg = "array partly set: cube"
@@ -800,36 +715,29 @@ contains
           end do
         end do
       end do
-
     case ("labels")
       if (size(filled) /= 1) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "shape rank mismatch for 'labels'"
         return
       end if
-
       do idx__1 = 1, size(this%labels, 1)
-
         if (this%labels(idx__1) == achar(0)) cycle
         if (idx__1 > filled(1)) filled(1) = idx__1
       end do
-
       do idx__1 = 1, filled(1)
-
         if (this%labels(idx__1) == achar(0)) then
           status = NML_ERR_PARTLY_SET
           if (present(errmsg)) errmsg = "array partly set: labels"
           return
         end if
       end do
-
     case ("defaulted")
       if (size(filled) /= 1) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "shape rank mismatch for 'defaulted'"
         return
       end if
-
       filled(1) = size(this%defaulted, 1)
     case ("flags")
       if (size(filled) /= 1) then
@@ -837,7 +745,6 @@ contains
         if (present(errmsg)) errmsg = "shape rank mismatch for 'flags'"
         return
       end if
-
       filled(1) = size(this%flags, 1)
     case ("runtime")
       if (size(filled) /= 2) then
@@ -850,19 +757,15 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: runtime"
         return
       end if
-
       do idx__2 = 1, size(this%runtime, 2)
         do idx__1 = 1, size(this%runtime, 1)
-
           if (ieee_is_nan(this%runtime(idx__1, idx__2))) cycle
           if (idx__1 > filled(1)) filled(1) = idx__1
           if (idx__2 > filled(2)) filled(2) = idx__2
         end do
       end do
-
       do idx__2 = 1, filled(2)
         do idx__1 = 1, filled(1)
-
           if (ieee_is_nan(this%runtime(idx__1, idx__2))) then
             status = NML_ERR_PARTLY_SET
             if (present(errmsg)) errmsg = "array partly set: runtime"
@@ -870,7 +773,6 @@ contains
           end if
         end do
       end do
-
     case default
       status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)

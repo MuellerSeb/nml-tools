@@ -383,10 +383,6 @@ contains
 {% for decl in optional_argument_declarations %}
 {{ decl | indent(4, True) }}
 {% endfor %}
-{% if array_bound_vars %}
-    integer :: &
-      {{ array_bound_vars | join(', &\n      ') }}
-{% endif %}
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -407,12 +403,29 @@ contains
     status = NML_OK
   end function {{ type_prefix }}_set
 
+{% macro presence_status(missing, partial, offset) %}
+{% set statement = "if (" ~ missing ~ ") status = NML_ERR_NOT_SET" %}
+{% if not partial and '\n' not in missing and statement | length + offset <= 132 %}
+{{ statement }}
+{% else %}
+if ({{ missing | indent(4) }}) then
+  status = NML_ERR_NOT_SET
+{% if partial %}
+else if ({{ partial | indent(4) }}) then
+  status = NML_ERR_PARTLY_SET
+{% endif %}
+end if
+{% endif %}
+{%- endmacro %}
   !> \brief Check whether a namelist value was set
   integer function {{ type_prefix }}_is_set(this, name, idx, errmsg) result(status)
     class({{ type_name }}), intent(in) :: this !< namelist instance
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+{% if array_ranks %}
+    intrinsic :: shape
+{% endif %}
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -433,27 +446,20 @@ contains
       end if
 {% endif %}
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%{{ case.storage_name }}), &
-          ubound(this%{{ case.storage_name }}), "{{ case.display_name }}", errmsg)
+{% set index_check = 'status = idx_check(idx, shape(this%' ~ case.storage_name ~ '), "' ~ case.display_name ~ '", errmsg)' %}
+{% if index_check | length + 8 <= 132 %}
+        {{ index_check }}
+{% else %}
+        status = idx_check(idx, shape(this%{{ case.storage_name }}), &
+          "{{ case.display_name }}", errmsg)
+{% endif %}
         if (status /= NML_OK) return
 {% if case.missing_condition %}
-        if ({{ case.missing_condition | indent(10) }}) then
-          status = NML_ERR_NOT_SET
-{% if case.partial_condition %}
-        else if ({{ case.partial_condition | indent(10) }}) then
-          status = NML_ERR_PARTLY_SET
+{{ presence_status(case.missing_condition, case.partial_condition, 8).rstrip() | indent(8, true) }}
 {% endif %}
-        end if
-{% endif %}
-      else
 {% if case.aggregate_missing_condition %}
-        if ({{ case.aggregate_missing_condition | indent(10) }}) then
-          status = NML_ERR_NOT_SET
-{% if case.aggregate_partial_condition %}
-        else if ({{ case.aggregate_partial_condition | indent(10) }}) then
-          status = NML_ERR_PARTLY_SET
-{% endif %}
-        end if
+      else
+{{ presence_status(case.aggregate_missing_condition, case.aggregate_partial_condition, 8).rstrip() | indent(8, true) }}
 {% endif %}
       end if
 {% else %}
@@ -463,13 +469,7 @@ contains
         return
       end if
 {% if case.missing_condition %}
-      if ({{ case.missing_condition | indent(10) }}) then
-        status = NML_ERR_NOT_SET
-{% if case.partial_condition %}
-      else if ({{ case.partial_condition | indent(10) }}) then
-        status = NML_ERR_PARTLY_SET
-{% endif %}
-      end if
+{{ presence_status(case.missing_condition, case.partial_condition, 6).rstrip() | indent(6, true) }}
 {% endif %}
 {% endif %}
 {% endfor %}

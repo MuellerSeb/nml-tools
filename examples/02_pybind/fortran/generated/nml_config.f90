@@ -271,9 +271,6 @@ contains
     character(len=*), intent(in), optional :: name !< Config name
     logical, intent(in), optional :: enabled !< Enabled
     real(dp), dimension(:), intent(in), optional :: weights !< Weights
-    integer :: &
-      lb__1, &
-      ub__1
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -290,9 +287,7 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'weights'"
         return
       end if
-      lb__1 = lbound(this%weights, 1)
-      ub__1 = lb__1 + size(weights, 1) - 1
-      this%weights(lb__1:ub__1) = weights
+      this%weights(1:size(weights, 1)) = weights
     end if
 
     ! mark as configured
@@ -306,6 +301,7 @@ contains
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    intrinsic :: shape
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -327,18 +323,14 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'iterations'"
         return
       end if
-      if (this%iterations == -huge(this%iterations)) then
-        status = NML_ERR_NOT_SET
-      end if
+      if (this%iterations == -huge(this%iterations)) status = NML_ERR_NOT_SET
     case ("tolerance")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'tolerance'"
         return
       end if
-      if (ieee_is_nan(this%tolerance)) then
-        status = NML_ERR_NOT_SET
-      end if
+      if (ieee_is_nan(this%tolerance)) status = NML_ERR_NOT_SET
     case ("enabled")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
@@ -352,10 +344,8 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%weights), &
-          ubound(this%weights), "weights", errmsg)
+        status = idx_check(idx, shape(this%weights), "weights", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case default
       status = NML_ERR_INVALID_NAME
@@ -373,6 +363,7 @@ contains
     logical, allocatable, intent(out) :: mask(:) !< item presence
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: idx__1
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -399,7 +390,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: weights"
         return
       end if
-
       allocate(mask( &
         size(this%weights, 1)))
       mask = .true.
@@ -409,7 +399,7 @@ contains
     end select
   end function nml_config_set_mask__rank__1
 
-  !> \brief Determine the smallest complete lower-bound-anchored populated prefix
+  !> \brief Determine the smallest complete populated prefix starting at index 1
   integer function nml_config_filled_shape(this, name, filled, errmsg) result(status)
     class(nml_config_t), intent(in) :: this !< namelist instance
     character(len=*), intent(in) :: name !< field or derived component path
@@ -449,7 +439,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: weights"
         return
       end if
-
       filled(1) = size(this%weights, 1)
     case default
       status = NML_ERR_INVALID_NAME

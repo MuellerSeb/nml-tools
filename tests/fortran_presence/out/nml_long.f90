@@ -145,11 +145,6 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer, dimension(:), intent(in), optional :: values !< values
     logical, dimension(:, :), intent(in), optional :: flags !< flags
-    integer :: &
-      lb__1, &
-      lb__2, &
-      ub__1, &
-      ub__2
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -162,9 +157,7 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'values'"
         return
       end if
-      lb__1 = lbound(this%values, 1)
-      ub__1 = lb__1 + size(values, 1) - 1
-      this%values(lb__1:ub__1) = values
+      this%values(1:size(values, 1)) = values
     end if
     if (present(flags)) then
       if (size(flags, 1) > size(this%flags, 1)) then
@@ -172,16 +165,12 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'flags'"
         return
       end if
-      lb__1 = lbound(this%flags, 1)
-      ub__1 = lb__1 + size(flags, 1) - 1
       if (size(flags, 2) > size(this%flags, 2)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'flags'"
         return
       end if
-      lb__2 = lbound(this%flags, 2)
-      ub__2 = lb__2 + size(flags, 2) - 1
-      this%flags(lb__1:ub__1, lb__2:ub__2) = flags
+      this%flags(1:size(flags, 1), 1:size(flags, 2)) = flags
     end if
 
     ! mark as configured
@@ -195,6 +184,7 @@ contains
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    intrinsic :: shape
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -206,23 +196,16 @@ contains
     select case (to_lower(trim(name)))
     case ("values")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%values), &
-          ubound(this%values), "values", errmsg)
+        status = idx_check(idx, shape(this%values), "values", errmsg)
         if (status /= NML_OK) return
-        if (this%values(idx(1)) == -huge(this%values(idx(1)))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (this%values(idx(1)) == -huge(this%values(idx(1)))) status = NML_ERR_NOT_SET
       else
-        if (all(this%values == -huge(this%values))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (all(this%values == -huge(this%values))) status = NML_ERR_NOT_SET
       end if
     case ("flags")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%flags), &
-          ubound(this%flags), "flags", errmsg)
+        status = idx_check(idx, shape(this%flags), "flags", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case default
       status = NML_ERR_INVALID_NAME
@@ -240,6 +223,7 @@ contains
     logical, allocatable, intent(out) :: mask(:) !< item presence
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: idx__1
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -249,18 +233,15 @@ contains
     end if
     select case (to_lower(trim(name)))
     case ("values")
-
       allocate(mask( &
         size(this%values, 1)))
       do idx__1 = 1, size(this%values, 1)
-
         if (this%values(idx__1) == -huge(this%values(idx__1))) then
           mask(idx__1) = .false.
         else
           mask(idx__1) = .true.
         end if
       end do
-
     case ("flags")
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for 'flags'"
@@ -278,6 +259,7 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: idx__1
     integer :: idx__2
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -290,7 +272,6 @@ contains
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for 'values'"
     case ("flags")
-
       allocate(mask( &
         size(this%flags, 1), &
         size(this%flags, 2)))
@@ -301,7 +282,7 @@ contains
     end select
   end function nml_long_nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn_ebe2c9119d
 
-  !> \brief Determine the smallest complete lower-bound-anchored populated prefix
+  !> \brief Determine the smallest complete populated prefix starting at index 1
   integer function nml_long_nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn_4b0a62caab(this, name, filled, errmsg) result(status)
     class(nml_long_nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn_t), intent(in) :: this !< namelist instance
     character(len=*), intent(in) :: name !< field or derived component path
@@ -325,29 +306,23 @@ contains
         if (present(errmsg)) errmsg = "shape rank mismatch for 'values'"
         return
       end if
-
       do idx__1 = 1, size(this%values, 1)
-
         if (this%values(idx__1) == -huge(this%values(idx__1))) cycle
         if (idx__1 > filled(1)) filled(1) = idx__1
       end do
-
       do idx__1 = 1, filled(1)
-
         if (this%values(idx__1) == -huge(this%values(idx__1))) then
           status = NML_ERR_PARTLY_SET
           if (present(errmsg)) errmsg = "array partly set: values"
           return
         end if
       end do
-
     case ("flags")
       if (size(filled) /= 2) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "shape rank mismatch for 'flags'"
         return
       end if
-
       filled(1) = size(this%flags, 1)
       filled(2) = size(this%flags, 2)
     case default

@@ -208,11 +208,6 @@ contains
     type(entry_t), dimension(:, :), intent(in) :: entries !< entries
     type(known_t), dimension(:), intent(in), optional :: known !< known
     type(context_t), intent(in), optional :: context !< context
-    integer :: &
-      lb__1, &
-      lb__2, &
-      ub__1, &
-      ub__2
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -223,16 +218,12 @@ contains
       if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'entries'"
       return
     end if
-    lb__1 = lbound(this%entries, 1)
-    ub__1 = lb__1 + size(entries, 1) - 1
     if (size(entries, 2) > size(this%entries, 2)) then
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'entries'"
       return
     end if
-    lb__2 = lbound(this%entries, 2)
-    ub__2 = lb__2 + size(entries, 2) - 1
-    this%entries(lb__1:ub__1, lb__2:ub__2) = entries
+    this%entries(1:size(entries, 1), 1:size(entries, 2)) = entries
     ! override with provided values
     if (present(known)) then
       if (size(known, 1) > size(this%known, 1)) then
@@ -240,9 +231,7 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'known'"
         return
       end if
-      lb__1 = lbound(this%known, 1)
-      ub__1 = lb__1 + size(known, 1) - 1
-      this%known(lb__1:ub__1) = known
+      this%known(1:size(known, 1)) = known
     end if
     if (present(context)) this%context = context
 
@@ -257,6 +246,7 @@ contains
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    intrinsic :: shape
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -273,16 +263,11 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%entries), &
-          ubound(this%entries), "entries%left", errmsg)
+        status = idx_check(idx, shape(this%entries), "entries%left", errmsg)
         if (status /= NML_OK) return
-        if (this%entries(idx(1), idx(2))%left == -huge(this%entries(idx(1), idx(2))%left)) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (this%entries(idx(1), idx(2))%left == -huge(this%entries(idx(1), idx(2))%left)) status = NML_ERR_NOT_SET
       else
-        if (all(this%entries%left == -huge(this%entries%left))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (all(this%entries%left == -huge(this%entries%left))) status = NML_ERR_NOT_SET
       end if
     case ("entries%right")
       if (.not. allocated(this%entries)) then
@@ -291,16 +276,11 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%entries), &
-          ubound(this%entries), "entries%right", errmsg)
+        status = idx_check(idx, shape(this%entries), "entries%right", errmsg)
         if (status /= NML_OK) return
-        if (this%entries(idx(1), idx(2))%right == -huge(this%entries(idx(1), idx(2))%right)) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (this%entries(idx(1), idx(2))%right == -huge(this%entries(idx(1), idx(2))%right)) status = NML_ERR_NOT_SET
       else
-        if (all(this%entries%right == -huge(this%entries%right))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (all(this%entries%right == -huge(this%entries%right))) status = NML_ERR_NOT_SET
       end if
     case ("entries%note")
       if (.not. allocated(this%entries)) then
@@ -309,16 +289,11 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%entries), &
-          ubound(this%entries), "entries%note", errmsg)
+        status = idx_check(idx, shape(this%entries), "entries%note", errmsg)
         if (status /= NML_OK) return
-        if (this%entries(idx(1), idx(2))%note == achar(0)) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (this%entries(idx(1), idx(2))%note == achar(0)) status = NML_ERR_NOT_SET
       else
-        if (all(this%entries%note == achar(0))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (all(this%entries%note == achar(0))) status = NML_ERR_NOT_SET
       end if
     case ("entries%flag")
       if (.not. allocated(this%entries)) then
@@ -327,10 +302,8 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%entries), &
-          ubound(this%entries), "entries%flag", errmsg)
+        status = idx_check(idx, shape(this%entries), "entries%flag", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case ("entries")
       if (.not. allocated(this%entries)) then
@@ -339,38 +312,33 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%entries), &
-          ubound(this%entries), "entries", errmsg)
+        status = idx_check(idx, shape(this%entries), "entries", errmsg)
         if (status /= NML_OK) return
         if ((this%entries(idx(1), idx(2))%left == -huge(this%entries(idx(1), idx(2))%left)) .and. &
-            (this%entries(idx(1), idx(2))%right == -huge(this%entries(idx(1), idx(2))%right))) then
+              (this%entries(idx(1), idx(2))%right == -huge(this%entries(idx(1), idx(2))%right))) then
           status = NML_ERR_NOT_SET
         else if ((this%entries(idx(1), idx(2))%left == -huge(this%entries(idx(1), idx(2))%left)) .or. &
-            (this%entries(idx(1), idx(2))%right == -huge(this%entries(idx(1), idx(2))%right))) then
+              (this%entries(idx(1), idx(2))%right == -huge(this%entries(idx(1), idx(2))%right))) then
           status = NML_ERR_PARTLY_SET
         end if
       else
         if (all((this%entries%left == -huge(this%entries%left)) .and. &
-            (this%entries%right == -huge(this%entries%right)))) then
+              (this%entries%right == -huge(this%entries%right)))) then
           status = NML_ERR_NOT_SET
         else if (any((this%entries%left == -huge(this%entries%left)) .or. &
-            (this%entries%right == -huge(this%entries%right)))) then
+              (this%entries%right == -huge(this%entries%right)))) then
           status = NML_ERR_PARTLY_SET
         end if
       end if
     case ("known%value")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%known), &
-          ubound(this%known), "known%value", errmsg)
+        status = idx_check(idx, shape(this%known), "known%value", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case ("known")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%known), &
-          ubound(this%known), "known", errmsg)
+        status = idx_check(idx, shape(this%known), "known", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case ("context%value")
       if (present(idx)) then
@@ -400,6 +368,7 @@ contains
     logical, allocatable, intent(out) :: mask(:) !< item presence
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: idx__1
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -424,12 +393,10 @@ contains
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for 'entries'"
     case ("known%value")
-
       allocate(mask( &
         size(this%known, 1)))
       mask = .true.
     case ("known")
-
       allocate(mask( &
         size(this%known, 1)))
       mask = .true.
@@ -453,6 +420,7 @@ contains
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: idx__1
     integer :: idx__2
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -467,13 +435,11 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: entries%left"
         return
       end if
-
       allocate(mask( &
         size(this%entries, 1), &
         size(this%entries, 2)))
       do idx__2 = 1, size(this%entries, 2)
         do idx__1 = 1, size(this%entries, 1)
-
           if (this%entries(idx__1, idx__2)%left == -huge(this%entries(idx__1, idx__2)%left)) then
             mask(idx__1, idx__2) = .false.
           else
@@ -481,20 +447,17 @@ contains
           end if
         end do
       end do
-
     case ("entries%right")
       if (.not. allocated(this%entries)) then
         status = NML_ERR_NOT_SET
         if (present(errmsg)) errmsg = "array storage unavailable: entries%right"
         return
       end if
-
       allocate(mask( &
         size(this%entries, 1), &
         size(this%entries, 2)))
       do idx__2 = 1, size(this%entries, 2)
         do idx__1 = 1, size(this%entries, 1)
-
           if (this%entries(idx__1, idx__2)%right == -huge(this%entries(idx__1, idx__2)%right)) then
             mask(idx__1, idx__2) = .false.
           else
@@ -502,20 +465,17 @@ contains
           end if
         end do
       end do
-
     case ("entries%note")
       if (.not. allocated(this%entries)) then
         status = NML_ERR_NOT_SET
         if (present(errmsg)) errmsg = "array storage unavailable: entries%note"
         return
       end if
-
       allocate(mask( &
         size(this%entries, 1), &
         size(this%entries, 2)))
       do idx__2 = 1, size(this%entries, 2)
         do idx__1 = 1, size(this%entries, 1)
-
           if (this%entries(idx__1, idx__2)%note == achar(0)) then
             mask(idx__1, idx__2) = .false.
           else
@@ -523,14 +483,12 @@ contains
           end if
         end do
       end do
-
     case ("entries%flag")
       if (.not. allocated(this%entries)) then
         status = NML_ERR_NOT_SET
         if (present(errmsg)) errmsg = "array storage unavailable: entries%flag"
         return
       end if
-
       allocate(mask( &
         size(this%entries, 1), &
         size(this%entries, 2)))
@@ -541,13 +499,11 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: entries"
         return
       end if
-
       allocate(mask( &
         size(this%entries, 1), &
         size(this%entries, 2)))
       do idx__2 = 1, size(this%entries, 2)
         do idx__1 = 1, size(this%entries, 1)
-
           if ((this%entries(idx__1, idx__2)%left == -huge(this%entries(idx__1, idx__2)%left)) .and. &
               (this%entries(idx__1, idx__2)%right == -huge(this%entries(idx__1, idx__2)%right))) then
             mask(idx__1, idx__2) = .false.
@@ -563,7 +519,6 @@ contains
           end if
         end do
       end do
-
     case ("known%value")
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for 'known%value'"
@@ -582,7 +537,7 @@ contains
     end select
   end function nml_records_set_mask__rank__2
 
-  !> \brief Determine the smallest complete lower-bound-anchored populated prefix
+  !> \brief Determine the smallest complete populated prefix starting at index 1
   integer function nml_records_filled_shape(this, name, filled, errmsg) result(status)
     class(nml_records_t), intent(in) :: this !< namelist instance
     character(len=*), intent(in) :: name !< field or derived component path
@@ -611,19 +566,15 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: entries%left"
         return
       end if
-
       do idx__2 = 1, size(this%entries, 2)
         do idx__1 = 1, size(this%entries, 1)
-
           if (this%entries(idx__1, idx__2)%left == -huge(this%entries(idx__1, idx__2)%left)) cycle
           if (idx__1 > filled(1)) filled(1) = idx__1
           if (idx__2 > filled(2)) filled(2) = idx__2
         end do
       end do
-
       do idx__2 = 1, filled(2)
         do idx__1 = 1, filled(1)
-
           if (this%entries(idx__1, idx__2)%left == -huge(this%entries(idx__1, idx__2)%left)) then
             status = NML_ERR_PARTLY_SET
             if (present(errmsg)) errmsg = "array partly set: entries%left"
@@ -631,7 +582,6 @@ contains
           end if
         end do
       end do
-
     case ("entries%right")
       if (size(filled) /= 2) then
         status = NML_ERR_INVALID_INDEX
@@ -643,19 +593,15 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: entries%right"
         return
       end if
-
       do idx__2 = 1, size(this%entries, 2)
         do idx__1 = 1, size(this%entries, 1)
-
           if (this%entries(idx__1, idx__2)%right == -huge(this%entries(idx__1, idx__2)%right)) cycle
           if (idx__1 > filled(1)) filled(1) = idx__1
           if (idx__2 > filled(2)) filled(2) = idx__2
         end do
       end do
-
       do idx__2 = 1, filled(2)
         do idx__1 = 1, filled(1)
-
           if (this%entries(idx__1, idx__2)%right == -huge(this%entries(idx__1, idx__2)%right)) then
             status = NML_ERR_PARTLY_SET
             if (present(errmsg)) errmsg = "array partly set: entries%right"
@@ -663,7 +609,6 @@ contains
           end if
         end do
       end do
-
     case ("entries%note")
       if (size(filled) /= 2) then
         status = NML_ERR_INVALID_INDEX
@@ -675,19 +620,15 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: entries%note"
         return
       end if
-
       do idx__2 = 1, size(this%entries, 2)
         do idx__1 = 1, size(this%entries, 1)
-
           if (this%entries(idx__1, idx__2)%note == achar(0)) cycle
           if (idx__1 > filled(1)) filled(1) = idx__1
           if (idx__2 > filled(2)) filled(2) = idx__2
         end do
       end do
-
       do idx__2 = 1, filled(2)
         do idx__1 = 1, filled(1)
-
           if (this%entries(idx__1, idx__2)%note == achar(0)) then
             status = NML_ERR_PARTLY_SET
             if (present(errmsg)) errmsg = "array partly set: entries%note"
@@ -695,7 +636,6 @@ contains
           end if
         end do
       end do
-
     case ("entries%flag")
       if (size(filled) /= 2) then
         status = NML_ERR_INVALID_INDEX
@@ -707,7 +647,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: entries%flag"
         return
       end if
-
       filled(1) = size(this%entries, 1)
       filled(2) = size(this%entries, 2)
     case ("entries")
@@ -721,10 +660,8 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: entries"
         return
       end if
-
       do idx__2 = 1, size(this%entries, 2)
         do idx__1 = 1, size(this%entries, 1)
-
           if ((this%entries(idx__1, idx__2)%left == -huge(this%entries(idx__1, idx__2)%left)) .and. &
               (this%entries(idx__1, idx__2)%right == -huge(this%entries(idx__1, idx__2)%right))) cycle
           if ((this%entries(idx__1, idx__2)%left == -huge(this%entries(idx__1, idx__2)%left)) .or. &
@@ -738,10 +675,8 @@ contains
           if (idx__2 > filled(2)) filled(2) = idx__2
         end do
       end do
-
       do idx__2 = 1, filled(2)
         do idx__1 = 1, filled(1)
-
           if ((this%entries(idx__1, idx__2)%left == -huge(this%entries(idx__1, idx__2)%left)) .and. &
               (this%entries(idx__1, idx__2)%right == -huge(this%entries(idx__1, idx__2)%right))) then
             status = NML_ERR_PARTLY_SET
@@ -750,14 +685,12 @@ contains
           end if
         end do
       end do
-
     case ("known%value")
       if (size(filled) /= 1) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "shape rank mismatch for 'known%value'"
         return
       end if
-
       filled(1) = size(this%known, 1)
     case ("known")
       if (size(filled) /= 1) then
@@ -765,7 +698,6 @@ contains
         if (present(errmsg)) errmsg = "shape rank mismatch for 'known'"
         return
       end if
-
       filled(1) = size(this%known, 1)
     case ("context%value")
       status = NML_ERR_INVALID_INDEX

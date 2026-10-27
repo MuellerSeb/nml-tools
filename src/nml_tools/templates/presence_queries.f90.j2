@@ -8,18 +8,15 @@
     end if
 {%- endmacro %}
 {% macro storage_guard(case) %}
-{% if case.runtime_array %}
       if (.not. allocated(this%{{ case.storage_name }})) then
         status = NML_ERR_NOT_SET
         if (present(errmsg)) errmsg = "array storage unavailable: {{ case.display_name }}"
         return
       end if
-{% endif %}
 {%- endmacro %}
 {% macro open_loops(case, prefix=false) %}
 {% for index in case.indices | reverse %}
-      {{ '  ' * loop.index0 }}do {{ index }} = 1, {% if prefix %}filled({{ loop.revindex }}){% else %}size(this%{{ case.storage_name }}, {{ loop.revindex }}){% endif %}
-
+      {{ '  ' * loop.index0 }}do {{ index }} = 1, {{ 'filled(' ~ loop.revindex ~ ')' if prefix else case.extents[loop.revindex0] }}
 {% endfor %}
 {%- endmacro %}
 {% macro close_loops(case) %}
@@ -37,6 +34,7 @@
 {% for index in presence_indices[:rank] %}
     integer :: {{ index }}
 {% endfor %}
+
 {{ state_guard() }}
     select case (to_lower(trim(name)))
 {% for case in presence_cases %}
@@ -48,13 +46,15 @@
       status = NML_ERR_INVALID_INDEX
       if (present(errmsg)) errmsg = "mask rank mismatch for '{{ case.display_name }}'"
 {% else %}
-{{ storage_guard(case) }}
+{% if case.runtime_array %}
+{{ storage_guard(case).rstrip() }}
+{% endif %}
       allocate(mask( &
         {{ case.extents | join(', &\n        ') }}))
 {% if not case.scan_missing_condition %}
       mask = .true.
 {% else %}
-{{ open_loops(case) }}
+{{ open_loops(case).rstrip() }}
 {% filter indent(2 * (case.rank - 1), true) %}
         if ({{ case.scan_missing_condition | indent(10) }}) then
           mask({{ case.indices | join(', ') }}) = .false.
@@ -70,7 +70,7 @@
           mask({{ case.indices | join(', ') }}) = .true.
         end if
 {% endfilter %}
-{{ close_loops(case) }}
+{{ close_loops(case).rstrip() }}
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -81,7 +81,7 @@
   end function {{ set_mask_procedures[rank] }}
 
 {% endfor %}
-  !> \brief Determine the smallest complete lower-bound-anchored populated prefix
+  !> \brief Determine the smallest complete populated prefix starting at index 1
   integer function {{ filled_shape_procedure }}(this, name, filled, errmsg) result(status)
     class({{ type_name }}), intent(in) :: this !< namelist instance
     character(len=*), intent(in) :: name !< field or derived component path
@@ -105,13 +105,15 @@
         if (present(errmsg)) errmsg = "shape rank mismatch for '{{ case.display_name }}'"
         return
       end if
-{{ storage_guard(case) }}
+{% if case.runtime_array %}
+{{ storage_guard(case).rstrip() }}
+{% endif %}
 {% if not case.scan_missing_condition %}
 {% for index in case.indices %}
       filled({{ loop.index }}) = size(this%{{ case.storage_name }}, {{ loop.index }})
 {% endfor %}
 {% else %}
-{{ open_loops(case) }}
+{{ open_loops(case).rstrip() }}
 {% filter indent(2 * (case.rank - 1), true) %}
         if ({{ case.scan_missing_condition | indent(10) }}) cycle
 {% if case.scan_partial_condition %}
@@ -126,8 +128,8 @@
         if ({{ index }} > filled({{ loop.index }})) filled({{ loop.index }}) = {{ index }}
 {% endfor %}
 {% endfilter %}
-{{ close_loops(case) }}
-{{ open_loops(case, prefix=true) }}
+{{ close_loops(case).rstrip() }}
+{{ open_loops(case, prefix=true).rstrip() }}
 {% filter indent(2 * (case.rank - 1), true) %}
         if ({{ case.scan_missing_condition | indent(10) }}) then
           status = NML_ERR_PARTLY_SET
@@ -135,7 +137,7 @@
           return
         end if
 {% endfilter %}
-{{ close_loops(case) }}
+{{ close_loops(case).rstrip() }}
 {% endif %}
 {% endif %}
 {% endfor %}

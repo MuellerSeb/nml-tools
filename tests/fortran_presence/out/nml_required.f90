@@ -119,9 +119,6 @@ contains
     class(nml_required_t), intent(inout) :: this !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer, dimension(:), intent(in) :: values !< values
-    integer :: &
-      lb__1, &
-      ub__1
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -132,9 +129,7 @@ contains
       if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'values'"
       return
     end if
-    lb__1 = lbound(this%values, 1)
-    ub__1 = lb__1 + size(values, 1) - 1
-    this%values(lb__1:ub__1) = values
+    this%values(1:size(values, 1)) = values
 
     ! mark as configured
     this%is_configured = .true.
@@ -147,6 +142,7 @@ contains
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    intrinsic :: shape
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -158,16 +154,11 @@ contains
     select case (to_lower(trim(name)))
     case ("values")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%values), &
-          ubound(this%values), "values", errmsg)
+        status = idx_check(idx, shape(this%values), "values", errmsg)
         if (status /= NML_OK) return
-        if (this%values(idx(1)) == -huge(this%values(idx(1)))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (this%values(idx(1)) == -huge(this%values(idx(1)))) status = NML_ERR_NOT_SET
       else
-        if (all(this%values == -huge(this%values))) then
-          status = NML_ERR_NOT_SET
-        end if
+        if (all(this%values == -huge(this%values))) status = NML_ERR_NOT_SET
       end if
     case default
       status = NML_ERR_INVALID_NAME
@@ -185,6 +176,7 @@ contains
     logical, allocatable, intent(out) :: mask(:) !< item presence
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: idx__1
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -194,25 +186,22 @@ contains
     end if
     select case (to_lower(trim(name)))
     case ("values")
-
       allocate(mask( &
         size(this%values, 1)))
       do idx__1 = 1, size(this%values, 1)
-
         if (this%values(idx__1) == -huge(this%values(idx__1))) then
           mask(idx__1) = .false.
         else
           mask(idx__1) = .true.
         end if
       end do
-
     case default
       status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
   end function nml_required_set_mask__rank__1
 
-  !> \brief Determine the smallest complete lower-bound-anchored populated prefix
+  !> \brief Determine the smallest complete populated prefix starting at index 1
   integer function nml_required_filled_shape(this, name, filled, errmsg) result(status)
     class(nml_required_t), intent(in) :: this !< namelist instance
     character(len=*), intent(in) :: name !< field or derived component path
@@ -235,22 +224,17 @@ contains
         if (present(errmsg)) errmsg = "shape rank mismatch for 'values'"
         return
       end if
-
       do idx__1 = 1, size(this%values, 1)
-
         if (this%values(idx__1) == -huge(this%values(idx__1))) cycle
         if (idx__1 > filled(1)) filled(1) = idx__1
       end do
-
       do idx__1 = 1, filled(1)
-
         if (this%values(idx__1) == -huge(this%values(idx__1))) then
           status = NML_ERR_PARTLY_SET
           if (present(errmsg)) errmsg = "array partly set: values"
           return
         end if
       end do
-
     case default
       status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)

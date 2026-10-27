@@ -305,9 +305,6 @@ contains
     type(period_t), intent(in) :: period !< Main simulation period
     type(station_t), intent(in) :: station !< Selected station
     type(period_t), dimension(:), intent(in), optional :: periods !< Comparison periods
-    integer :: &
-      lb__1, &
-      ub__1
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -322,9 +319,7 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'periods'"
         return
       end if
-      lb__1 = lbound(this%periods, 1)
-      ub__1 = lb__1 + size(periods, 1) - 1
-      this%periods(lb__1:ub__1) = periods
+      this%periods(1:size(periods, 1)) = periods
     end if
 
     ! mark as configured
@@ -338,6 +333,7 @@ contains
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    intrinsic :: shape
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -359,9 +355,7 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'period%end_year'"
         return
       end if
-      if (this%period%end_year == -huge(this%period%end_year)) then
-        status = NML_ERR_NOT_SET
-      end if
+      if (this%period%end_year == -huge(this%period%end_year)) status = NML_ERR_NOT_SET
     case ("period%label")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
@@ -374,9 +368,7 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'period'"
         return
       end if
-      if ((this%period%end_year == -huge(this%period%end_year))) then
-        status = NML_ERR_NOT_SET
-      end if
+      if ((this%period%end_year == -huge(this%period%end_year))) status = NML_ERR_NOT_SET
     case ("periods%start_year")
       if (.not. allocated(this%periods)) then
         status = NML_ERR_NOT_SET
@@ -384,10 +376,8 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%periods), &
-          ubound(this%periods), "periods%start_year", errmsg)
+        status = idx_check(idx, shape(this%periods), "periods%start_year", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case ("periods%end_year")
       if (.not. allocated(this%periods)) then
@@ -396,10 +386,8 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%periods), &
-          ubound(this%periods), "periods%end_year", errmsg)
+        status = idx_check(idx, shape(this%periods), "periods%end_year", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case ("periods%label")
       if (.not. allocated(this%periods)) then
@@ -408,10 +396,8 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%periods), &
-          ubound(this%periods), "periods%label", errmsg)
+        status = idx_check(idx, shape(this%periods), "periods%label", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case ("periods")
       if (.not. allocated(this%periods)) then
@@ -420,10 +406,8 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%periods), &
-          ubound(this%periods), "periods", errmsg)
+        status = idx_check(idx, shape(this%periods), "periods", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case ("station%code")
       if (present(idx)) then
@@ -431,9 +415,7 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'station%code'"
         return
       end if
-      if (this%station%code == -huge(this%station%code)) then
-        status = NML_ERR_NOT_SET
-      end if
+      if (this%station%code == -huge(this%station%code)) status = NML_ERR_NOT_SET
     case ("station%label")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
@@ -446,9 +428,7 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'station'"
         return
       end if
-      if ((this%station%code == -huge(this%station%code))) then
-        status = NML_ERR_NOT_SET
-      end if
+      if ((this%station%code == -huge(this%station%code))) status = NML_ERR_NOT_SET
     case default
       status = NML_ERR_INVALID_NAME
       if (present(errmsg)) errmsg = "unknown field: " // trim(name)
@@ -465,6 +445,7 @@ contains
     logical, allocatable, intent(out) :: mask(:) !< item presence
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: idx__1
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -491,7 +472,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: periods%start_year"
         return
       end if
-
       allocate(mask( &
         size(this%periods, 1)))
       mask = .true.
@@ -501,7 +481,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: periods%end_year"
         return
       end if
-
       allocate(mask( &
         size(this%periods, 1)))
       mask = .true.
@@ -511,7 +490,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: periods%label"
         return
       end if
-
       allocate(mask( &
         size(this%periods, 1)))
       mask = .true.
@@ -521,7 +499,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: periods"
         return
       end if
-
       allocate(mask( &
         size(this%periods, 1)))
       mask = .true.
@@ -540,7 +517,7 @@ contains
     end select
   end function nml_run_set_mask__rank__1
 
-  !> \brief Determine the smallest complete lower-bound-anchored populated prefix
+  !> \brief Determine the smallest complete populated prefix starting at index 1
   integer function nml_run_filled_shape(this, name, filled, errmsg) result(status)
     class(nml_run_t), intent(in) :: this !< namelist instance
     character(len=*), intent(in) :: name !< field or derived component path
@@ -580,7 +557,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: periods%start_year"
         return
       end if
-
       filled(1) = size(this%periods, 1)
     case ("periods%end_year")
       if (size(filled) /= 1) then
@@ -593,7 +569,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: periods%end_year"
         return
       end if
-
       filled(1) = size(this%periods, 1)
     case ("periods%label")
       if (size(filled) /= 1) then
@@ -606,7 +581,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: periods%label"
         return
       end if
-
       filled(1) = size(this%periods, 1)
     case ("periods")
       if (size(filled) /= 1) then
@@ -619,7 +593,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: periods"
         return
       end if
-
       filled(1) = size(this%periods, 1)
     case ("station%code")
       status = NML_ERR_INVALID_INDEX

@@ -230,13 +230,6 @@ contains
     real(dp), intent(in), optional :: dds_r !< DDS perturbation rate
     logical, intent(in), optional :: mcmc_opti !< MCMC optimization
     real(dp), dimension(:, :, :), intent(in), optional :: mcmc_error_params !< MCMC error parameters per domain
-    integer :: &
-      lb__1, &
-      lb__2, &
-      lb__3, &
-      ub__1, &
-      ub__2, &
-      ub__3
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -255,23 +248,21 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'mcmc_error_params'"
         return
       end if
-      lb__1 = lbound(this%mcmc_error_params, 1)
-      ub__1 = lb__1 + size(mcmc_error_params, 1) - 1
       if (size(mcmc_error_params, 2) > size(this%mcmc_error_params, 2)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'mcmc_error_params'"
         return
       end if
-      lb__2 = lbound(this%mcmc_error_params, 2)
-      ub__2 = lb__2 + size(mcmc_error_params, 2) - 1
       if (size(mcmc_error_params, 3) > size(this%mcmc_error_params, 3)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 3 exceeds bounds for 'mcmc_error_params'"
         return
       end if
-      lb__3 = lbound(this%mcmc_error_params, 3)
-      ub__3 = lb__3 + size(mcmc_error_params, 3) - 1
-      this%mcmc_error_params(lb__1:ub__1, lb__2:ub__2, lb__3:ub__3) = mcmc_error_params
+      this%mcmc_error_params( &
+        1:size(mcmc_error_params, 1), &
+        1:size(mcmc_error_params, 2), &
+        1:size(mcmc_error_params, 3) &
+      ) = mcmc_error_params
     end if
 
     ! mark as configured
@@ -285,6 +276,7 @@ contains
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    intrinsic :: shape
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -300,27 +292,21 @@ contains
         if (present(errmsg)) errmsg = "index not supported for 'name'"
         return
       end if
-      if (this%name == achar(0)) then
-        status = NML_ERR_NOT_SET
-      end if
+      if (this%name == achar(0)) status = NML_ERR_NOT_SET
     case ("niterations")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'niterations'"
         return
       end if
-      if (this%niterations == -huge(this%niterations)) then
-        status = NML_ERR_NOT_SET
-      end if
+      if (this%niterations == -huge(this%niterations)) status = NML_ERR_NOT_SET
     case ("tolerance")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "index not supported for 'tolerance'"
         return
       end if
-      if (ieee_is_nan(this%tolerance)) then
-        status = NML_ERR_NOT_SET
-      end if
+      if (ieee_is_nan(this%tolerance)) status = NML_ERR_NOT_SET
     case ("seed")
       if (present(idx)) then
         status = NML_ERR_INVALID_INDEX
@@ -346,10 +332,8 @@ contains
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%mcmc_error_params), &
-          ubound(this%mcmc_error_params), "mcmc_error_params", errmsg)
+        status = idx_check(idx, shape(this%mcmc_error_params), "mcmc_error_params", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case default
       status = NML_ERR_INVALID_NAME
@@ -369,6 +353,7 @@ contains
     integer :: idx__1
     integer :: idx__2
     integer :: idx__3
+
     status = NML_OK
     if (present(errmsg)) errmsg = ""
     if (.not. this%is_configured) then
@@ -401,7 +386,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: mcmc_error_params"
         return
       end if
-
       allocate(mask( &
         size(this%mcmc_error_params, 1), &
         size(this%mcmc_error_params, 2), &
@@ -413,7 +397,7 @@ contains
     end select
   end function nml_optimization_set_mask__rank__3
 
-  !> \brief Determine the smallest complete lower-bound-anchored populated prefix
+  !> \brief Determine the smallest complete populated prefix starting at index 1
   integer function nml_optimization_filled_shape(this, name, filled, errmsg) result(status)
     class(nml_optimization_t), intent(in) :: this !< namelist instance
     character(len=*), intent(in) :: name !< field or derived component path
@@ -461,7 +445,6 @@ contains
         if (present(errmsg)) errmsg = "array storage unavailable: mcmc_error_params"
         return
       end if
-
       filled(1) = size(this%mcmc_error_params, 1)
       filled(2) = size(this%mcmc_error_params, 2)
       filled(3) = size(this%mcmc_error_params, 3)

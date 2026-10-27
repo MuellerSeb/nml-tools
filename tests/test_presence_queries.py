@@ -182,6 +182,12 @@ program conformance
   if (count(mask) /= {expected}) stop 3
   status = cfg%filled_shape("values", filled)
   if (status /= 0 .or. any(filled /= {expected})) stop 4
+  status = cfg%is_set("values", [1])
+  if (status /= 0) stop 5
+  status = cfg%is_set("values", [3,1])
+  if (status /= 21) stop 6
+  status = cfg%is_set("values", [4])
+  if (status /= 21) stop 7
 end program conformance
 """
     _compile_and_run(tmp_path, schema, program, {constant: 3})
@@ -219,6 +225,30 @@ program conformance
   if (status /= 0 .or. any(filled /= 2)) stop 4
   status = cfg%filled_shape("flags", full)
   if (status /= 0 .or. any(full /= [2,3])) stop 5
+end program conformance
+"""
+    _compile_and_run(tmp_path, schema, program, {})
+
+
+@pytest.mark.parametrize("name,rank", [("mcmc_error_params", 3), ("values_" + "x" * 36, 1)])
+def test_partial_set_sections_compile_with_long_fields(
+    tmp_path: Path, name: str, rank: int
+) -> None:
+    schema = _schema()
+    schema["properties"] = {name: {
+        "type": "array", "x-fortran-shape": [3] * rank, "items": {"type": "number"},
+    }}
+    prefix = ",".join(str(extent) for extent in [2] + [1] * (rank - 1))
+    program = f"""
+program conformance
+  use nml_run, only: nml_run_t
+  implicit none
+  type(nml_run_t) :: cfg
+  integer :: status, filled({rank})
+  status = cfg%set({name}=reshape([1.,2.], [{prefix}]))
+  if (status /= 0) stop 1
+  status = cfg%filled_shape("{name}", filled)
+  if (status /= 0 .or. any(filled /= [{prefix}])) stop 2
 end program conformance
 """
     _compile_and_run(tmp_path, schema, program, {})

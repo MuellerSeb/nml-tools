@@ -1,6 +1,6 @@
 program conformance
   use nml_helper, only: NML_OK, NML_ERR_NOT_SET, NML_ERR_INVALID_NAME, &
-    NML_ERR_INVALID_INDEX, NML_ERR_PARTLY_SET, NML_ERR_REQUIRED
+    NML_ERR_INVALID_INDEX, NML_ERR_PARTLY_SET, NML_ERR_REQUIRED, idx_check
   use nml_presence, only: nml_presence_t
   use nml_records, only: nml_records_t
   use nml_required, only: nml_required_t
@@ -13,11 +13,27 @@ program conformance
   type(nml_records_t) :: records
   type(nml_required_t) :: required
   logical, allocatable :: mask1(:), mask2(:,:), mask3(:,:,:)
+  integer :: zero_based(0:1) = [10,20]
   integer :: status, filled1(1), filled2(2), filled3(3), i, j, k
   character(len=256) :: root, errmsg
 
   call get_command_argument(1, root)
   if (len_trim(root) == 0) error stop "fixture directory argument required"
+
+  errmsg = "previous diagnostic"
+  status = idx_check(idx=[3,4], shp=[3,4], field="matrix", errmsg=errmsg)
+  call expect(status, NML_OK, "shape-based index check")
+  if (len_trim(errmsg) /= 0) error stop "index success did not clear diagnostic"
+  status = idx_check([1], [3,4], "matrix", errmsg)
+  call expect(status, NML_ERR_INVALID_INDEX, "shape-based rank mismatch")
+  if (index(errmsg, "rank mismatch") == 0) error stop "index rank diagnostic"
+  status = idx_check([0,1], [3,4], "matrix", errmsg)
+  call expect(status, NML_ERR_INVALID_INDEX, "shape-based lower bound")
+  if (index(errmsg, "out of bounds") == 0) error stop "index bounds diagnostic"
+  status = idx_check([4,1], [3,4], "matrix")
+  call expect(status, NML_ERR_INVALID_INDEX, "shape-based upper bound")
+  status = idx_check([1,1], [3,0], "matrix", errmsg)
+  call expect(status, NML_ERR_INVALID_INDEX, "shape-based empty extent")
 
   status = cfg%set_mask("counts", mask1, errmsg)
   call expect(status, NML_ERR_NOT_SET, "unconfigured mask")
@@ -48,6 +64,25 @@ program conformance
   status = cfg%filled_shape("flags", filled1, errmsg)
   call expect(status, NML_OK, "logical filled shape")
   if (any(filled1 /= 3)) error stop "logical full extent"
+
+  ! Setter arguments may have other bounds; generated storage stays one-based.
+  status = cfg%set(counts=zero_based, errmsg=errmsg)
+  call expect(status, NML_OK, "zero-based setter argument")
+  if (lbound(cfg%counts, 1) /= 1) error stop "generated storage lower bound"
+  if (any(cfg%counts(1:2) /= zero_based)) error stop "rebased setter values"
+  call check1("counts")
+  if (any(mask1 .neqv. [.true.,.true.,.false.,.false.])) error stop "rebased setter mask"
+  status = cfg%filled_shape("counts", filled1, errmsg)
+  call expect(status, NML_OK, "rebased setter prefix")
+  if (any(filled1 /= 2)) error stop "rebased prefix extent"
+  status = cfg%is_set("counts", [0], errmsg)
+  call expect(status, NML_ERR_INVALID_INDEX, "index below one")
+  status = cfg%is_set("counts", [5], errmsg)
+  call expect(status, NML_ERR_INVALID_INDEX, "index above extent")
+  status = cfg%is_set("counts", [1,1], errmsg)
+  call expect(status, NML_ERR_INVALID_INDEX, "index rank mismatch")
+  status = cfg%set(counts=[1,2,3,4,5], errmsg=errmsg)
+  call expect(status, NML_ERR_INVALID_INDEX, "setter exceeds storage extent")
 
   status = cfg%set(matrix=reshape([1., 2., 3., 4., 5., 6.], [3,2]), &
     counts=[1,2], defaulted=[-huge(0)], errmsg=errmsg)

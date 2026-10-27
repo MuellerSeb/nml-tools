@@ -978,7 +978,7 @@ def test_generate_fortran_runtime_sized_array_with_default_uses_partial_set(tmp_
 
     generated = output.read_text()
     assert "if (size(values, 1) > size(this%values, 1)) then" in generated
-    assert "this%values(lb__1:ub__1) = values" in generated
+    assert "this%values(1:size(values, 1)) = values" in generated
     assert "dimension 1 mismatch for 'values'" not in generated
 
 
@@ -1176,7 +1176,7 @@ def test_generate_fortran_fixed_array_setters_use_assumed_shape(
     generated = output.read_text()
     assert "integer(i4), dimension(:), intent(in), optional :: values" in generated
     assert "if (size(values, 1) > size(this%values, 1)) then" in generated
-    assert "this%values(lb__1:ub__1) = values" in generated
+    assert "this%values(1:size(values, 1)) = values" in generated
     assert "dimension(3), intent(in), optional :: values" not in generated
 
 
