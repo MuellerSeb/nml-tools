@@ -11,6 +11,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from ._utils import (
     FORTRAN_IDENTIFIER,
+    bounded_generated_name,
     normalize_constant_values,
     normalize_runtime_dimensions,
     reject_constant_dimension_overlap,
@@ -42,6 +43,7 @@ _RESERVED_NAMELIST_TYPE_MEMBERS = {
     "is_valid",
     "set",
     "set_dims",
+    "set_mask",
 }
 
 
@@ -90,6 +92,44 @@ class FieldSpec:
     type_category: str
     runtime_sized_array: bool = False
     rank: int = 0
+
+
+@dataclass(frozen=True)
+class PresenceSpec:
+    """Shared indexed and aggregate presence predicates for one public path."""
+
+    name: str
+    display_name: str
+    storage_name: str
+    rank: int
+    runtime_array: bool
+    missing_condition: str | None
+    aggregate_missing_condition: str | None
+    partial_condition: str | None = None
+    aggregate_partial_condition: str | None = None
+
+    @property
+    def indices(self) -> list[str]:
+        return [_generated_name("idx", str(dim)) for dim in range(1, self.rank + 1)]
+
+    @property
+    def extents(self) -> list[str]:
+        return [f"size(this%{self.storage_name}, {dim})" for dim in range(1, self.rank + 1)]
+
+    def _scan_condition(self, condition: str | None) -> str | None:
+        if condition is None:
+            return None
+        for dim, index in enumerate(self.indices, 1):
+            condition = condition.replace(f"idx({dim})", index)
+        return condition
+
+    @property
+    def scan_missing_condition(self) -> str | None:
+        return self._scan_condition(self.missing_condition)
+
+    @property
+    def scan_partial_condition(self) -> str | None:
+        return self._scan_condition(self.partial_condition)
 
 
 @dataclass
@@ -389,11 +429,9 @@ def _build_context(
     set_optional_defaults: list[str] = []
     local_init_assignments: list[str] = []
     set_required_assignments: list[str] = []
-    presence_cases: list[dict[str, Any]] = []
+    presence_cases: list[PresenceSpec] = []
     required_scalar_names: set[str] = set()
     required_array_by_name: dict[str, dict[str, Any]] = {}
-    flex_bound_vars: set[str] = set()
-    flex_arrays: list[dict[str, Any]] = []
     default_parameters: list[str] = []
     enum_parameters: list[str] = []
     enum_functions: list[dict[str, Any]] = []
@@ -403,7 +441,6 @@ def _build_context(
     bounds_checks: list[dict[str, Any]] = []
     derived_type_imports: list[dict[str, str]] = []
     derived_init_type_fields: list[dict[str, Any]] = []
-    derived_presence_blocks: list[str] = []
     static_constants = normalize_constant_values(constants)
     runtime_dimension_values = normalize_runtime_dimensions(dimensions)
     reject_constant_dimension_overlap(static_constants, runtime_dimension_values)
@@ -538,20 +575,6 @@ def _build_context(
             array_default_info: tuple[Any, bool] | None = None
             if type_info.category == "array":
                 array_default_info = _array_default_value(prop)
-
-            flex_dim = _parse_flex_dim(prop, type_info)
-            if flex_dim > 0:
-                if type_info.element_category == "boolean":
-                    raise ValueError("flex arrays cannot use boolean elements")
-                if array_default_info is not None or any(
-                    key in prop
-                    for key in (
-                        "x-fortran-default-order",
-                        "x-fortran-default-repeat",
-                        "x-fortran-default-pad",
-                    )
-                ):
-                    raise ValueError("flex arrays cannot define defaults")
 
             is_runtime_sized = type_info.category == "array" and dynamic_shape
             derived = _derived_schema(prop)
@@ -860,29 +883,16 @@ def _build_context(
                     doc=title,
                 )
                 local_init_assignments.append(f"{name} = this%{name}")
-                derived_partial_bounds: list[dict[str, Any]] = []
                 set_present_assignment: str | None = None
-                if type_info.category == "array":
-                    for array_dim_index in range(1, len(type_info.dimensions) + 1):
-                        lb_var, ub_var = _flex_bound_vars(array_dim_index)
-                        derived_partial_bounds.append(
-                            {"dim": array_dim_index, "lb_var": lb_var, "ub_var": ub_var}
-                        )
-                        flex_bound_vars.add(lb_var)
-                        flex_bound_vars.add(ub_var)
                 if requires_input:
                     if type_info.category == "array":
                         set_required_assignments.append(
-                            _render_partial_set_block(
-                                name, len(type_info.dimensions), derived_partial_bounds
-                            )
+                            _render_partial_set_block(name, len(type_info.dimensions))
                         )
                     else:
                         set_required_assignments.append(f"this%{name} = {name}")
                 elif type_info.category == "array":
-                    block = _render_partial_set_block(
-                        name, len(type_info.dimensions), derived_partial_bounds
-                    )
+                    block = _render_partial_set_block(name, len(type_info.dimensions))
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
                         f"if (present({name})) then\n{indented_block}\nend if"
@@ -923,8 +933,8 @@ def _build_context(
                         "init_lines": init_lines,
                     }
                 )
-                derived_presence_blocks.extend(
-                    _derived_presence_cases(
+                presence_cases.extend(
+                    _derived_presence_specs(
                         name=name,
                         display_name=display_name,
                         leaves=leaf_entries,
@@ -1047,7 +1057,7 @@ def _build_context(
             if requires_input and type_info.category != "array":
                 required_scalar_names.add(name)
 
-            if requires_input and type_info.category == "array" and flex_dim == 0:
+            if requires_input and type_info.category == "array":
                 element_category = type_info.element_category
                 if element_category is None:
                     raise ValueError("array field missing element category")
@@ -1065,72 +1075,6 @@ def _build_context(
                 }
                 uses_partly_set = True
                 if uses_ieee:
-                    requires_ieee = True
-
-            partial_bounds: list[dict[str, Any]] | None = None
-            if type_info.category == "array":
-                rank = len(type_info.dimensions)
-                all_bounds = []
-                for array_dim_index in range(1, rank + 1):
-                    lb_var, ub_var = _flex_bound_vars(array_dim_index)
-                    all_bounds.append(
-                        {"dim": array_dim_index, "lb_var": lb_var, "ub_var": ub_var}
-                    )
-                    flex_bound_vars.add(lb_var)
-                    flex_bound_vars.add(ub_var)
-                partial_bounds = all_bounds
-            if flex_dim > 0:
-                rank = len(type_info.dimensions)
-                element_category = type_info.element_category
-                if element_category is None:
-                    raise ValueError("array field missing element category")
-                flex_dims: list[int] = list(range(rank - flex_dim + 1, rank + 1))
-                slice_missing_conditions: list[str] = []
-                slice_uses_ieee = False
-                flex_dim_bounds: list[dict[str, Any]] = []
-                lb_vars: dict[int, str] = {}
-                ub_vars: dict[int, str] = {}
-                for flex_dim_index in flex_dims:
-                    lb_var, ub_var = _flex_bound_vars(flex_dim_index)
-                    lb_vars[flex_dim_index] = lb_var
-                    ub_vars[flex_dim_index] = ub_var
-                    flex_dim_bounds.append(
-                        {"dim": flex_dim_index, "lb_var": lb_var, "ub_var": ub_var}
-                    )
-                    flex_bound_vars.add(lb_var)
-                    flex_bound_vars.add(ub_var)
-                    slice_ref = _slice_ref(name, rank, flex_dim_index, "idx")
-                    slice_missing_expr, uses_ieee = _element_missing_expression(
-                        element_category,
-                        var_ref=slice_ref,
-                        len_ref=f"this%{name}",
-                    )
-                    slice_missing_conditions.append(
-                        f"all({slice_missing_expr})" if rank > 1 else slice_missing_expr
-                    )
-                    slice_uses_ieee = slice_uses_ieee or uses_ieee
-                prefix_ref = _slice_ref_bounds(name, rank, flex_dims, lb_vars, ub_vars)
-                prefix_missing_expr, uses_ieee_prefix = _element_missing_expression(
-                    element_category,
-                    var_ref=prefix_ref,
-                    len_ref=f"this%{name}",
-                )
-                prefix_any_missing_condition = f"any({prefix_missing_expr})"
-                flex_arrays.append(
-                    {
-                        "name": name,
-                        "display_name": display_name,
-                        "rank": rank,
-                        "flex_dims": flex_dims,
-                        "required": requires_input,
-                        "runtime_array": dynamic_array,
-                        "bounds": flex_dim_bounds,
-                        "slice_missing_conditions": slice_missing_conditions,
-                        "prefix_any_missing_condition": prefix_any_missing_condition,
-                    }
-                )
-                uses_partly_set = True
-                if slice_uses_ieee or uses_ieee_prefix:
                     requires_ieee = True
 
             default_assignment: str | None = None
@@ -1445,11 +1389,7 @@ def _build_context(
                     # Match namelist-buffer semantics: set assigns the provided
                     # leading subsection and leaves completeness checks to is_valid.
                     set_required_assignments.append(
-                        _render_partial_set_block(
-                            name,
-                            len(type_info.dimensions),
-                            partial_bounds or [],
-                        )
+                        _render_partial_set_block(name, len(type_info.dimensions))
                     )
                 else:
                     set_required_assignments.append(f"this%{name} = {name}")
@@ -1458,11 +1398,7 @@ def _build_context(
                 if is_array:
                     # Match namelist-buffer semantics: set assigns the provided
                     # leading subsection and leaves completeness checks to is_valid.
-                    block = _render_partial_set_block(
-                        name,
-                        len(type_info.dimensions),
-                        partial_bounds or [],
-                    )
+                    block = _render_partial_set_block(name, len(type_info.dimensions))
                     indented_block = "\n".join(f"  {line}" for line in block.splitlines())
                     set_present_assignment = (
                         f"if (present({name})) then\n{indented_block}\nend if"
@@ -1487,34 +1423,21 @@ def _build_context(
                 if element_uses_ieee:
                     requires_ieee = True
 
-            if has_default or type_info.category == "boolean":
-                presence_cases.append(
-                    {
-                        "name": name,
-                        "display_name": display_name,
-                        "always_true": True,
-                        "sentinel_condition": None,
-                        "is_array": is_array,
-                        "runtime_array": dynamic_array,
-                        "rank": array_rank,
-                        "element_condition": element_condition,
-                    }
+            always_true = has_default or type_info.category == "boolean"
+            if not always_true and set_sentinel_condition is None:
+                raise ValueError(f"missing sentinel condition for '{display_name}'")
+            missing_condition = element_condition if is_array else set_sentinel_condition
+            presence_cases.append(
+                PresenceSpec(
+                    name=name,
+                    display_name=display_name,
+                    storage_name=name,
+                    rank=array_rank,
+                    runtime_array=dynamic_array,
+                    missing_condition=None if always_true else missing_condition,
+                    aggregate_missing_condition=None if always_true else set_sentinel_condition,
                 )
-            else:
-                if set_sentinel_condition is None:
-                    raise ValueError(f"missing sentinel condition for '{display_name}'")
-                presence_cases.append(
-                    {
-                        "name": name,
-                        "display_name": display_name,
-                        "always_true": False,
-                        "sentinel_condition": set_sentinel_condition,
-                        "is_array": is_array,
-                        "runtime_array": dynamic_array,
-                        "rank": array_rank,
-                        "element_condition": element_condition,
-                    }
-                )
+            )
 
             fields.append(
                 FieldSpec(
@@ -1550,15 +1473,15 @@ def _build_context(
         if f"property '{current_property}'" in msg:
             raise
         raise ValueError(f"property '{current_property}': {msg}") from exc
-    if uses_partly_set and "NML_ERR_PARTLY_SET" not in helper_imports:
+    array_ranks = sorted({case.rank for case in presence_cases if case.rank})
+    if (uses_partly_set or array_ranks) and "NML_ERR_PARTLY_SET" not in helper_imports:
         helper_imports.append("NML_ERR_PARTLY_SET")
-    required_flex_names = {entry["name"] for entry in flex_arrays if entry["required"]}
     required_input_names = [field.name for field in fields if field.requires_input]
     required_scalar_validations: list[str] = []
     for name in required_input_names:
         if name in required_scalar_names:
             required_scalar_validations.append(property_name_map[name])
-        elif name not in required_array_by_name and name not in required_flex_names:
+        elif name not in required_array_by_name:
             required_scalar_validations.append(property_name_map[name])
     required_array_validations = [
         required_array_by_name[name]
@@ -1659,7 +1582,16 @@ def _build_context(
         "local_init_assignments": local_init_assignments,
         "required_scalar_validations": required_scalar_validations,
         "required_array_validations": required_array_validations,
-        "flex_arrays": flex_arrays,
+        "array_ranks": array_ranks,
+        "set_mask_procedures": {
+            rank: bounded_generated_name(f"{module_name}_set_mask__rank__{rank}")
+            for rank in array_ranks
+        },
+        "filled_shape_procedure": bounded_generated_name(f"{module_name}_filled_shape"),
+        "presence_indices": [
+            _generated_name("idx", str(dim))
+            for dim in range(1, max(array_ranks, default=0) + 1)
+        ],
         "assignments": [f"this%{field.name} = {field.name}" for field in fields],
         "argument_list": [
             field.name for field in declared_required_specs + declared_optional_specs
@@ -1685,7 +1617,6 @@ def _build_context(
         "bounds_checks": bounds_checks,
         "derived_type_imports": derived_type_imports,
         "derived_init_type_fields": derived_init_type_fields,
-        "derived_presence_blocks": derived_presence_blocks,
         "kind_module": resolved_kind_module,
         "kind_imports": _resolve_kind_imports(
             kind_ids,
@@ -1696,14 +1627,13 @@ def _build_context(
         "helper_module": helper_module,
         "helper_imports": helper_imports,
         "presence_cases": presence_cases,
-        "flex_bound_vars": _sort_bound_vars(flex_bound_vars),
         "f2py_handle_helpers": f2py_handle_helpers,
     }
 
     return context
 
 
-def _derived_presence_cases(
+def _derived_presence_specs(
     *,
     name: str,
     display_name: str,
@@ -1711,171 +1641,62 @@ def _derived_presence_cases(
     is_array: bool,
     runtime_array: bool,
     rank: int,
-) -> list[str]:
-    blocks: list[str] = []
+) -> list[PresenceSpec]:
     idx_args = ", ".join(f"idx({index})" for index in range(1, rank + 1))
 
-    def append_condition(
-        lines: list[str],
-        *,
-        prefix: str,
-        conditions: list[str],
-        operator: str,
-        suffix: str,
-    ) -> None:
-        if len(conditions) == 1:
-            lines.append(f"{prefix}{conditions[0]}{suffix}")
-            return
-        continuation = " " * (len(prefix) + 2)
-        for index, condition in enumerate(conditions):
-            if index == 0:
-                lines.append(f"{prefix}{condition} {operator} &")
-            elif index == len(conditions) - 1:
-                lines.append(f"{continuation}{condition}{suffix}")
-            else:
-                lines.append(f"{continuation}{condition} {operator} &")
+    def indexed(condition: str | None) -> str | None:
+        if condition is None or not is_array:
+            return condition
+        return condition.replace(f"this%{name}%", f"this%{name}({idx_args})%")
 
-    def array_prefix(lines: list[str]) -> None:
-        if runtime_array:
-            lines.extend(
-                [
-                    f"  if (.not. allocated(this%{name})) then",
-                    "    status = NML_ERR_NOT_SET",
-                    "    return",
-                    "  end if",
-                ]
-            )
+    def combine(conditions: list[str], operator: str) -> str | None:
+        if not conditions:
+            return None
+        return (f" {operator} &\n  ").join(f"({condition})" for condition in conditions)
 
+    specs = []
     for leaf in leaves:
         condition = leaf["missing_condition"]
-        lines = [f'case ("{name}%{leaf["name"]}")']
-        if is_array:
-            array_prefix(lines)
-            lines.extend(
-                [
-                    "  if (present(idx)) then",
-                    f"    status = idx_check(idx, lbound(this%{name}), ubound(this%{name}), &",
-                    f'      "{display_name}", errmsg)',
-                    "    if (status /= NML_OK) return",
-                ]
+        specs.append(
+            PresenceSpec(
+                name=f"{name}%{leaf['name']}",
+                display_name=f"{display_name}%{leaf['display_name']}",
+                storage_name=name,
+                rank=rank,
+                runtime_array=runtime_array,
+                missing_condition=indexed(condition),
+                aggregate_missing_condition=(
+                    f"all({condition})" if is_array and condition is not None else condition
+                ),
             )
-            if condition is not None:
-                indexed = str(condition).replace(
-                    f"this%{name}%{leaf['name']}",
-                    f"this%{name}({idx_args})%{leaf['name']}",
-                )
-                lines.append(f"    if ({indexed}) status = NML_ERR_NOT_SET")
-            if condition is not None:
-                lines.append("  else")
-                lines.append(f"    if (all({condition})) status = NML_ERR_NOT_SET")
-            lines.append("  end if")
-        else:
-            lines.extend(
-                [
-                    "  if (present(idx)) then",
-                    "    status = NML_ERR_INVALID_INDEX",
-                    "    if (present(errmsg)) "
-                    f'errmsg = "index not supported for \'{display_name}\'"',
-                    "    return",
-                    "  end if",
-                ]
-            )
-            if condition is not None:
-                lines.append(f"  if ({condition}) status = NML_ERR_NOT_SET")
-        blocks.append("\n".join(lines))
-
-    required_conditions = [
+        )
+    required = [
         str(leaf["missing_condition"])
         for leaf in leaves
         if leaf["required"] and leaf["missing_condition"] is not None
     ]
-    aggregate_conditions = required_conditions
-    lines = [f'case ("{name}")']
-    if is_array:
-        array_prefix(lines)
-        lines.extend(
-            [
-                "  if (present(idx)) then",
-                f"    status = idx_check(idx, lbound(this%{name}), ubound(this%{name}), &",
-                f'      "{display_name}", errmsg)',
-                "    if (status /= NML_OK) return",
-            ]
+    missing = combine(required, ".and.")
+    partial = combine(required, ".or.")
+    specs.append(
+        PresenceSpec(
+            name=name,
+            display_name=display_name,
+            storage_name=name,
+            rank=rank,
+            runtime_array=runtime_array,
+            missing_condition=indexed(missing),
+            partial_condition=indexed(partial) if len(required) > 1 else None,
+            aggregate_missing_condition=(
+                f"all({missing})" if is_array and missing is not None else missing
+            ),
+            aggregate_partial_condition=(
+                f"any({partial})"
+                if is_array and partial is not None
+                else partial if len(required) > 1 else None
+            ),
         )
-        indexed_conditions = [
-            condition.replace(f"this%{name}%", f"this%{name}({idx_args})%")
-            for condition in aggregate_conditions
-        ]
-        if indexed_conditions:
-            append_condition(
-                lines,
-                prefix="    if (",
-                conditions=indexed_conditions,
-                operator=".and.",
-                suffix=") then",
-            )
-            lines.append("      status = NML_ERR_NOT_SET")
-            if required_conditions and len(indexed_conditions) > 1:
-                append_condition(
-                    lines,
-                    prefix="    else if (",
-                    conditions=indexed_conditions,
-                    operator=".or.",
-                    suffix=") then",
-                )
-                lines.append("      status = NML_ERR_PARTLY_SET")
-            lines.append("    end if")
-        if aggregate_conditions:
-            lines.append("  else")
-            append_condition(
-                lines,
-                prefix="    if (all(",
-                conditions=aggregate_conditions,
-                operator=".and.",
-                suffix=")) then",
-            )
-            lines.append("      status = NML_ERR_NOT_SET")
-            if required_conditions and (len(aggregate_conditions) > 1 or is_array):
-                append_condition(
-                    lines,
-                    prefix="    else if (any(",
-                    conditions=aggregate_conditions,
-                    operator=".or.",
-                    suffix=")) then",
-                )
-                lines.append("      status = NML_ERR_PARTLY_SET")
-            lines.append("    end if")
-        lines.append("  end if")
-    else:
-        lines.extend(
-            [
-                "  if (present(idx)) then",
-                "    status = NML_ERR_INVALID_INDEX",
-                f'    if (present(errmsg)) errmsg = "index not supported for \'{display_name}\'"',
-                "    return",
-                "  end if",
-            ]
-        )
-        if aggregate_conditions:
-            append_condition(
-                lines,
-                prefix="  if (",
-                conditions=aggregate_conditions,
-                operator=".and.",
-                suffix=") then",
-            )
-            lines.append("    status = NML_ERR_NOT_SET")
-            if len(aggregate_conditions) > 1 and required_conditions:
-                append_condition(
-                    lines,
-                    prefix="  else if (",
-                    conditions=aggregate_conditions,
-                    operator=".or.",
-                    suffix=") then",
-                )
-                lines.append("    status = NML_ERR_PARTLY_SET")
-            lines.append("  end if")
-    blocks.append("\n".join(lines))
-    return blocks
+    )
+    return specs
 
 
 def _ordered_unique(values: Iterable[Any]) -> list[Any]:
@@ -2210,29 +2031,6 @@ def _validate_length_token(length_expr: str) -> None:
     raise ValueError("string length must be an integer literal or identifier")
 
 
-def _parse_flex_dim(prop: dict[str, Any], type_info: FieldTypeInfo) -> int:
-    flex_raw = prop.get("x-fortran-flex-tail-dims")
-    if flex_raw is None:
-        flex_value = 0
-    else:
-        if isinstance(flex_raw, bool) or not isinstance(flex_raw, int):
-            raise ValueError("x-fortran-flex-tail-dims must be an integer")
-        flex_value = flex_raw
-    if flex_value < 0:
-        raise ValueError("x-fortran-flex-tail-dims must be >= 0")
-    if flex_value == 0:
-        return 0
-    if type_info.category != "array":
-        raise ValueError("x-fortran-flex-tail-dims is only supported for arrays")
-    if flex_value > len(type_info.dimensions):
-        raise ValueError("x-fortran-flex-tail-dims must not exceed array rank")
-    if any(dim == ":" for dim in type_info.dimensions):
-        raise ValueError(
-            "x-fortran-flex-tail-dims does not support deferred-size dimensions"
-        )
-    return flex_value
-
-
 def _collect_dimension_constants(
     dimensions: list[str],
     constants: dict[str, int] | None,
@@ -2493,45 +2291,10 @@ def _array_missing_conditions(
     return f"all({missing_expr})", f"any({missing_expr})", uses_ieee
 
 
-def _slice_ref(name: str, rank: int, dim: int, index_var: str) -> str:
-    dims = [":" for _ in range(rank)]
-    dims[dim - 1] = index_var
-    return f"this%{name}({', '.join(dims)})"
-
-
-def _flex_bound_vars(dim: int) -> tuple[str, str]:
-    return _generated_name("lb", str(dim)), _generated_name("ub", str(dim))
-
-
-def _slice_ref_bounds(
-    name: str,
-    rank: int,
-    flex_dims: list[int],
-    lb_vars: dict[int, str],
-    ub_vars: dict[int, str],
-) -> str:
-    dims: list[str] = []
-    for dim in range(1, rank + 1):
-        if dim in flex_dims:
-            dims.append(f"{lb_vars[dim]}:{ub_vars[dim]}")
-        else:
-            dims.append(":")
-    return f"this%{name}({', '.join(dims)})"
-
-
-def _render_partial_set_block(
-    name: str,
-    rank: int,
-    bounds: list[dict[str, Any]],
-) -> str:
-    lb_vars = {entry["dim"]: entry["lb_var"] for entry in bounds}
-    ub_vars = {entry["dim"]: entry["ub_var"] for entry in bounds}
-    dims_all = [entry["dim"] for entry in bounds]
+def _render_partial_set_block(name: str, rank: int) -> str:
+    # Generated storage and assumed-shape setter dummies both use lower bound 1.
     lines: list[str] = []
-    for entry in bounds:
-        dim = entry["dim"]
-        lb_var = entry["lb_var"]
-        ub_var = entry["ub_var"]
+    for dim in range(1, rank + 1):
         lines.append(f"if (size({name}, {dim}) > size(this%{name}, {dim})) then")
         lines.append("  status = NML_ERR_INVALID_INDEX")
         lines.append(
@@ -2539,22 +2302,18 @@ def _render_partial_set_block(
         )
         lines.append("  return")
         lines.append("end if")
-        lines.append(f"{lb_var} = lbound(this%{name}, {dim})")
-        lines.append(f"{ub_var} = {lb_var} + size({name}, {dim}) - 1")
-    target_ref = _slice_ref_bounds(name, rank, dims_all, lb_vars, ub_vars)
-    lines.append(f"{target_ref} = {name}")
+    sections = [f"1:size({name}, {dim})" for dim in range(1, rank + 1)]
+    assignment = f"this%{name}({', '.join(sections)}) = {name}"
+    # Optional setter blocks add six spaces of indentation in the template.
+    if len(assignment) + 6 <= 132:
+        lines.append(assignment)
+    else:
+        lines.append(f"this%{name}( &")
+        for index, section in enumerate(sections):
+            suffix = ", &" if index < rank - 1 else " &"
+            lines.append(f"  {section}{suffix}")
+        lines.append(f") = {name}")
     return "\n".join(lines)
-
-
-def _sort_bound_vars(values: set[str]) -> list[str]:
-    def sort_key(name: str) -> tuple[str, int]:
-        prefix, _, suffix = name.partition("__")
-        try:
-            return prefix, int(suffix)
-        except ValueError:
-            return prefix, 0
-
-    return sorted(values, key=sort_key)
 
 
 def _format_reshape_assignment(name: str, arguments: list[str]) -> str:

@@ -17,7 +17,7 @@ All relevant configurations for the optimization parameters.
 | [seed](#seed) | integer | no | no | Random seed |
 | [dds_r](#dds_r) | real | no | no | DDS perturbation rate |
 | [mcmc_opti](#mcmc_opti) | logical | no | no | MCMC optimization |
-| [mcmc_error_params](#mcmc_error_params) | real array | yes | yes | MCMC error parameters per iteration |
+| [mcmc_error_params](#mcmc_error_params) | real array | no | no | MCMC error parameters per iteration |
 | [include_parameters](#include_parameters) | logical array | no | no | Include parameters |
 
 ## Field details
@@ -143,9 +143,8 @@ Parameters for the MCMC error model
 
 Summary:
 - Type: `real(dp), dimension(3, 2, max_iter)`
-- Flexible tail dims: 2
-- Declared required: yes
-- Input required: yes
+- Declared required: no
+- Input required: no
 - Minimum: `>= 0.0`
 - Examples: `[0.01, 0.6, 0.2]`
 

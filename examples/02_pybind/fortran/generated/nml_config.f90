@@ -28,7 +28,8 @@ module nml_config
     to_lower, &
     NML_ERR_INVALID_HANDLE, &
     str_len, &
-    n_weights__default
+    n_weights__default, &
+    NML_ERR_PARTLY_SET
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -68,6 +69,10 @@ module nml_config
     procedure :: from_file => nml_config_from_file
     procedure :: set => nml_config_set
     procedure :: is_set => nml_config_is_set
+    procedure, private :: set_mask__rank__1 => nml_config_set_mask__rank__1
+    generic :: set_mask => &
+      set_mask__rank__1
+    procedure :: filled_shape => nml_config_filled_shape
     procedure :: is_valid => nml_config_is_valid
   end type nml_config_t
 
@@ -266,9 +271,6 @@ contains
     character(len=*), intent(in), optional :: name !< Config name
     logical, intent(in), optional :: enabled !< Enabled
     real(dp), dimension(:), intent(in), optional :: weights !< Weights
-    integer :: &
-      lb__1, &
-      ub__1
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -285,9 +287,7 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'weights'"
         return
       end if
-      lb__1 = lbound(this%weights, 1)
-      ub__1 = lb__1 + size(weights, 1) - 1
-      this%weights(lb__1:ub__1) = weights
+      this%weights(1:size(weights, 1)) = weights
     end if
 
     ! mark as configured
@@ -301,6 +301,7 @@ contains
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    intrinsic :: shape
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -339,13 +340,12 @@ contains
     case ("weights")
       if (.not. allocated(this%weights)) then
         status = NML_ERR_NOT_SET
+        if (present(errmsg)) errmsg = "array storage unavailable: weights"
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%weights), ubound(this%weights), &
-          "weights", errmsg)
+        status = idx_check(idx, shape(this%weights), "weights", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case default
       status = NML_ERR_INVALID_NAME
@@ -355,6 +355,96 @@ contains
       if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function nml_config_is_set
+
+  !> \brief Obtain the item presence mask with one field-name dispatch
+  integer function nml_config_set_mask__rank__1(this, name, mask, errmsg) result(status)
+    class(nml_config_t), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field or derived component path
+    logical, allocatable, intent(out) :: mask(:) !< item presence
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    integer :: idx__1
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
+    select case (to_lower(trim(name)))
+    case ("name")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: name"
+    case ("iterations")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: iterations"
+    case ("tolerance")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: tolerance"
+    case ("enabled")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: enabled"
+    case ("weights")
+      if (.not. allocated(this%weights)) then
+        status = NML_ERR_NOT_SET
+        if (present(errmsg)) errmsg = "array storage unavailable: weights"
+        return
+      end if
+      allocate(mask( &
+        size(this%weights, 1)))
+      mask = .true.
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+    end select
+  end function nml_config_set_mask__rank__1
+
+  !> \brief Determine the smallest complete populated prefix starting at index 1
+  integer function nml_config_filled_shape(this, name, filled, errmsg) result(status)
+    class(nml_config_t), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field or derived component path
+    integer, intent(out) :: filled(:) !< prefix extents, retained when the prefix has holes
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    integer :: idx__1
+
+    filled = 0
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
+    select case (to_lower(trim(name)))
+    case ("name")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: name"
+    case ("iterations")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: iterations"
+    case ("tolerance")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: tolerance"
+    case ("enabled")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: enabled"
+    case ("weights")
+      if (size(filled) /= 1) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "shape rank mismatch for 'weights'"
+        return
+      end if
+      if (.not. allocated(this%weights)) then
+        status = NML_ERR_NOT_SET
+        if (present(errmsg)) errmsg = "array storage unavailable: weights"
+        return
+      end if
+      filled(1) = size(this%weights, 1)
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+    end select
+  end function nml_config_filled_shape
 
   !> \brief Validate required values and constraints
   integer function nml_config_is_valid(this, errmsg) result(status)

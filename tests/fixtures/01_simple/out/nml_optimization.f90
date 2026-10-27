@@ -25,7 +25,8 @@ module nml_optimization
     idx_check, &
     to_lower, &
     buf, &
-    max_iter__default
+    max_iter__default, &
+    NML_ERR_PARTLY_SET
   use ieee_arithmetic, only: ieee_value, ieee_quiet_nan, ieee_is_nan
   ! kind specifiers listed in the nml-tools configuration file
   use iso_fortran_env, only: &
@@ -60,6 +61,10 @@ module nml_optimization
     procedure :: from_file => nml_optimization_from_file
     procedure :: set => nml_optimization_set
     procedure :: is_set => nml_optimization_is_set
+    procedure, private :: set_mask__rank__3 => nml_optimization_set_mask__rank__3
+    generic :: set_mask => &
+      set_mask__rank__3
+    procedure :: filled_shape => nml_optimization_filled_shape
     procedure :: is_valid => nml_optimization_is_valid
   end type nml_optimization_t
 
@@ -225,13 +230,6 @@ contains
     real(dp), intent(in), optional :: dds_r !< DDS perturbation rate
     logical, intent(in), optional :: mcmc_opti !< MCMC optimization
     real(dp), dimension(:, :, :), intent(in), optional :: mcmc_error_params !< MCMC error parameters per domain
-    integer :: &
-      lb__1, &
-      lb__2, &
-      lb__3, &
-      ub__1, &
-      ub__2, &
-      ub__3
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -250,23 +248,21 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'mcmc_error_params'"
         return
       end if
-      lb__1 = lbound(this%mcmc_error_params, 1)
-      ub__1 = lb__1 + size(mcmc_error_params, 1) - 1
       if (size(mcmc_error_params, 2) > size(this%mcmc_error_params, 2)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'mcmc_error_params'"
         return
       end if
-      lb__2 = lbound(this%mcmc_error_params, 2)
-      ub__2 = lb__2 + size(mcmc_error_params, 2) - 1
       if (size(mcmc_error_params, 3) > size(this%mcmc_error_params, 3)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 3 exceeds bounds for 'mcmc_error_params'"
         return
       end if
-      lb__3 = lbound(this%mcmc_error_params, 3)
-      ub__3 = lb__3 + size(mcmc_error_params, 3) - 1
-      this%mcmc_error_params(lb__1:ub__1, lb__2:ub__2, lb__3:ub__3) = mcmc_error_params
+      this%mcmc_error_params( &
+        1:size(mcmc_error_params, 1), &
+        1:size(mcmc_error_params, 2), &
+        1:size(mcmc_error_params, 3) &
+      ) = mcmc_error_params
     end if
 
     ! mark as configured
@@ -280,6 +276,7 @@ contains
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    intrinsic :: shape
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -331,13 +328,12 @@ contains
     case ("mcmc_error_params")
       if (.not. allocated(this%mcmc_error_params)) then
         status = NML_ERR_NOT_SET
+        if (present(errmsg)) errmsg = "array storage unavailable: mcmc_error_params"
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%mcmc_error_params), ubound(this%mcmc_error_params), &
-          "mcmc_error_params", errmsg)
+        status = idx_check(idx, shape(this%mcmc_error_params), "mcmc_error_params", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case default
       status = NML_ERR_INVALID_NAME
@@ -347,6 +343,116 @@ contains
       if (len_trim(errmsg) == 0) errmsg = "field not set: " // trim(name)
     end if
   end function nml_optimization_is_set
+
+  !> \brief Obtain the item presence mask with one field-name dispatch
+  integer function nml_optimization_set_mask__rank__3(this, name, mask, errmsg) result(status)
+    class(nml_optimization_t), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field or derived component path
+    logical, allocatable, intent(out) :: mask(:, :, :) !< item presence
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    integer :: idx__1
+    integer :: idx__2
+    integer :: idx__3
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
+    select case (to_lower(trim(name)))
+    case ("name")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: name"
+    case ("niterations")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: niterations"
+    case ("tolerance")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: tolerance"
+    case ("seed")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: seed"
+    case ("dds_r")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: dds_r"
+    case ("mcmc_opti")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: mcmc_opti"
+    case ("mcmc_error_params")
+      if (.not. allocated(this%mcmc_error_params)) then
+        status = NML_ERR_NOT_SET
+        if (present(errmsg)) errmsg = "array storage unavailable: mcmc_error_params"
+        return
+      end if
+      allocate(mask( &
+        size(this%mcmc_error_params, 1), &
+        size(this%mcmc_error_params, 2), &
+        size(this%mcmc_error_params, 3)))
+      mask = .true.
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+    end select
+  end function nml_optimization_set_mask__rank__3
+
+  !> \brief Determine the smallest complete populated prefix starting at index 1
+  integer function nml_optimization_filled_shape(this, name, filled, errmsg) result(status)
+    class(nml_optimization_t), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field or derived component path
+    integer, intent(out) :: filled(:) !< prefix extents, retained when the prefix has holes
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    integer :: idx__1
+    integer :: idx__2
+    integer :: idx__3
+
+    filled = 0
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
+    select case (to_lower(trim(name)))
+    case ("name")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: name"
+    case ("niterations")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: niterations"
+    case ("tolerance")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: tolerance"
+    case ("seed")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: seed"
+    case ("dds_r")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: dds_r"
+    case ("mcmc_opti")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: mcmc_opti"
+    case ("mcmc_error_params")
+      if (size(filled) /= 3) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "shape rank mismatch for 'mcmc_error_params'"
+        return
+      end if
+      if (.not. allocated(this%mcmc_error_params)) then
+        status = NML_ERR_NOT_SET
+        if (present(errmsg)) errmsg = "array storage unavailable: mcmc_error_params"
+        return
+      end if
+      filled(1) = size(this%mcmc_error_params, 1)
+      filled(2) = size(this%mcmc_error_params, 2)
+      filled(3) = size(this%mcmc_error_params, 3)
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+    end select
+  end function nml_optimization_filled_shape
 
   !> \brief Validate required values and constraints
   integer function nml_optimization_is_valid(this, errmsg) result(status)

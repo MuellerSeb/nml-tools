@@ -1,0 +1,45 @@
+type: object
+x-fortran-namelist: presence
+properties:
+  scalar:
+    type: integer
+    default: 0
+  counts:
+    type: array
+    x-fortran-shape: [MaX]
+    items:
+      type: integer
+  matrix:
+    type: array
+    x-fortran-shape: [3, 4]
+    items:
+      type: number
+      minimum: 0.0
+  cube:
+    type: array
+    x-fortran-shape: [2, 2, 3]
+    items:
+      type: integer
+  labels:
+    type: array
+    x-fortran-shape: [3]
+    items:
+      type: string
+      x-fortran-len: 4
+  defaulted:
+    type: array
+    x-fortran-shape: [ShApE]
+    items:
+      type: integer
+      default: 7
+  flags:
+    type: array
+    x-fortran-shape: [3]
+    items:
+      type: boolean
+      default: false
+  runtime:
+    type: array
+    x-fortran-shape: [n, 2]
+    items:
+      type: number

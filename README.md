@@ -12,7 +12,7 @@ Generate Fortran namelist modules, Markdown docs, and template namelists from a 
 - Core keywords from JSON schema: `type`, `properties`, `required`, `default`,
   `examples`, `title`, `description`, `format`.
 - Fortran extensions: `x-fortran-namelist`, `x-fortran-kind`,
-  `x-fortran-len`, `x-fortran-shape`, `x-fortran-flex-tail-dims`,
+  `x-fortran-len`, `x-fortran-shape`,
   `x-fortran-default-*`, `x-fortran-type`, `x-fortran-module`.
 - Outputs: Fortran module, helper module, Markdown docs, template namelist.
 - Config-driven CLI for batching multiple schemas.
@@ -59,7 +59,7 @@ generated support names such as `seed__default`, `method__enum_values`, and
 
 Schema property names and runtime dimension names must also avoid generated
 namelist type member names: `is_configured`, `init`, `init_type`, `set_dims`,
-`from_file`, `set`, `is_set`, `is_valid`, and `filled_shape`.
+`from_file`, `set`, `is_set`, `is_valid`, `set_mask`, and `filled_shape`.
 
 ### x-fortran-namelist
 
@@ -191,8 +191,7 @@ Fortran layout. In the example above, `period%label` defaults to `main`, while
 `periods%label` keeps the reusable definition default `default`.
 
 Only intrinsic scalar members are supported in the first implementation.
-Nested derived members, array members, derived flexible-tail arrays, and
-array-level lists of derived defaults are rejected. Scalar derived objects may
+Nested derived members, array members, and array-level lists of derived defaults are rejected. Scalar derived objects may
 define a mapping-valued `default`; derived array `items.default` may define the
 same mapping as a broadcast fallback for every element:
 
@@ -258,27 +257,69 @@ order. For imported application-owned types, the schema order must match the
 actual Fortran type declaration order if buffer-style input is used. Component
 notation is preferred because it is explicit and robust to layout changes.
 
-### x-fortran-flex-tail-dims
+### Array presence queries
 
-- Location: array properties.
-- Type: integer.
-- Meaning: number of trailing dimensions that may be shorter than the declared
-  shape (0 disables flexibility).
-- Must be between 0 and the array rank; only trailing dimensions are supported.
-- Defaults and logical arrays are not supported for flexible arrays.
-- The generated type exposes `filled_shape()` to compute the used extent.
+Generated namelist types with arrays expose `set_mask(name, mask, errmsg)` and
+`filled_shape(name, filled, errmsg)` as integer status-returning functions.
+Both use the same configuration state and per-item presence rules as indexed
+`is_set(name, idx=...)`. Names are case-insensitive and derived component paths
+use `%`, for example `entries%start_year`.
 
-Example:
+Generated array storage and returned masks use one-based indexing in every
+dimension. Setter arguments may use other lower bounds; their elements are
+copied into a prefix starting at index 1.
+The generated helper `idx_check(idx, shp, field, errmsg)` checks indices against
+these one-based bounds, with `shp` containing the extent in each dimension.
 
-```yaml
-values:
-  type: array
-  x-fortran-shape: [3, 2, max_iter]
-  x-fortran-flex-tail-dims: 1
-  items:
-    type: number
-    x-fortran-kind: dp
+```fortran
+logical, allocatable :: mask(:,:)
+integer :: status, filled(2)
+character(len=256) :: errmsg
+
+status = cfg%set_mask("values", mask, errmsg=errmsg)
+status = cfg%filled_shape("values", filled, errmsg=errmsg)
 ```
+
+`set_mask` allocates a logical mask to the array's current shape. Its generic
+has one specific binding per distinct array rank in the namelist, selected by
+the rank of `mask`. True means the indexed `is_set` query returns `NML_OK`.
+Defaulted elements (including logical elements, which have no missing sentinel)
+are always present; the mask describes effective presence, not assignment history.
+A derived root uses its required, non-defaulted components to determine presence.
+An incomplete derived element returns `NML_ERR_PARTLY_SET` and leaves the mask
+unallocated; component paths remain independently queryable.
+
+`filled_shape` requires an integer vector of size equal to the array rank. It
+returns the smallest rectangular prefix containing all set elements, anchored
+at index 1 in every dimension. An all-missing array returns zero extents,
+and a fully present array returns its full shape. Holes inside the prefix return
+`NML_ERR_PARTLY_SET` while retaining the computed extents. Incomplete derived
+elements also return `NML_ERR_PARTLY_SET`, but with zero extents.
+
+Unconfigured instances or unavailable storage return `NML_ERR_NOT_SET`.
+Unknown names return `NML_ERR_INVALID_NAME`; scalar paths, wrong mask ranks,
+and wrong `filled` sizes return `NML_ERR_INVALID_INDEX` with targeted messages.
+A mask rank without a generated overload is rejected by the Fortran compiler.
+Failed mask queries leave the output unallocated; other filled-shape errors
+leave zero extents. Call `set` or `from_file` before querying; `init` and
+`set_dims` reset configuration state.
+
+Use runtime dimensions when the exact extent is known. For capacity-sized
+optional arrays, use `set_mask` for sparse data, `filled_shape` to require a
+complete prefix, or indexed `is_set` for individual elements. Ordinary required
+arrays still require complete population during generated `is_valid()` checks.
+Optional arrays do not acquire automatic prefix validation.
+
+#### Breaking migration: removed flex-tail dimensions
+
+`x-fortran-flex-tail-dims` has been removed and is rejected, including a value
+of zero. Delete it from schemas. Existing `filled_shape` calls retain their
+signature, but now inspect every dimension and require a configured instance.
+To retain a variable filled-prefix workflow, make the capacity-sized array
+schema-optional and explicitly check `filled_shape` status, nonempty extents,
+and any dimensions your application requires to be full. Leaving it required
+applies ordinary full-array completeness rules. `examples/01_simple` demonstrates
+this migration. No deprecation stage is provided.
 
 ### x-fortran-default-order
 
@@ -852,7 +893,7 @@ jobs that should ensure checked-in generated files are current.
 ### Validation
 
 Validation is check-only and implements a focused set of schema constraints
-(types, required, enums, bounds, string length, and array shape/flex).
+(types, required, enums, bounds, string length, and array shape).
 Operational defaults are tracked as the prior value for standard null-input
 semantics, but they do not count as explicitly supplied required input.
 Unknown keys or namelist groups not covered by the provided schemas are errors.

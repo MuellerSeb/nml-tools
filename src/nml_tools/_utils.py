@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Mapping
 
 FORTRAN_IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 RESERVED_IDENTIFIER_SEPARATOR = "__"
+
+
+def bounded_generated_name(base_name: str) -> str:
+    """Keep internal identifiers within Fortran's 63-character limit."""
+    if len(base_name) <= 63:
+        return base_name
+    suffix = hashlib.sha1(base_name.encode("ascii")).hexdigest()[:10]
+    return f"{base_name[:52]}_{suffix}"
 
 
 def is_fortran_identifier(name: str) -> bool:

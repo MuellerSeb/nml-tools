@@ -1,0 +1,14 @@
+type: object
+x-fortran-namelist: long_nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn
+properties:
+  values:
+    type: array
+    x-fortran-shape: [MaX]
+    items:
+      type: integer
+  flags:
+    type: array
+    x-fortran-shape: [2, ShApE]
+    items:
+      type: boolean
+      default: false

@@ -76,6 +76,11 @@ module nml_optimization
     procedure :: from_file => nml_optimization_from_file
     procedure :: set => nml_optimization_set
     procedure :: is_set => nml_optimization_is_set
+    procedure, private :: set_mask__rank__1 => nml_optimization_set_mask__rank__1
+    procedure, private :: set_mask__rank__3 => nml_optimization_set_mask__rank__3
+    generic :: set_mask => &
+      set_mask__rank__1, &
+      set_mask__rank__3
     procedure :: filled_shape => nml_optimization_filled_shape
     procedure :: is_valid => nml_optimization_is_valid
   end type nml_optimization_t
@@ -222,7 +227,7 @@ contains
     this%complex_sizes = -huge(this%complex_sizes) ! sentinel for optional integer array
     this%niterations = -huge(this%niterations) ! sentinel for required integer
     this%tolerance = ieee_value(this%tolerance, ieee_quiet_nan) ! sentinel for required real
-    this%mcmc_error_params = ieee_value(this%mcmc_error_params, ieee_quiet_nan) ! sentinel for required real array
+    this%mcmc_error_params = ieee_value(this%mcmc_error_params, ieee_quiet_nan) ! sentinel for optional real array
     ! default values
     this%seed = seed__default
     this%dds_r = dds_r__default
@@ -358,13 +363,13 @@ contains
     method, &
     niterations, &
     tolerance, &
-    mcmc_error_params, &
     name, &
     try_methods, &
     complex_sizes, &
     seed, &
     dds_r, &
     mcmc_opti, &
+    mcmc_error_params, &
     include_parameters, &
     errmsg) result(status)
 
@@ -373,21 +378,14 @@ contains
     character(len=*), intent(in) :: method !< Optimization method
     integer(i4), intent(in) :: niterations !< Number of iterations
     real(dp), intent(in) :: tolerance !< Convergence tolerance
-    real(dp), dimension(:, :, :), intent(in) :: mcmc_error_params !< MCMC error parameters per iteration
     character(len=*), intent(in), optional :: name !< Optimization name
     character(len=*), dimension(:), intent(in), optional :: try_methods !< Try alternative methods
     integer(i4), dimension(:), intent(in), optional :: complex_sizes !< Complex sizes for SCE
     integer(i4), intent(in), optional :: seed !< Random seed
     real(dp), intent(in), optional :: dds_r !< DDS perturbation rate
     logical, intent(in), optional :: mcmc_opti !< MCMC optimization
+    real(dp), dimension(:, :, :), intent(in), optional :: mcmc_error_params !< MCMC error parameters per iteration
     logical, dimension(:), intent(in), optional :: include_parameters !< Include parameters
-    integer :: &
-      lb__1, &
-      lb__2, &
-      lb__3, &
-      ub__1, &
-      ub__2, &
-      ub__3
 
     status = this%init(errmsg=errmsg)
     if (status /= NML_OK) return
@@ -396,28 +394,6 @@ contains
     this%method = method
     this%niterations = niterations
     this%tolerance = tolerance
-    if (size(mcmc_error_params, 1) > size(this%mcmc_error_params, 1)) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'mcmc_error_params'"
-      return
-    end if
-    lb__1 = lbound(this%mcmc_error_params, 1)
-    ub__1 = lb__1 + size(mcmc_error_params, 1) - 1
-    if (size(mcmc_error_params, 2) > size(this%mcmc_error_params, 2)) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'mcmc_error_params'"
-      return
-    end if
-    lb__2 = lbound(this%mcmc_error_params, 2)
-    ub__2 = lb__2 + size(mcmc_error_params, 2) - 1
-    if (size(mcmc_error_params, 3) > size(this%mcmc_error_params, 3)) then
-      status = NML_ERR_INVALID_INDEX
-      if (present(errmsg)) errmsg = "dimension 3 exceeds bounds for 'mcmc_error_params'"
-      return
-    end if
-    lb__3 = lbound(this%mcmc_error_params, 3)
-    ub__3 = lb__3 + size(mcmc_error_params, 3) - 1
-    this%mcmc_error_params(lb__1:ub__1, lb__2:ub__2, lb__3:ub__3) = mcmc_error_params
     ! override with provided values
     if (present(name)) this%name = name
     if (present(try_methods)) then
@@ -426,9 +402,7 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'try_methods'"
         return
       end if
-      lb__1 = lbound(this%try_methods, 1)
-      ub__1 = lb__1 + size(try_methods, 1) - 1
-      this%try_methods(lb__1:ub__1) = try_methods
+      this%try_methods(1:size(try_methods, 1)) = try_methods
     end if
     if (present(complex_sizes)) then
       if (size(complex_sizes, 1) > size(this%complex_sizes, 1)) then
@@ -436,22 +410,40 @@ contains
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'complex_sizes'"
         return
       end if
-      lb__1 = lbound(this%complex_sizes, 1)
-      ub__1 = lb__1 + size(complex_sizes, 1) - 1
-      this%complex_sizes(lb__1:ub__1) = complex_sizes
+      this%complex_sizes(1:size(complex_sizes, 1)) = complex_sizes
     end if
     if (present(seed)) this%seed = seed
     if (present(dds_r)) this%dds_r = dds_r
     if (present(mcmc_opti)) this%mcmc_opti = mcmc_opti
+    if (present(mcmc_error_params)) then
+      if (size(mcmc_error_params, 1) > size(this%mcmc_error_params, 1)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'mcmc_error_params'"
+        return
+      end if
+      if (size(mcmc_error_params, 2) > size(this%mcmc_error_params, 2)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 2 exceeds bounds for 'mcmc_error_params'"
+        return
+      end if
+      if (size(mcmc_error_params, 3) > size(this%mcmc_error_params, 3)) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "dimension 3 exceeds bounds for 'mcmc_error_params'"
+        return
+      end if
+      this%mcmc_error_params( &
+        1:size(mcmc_error_params, 1), &
+        1:size(mcmc_error_params, 2), &
+        1:size(mcmc_error_params, 3) &
+      ) = mcmc_error_params
+    end if
     if (present(include_parameters)) then
       if (size(include_parameters, 1) > size(this%include_parameters, 1)) then
         status = NML_ERR_INVALID_INDEX
         if (present(errmsg)) errmsg = "dimension 1 exceeds bounds for 'include_parameters'"
         return
       end if
-      lb__1 = lbound(this%include_parameters, 1)
-      ub__1 = lb__1 + size(include_parameters, 1) - 1
-      this%include_parameters(lb__1:ub__1) = include_parameters
+      this%include_parameters(1:size(include_parameters, 1)) = include_parameters
     end if
 
     ! mark as configured
@@ -465,6 +457,7 @@ contains
     character(len=*), intent(in) :: name !< field name
     integer, intent(in), optional :: idx(:) !< optional field index values
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    intrinsic :: shape
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -490,8 +483,7 @@ contains
       if (this%method == achar(0)) status = NML_ERR_NOT_SET
     case ("try_methods")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%try_methods), ubound(this%try_methods), &
-          "try_methods", errmsg)
+        status = idx_check(idx, shape(this%try_methods), "try_methods", errmsg)
         if (status /= NML_OK) return
         if (this%try_methods(idx(1)) == achar(0)) status = NML_ERR_NOT_SET
       else
@@ -499,8 +491,7 @@ contains
       end if
     case ("complex_sizes")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%complex_sizes), ubound(this%complex_sizes), &
-          "complex_sizes", errmsg)
+        status = idx_check(idx, shape(this%complex_sizes), "complex_sizes", errmsg)
         if (status /= NML_OK) return
         if (this%complex_sizes(idx(1)) == -huge(this%complex_sizes(idx(1)))) status = NML_ERR_NOT_SET
       else
@@ -541,11 +532,11 @@ contains
     case ("mcmc_error_params")
       if (.not. allocated(this%mcmc_error_params)) then
         status = NML_ERR_NOT_SET
+        if (present(errmsg)) errmsg = "array storage unavailable: mcmc_error_params"
         return
       end if
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%mcmc_error_params), ubound(this%mcmc_error_params), &
-          "mcmc_error_params", errmsg)
+        status = idx_check(idx, shape(this%mcmc_error_params), "mcmc_error_params", errmsg)
         if (status /= NML_OK) return
         if (ieee_is_nan(this%mcmc_error_params(idx(1), idx(2), idx(3)))) status = NML_ERR_NOT_SET
       else
@@ -553,10 +544,8 @@ contains
       end if
     case ("include_parameters")
       if (present(idx)) then
-        status = idx_check(idx, lbound(this%include_parameters), ubound(this%include_parameters), &
-          "include_parameters", errmsg)
+        status = idx_check(idx, shape(this%include_parameters), "include_parameters", errmsg)
         if (status /= NML_OK) return
-      else
       end if
     case default
       status = NML_ERR_INVALID_NAME
@@ -567,25 +556,225 @@ contains
     end if
   end function nml_optimization_is_set
 
-  !> \brief Determine the filled shape along flexible dimensions
-  integer function nml_optimization_filled_shape(this, name, filled, errmsg) result(status)
+  !> \brief Obtain the item presence mask with one field-name dispatch
+  integer function nml_optimization_set_mask__rank__1(this, name, mask, errmsg) result(status)
     class(nml_optimization_t), intent(in) :: this !< namelist instance
-    character(len=*), intent(in) :: name !< field name
-    integer, intent(out) :: filled(:) !< filled shape of the requested field
+    character(len=*), intent(in) :: name !< field or derived component path
+    logical, allocatable, intent(out) :: mask(:) !< item presence
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
-    integer :: idx
-    integer :: dim
-    integer :: &
-      lb__1, &
-      lb__2, &
-      lb__3, &
-      ub__1, &
-      ub__2, &
-      ub__3
+    integer :: idx__1
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
     select case (to_lower(trim(name)))
+    case ("name")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: name"
+    case ("method")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: method"
+    case ("try_methods")
+      allocate(mask( &
+        size(this%try_methods, 1)))
+      do idx__1 = 1, size(this%try_methods, 1)
+        if (this%try_methods(idx__1) == achar(0)) then
+          mask(idx__1) = .false.
+        else
+          mask(idx__1) = .true.
+        end if
+      end do
+    case ("complex_sizes")
+      allocate(mask( &
+        size(this%complex_sizes, 1)))
+      do idx__1 = 1, size(this%complex_sizes, 1)
+        if (this%complex_sizes(idx__1) == -huge(this%complex_sizes(idx__1))) then
+          mask(idx__1) = .false.
+        else
+          mask(idx__1) = .true.
+        end if
+      end do
+    case ("niterations")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: niterations"
+    case ("tolerance")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: tolerance"
+    case ("seed")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: seed"
+    case ("dds_r")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: dds_r"
+    case ("mcmc_opti")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: mcmc_opti"
+    case ("mcmc_error_params")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "mask rank mismatch for 'mcmc_error_params'"
+    case ("include_parameters")
+      allocate(mask( &
+        size(this%include_parameters, 1)))
+      mask = .true.
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+    end select
+  end function nml_optimization_set_mask__rank__1
+
+  !> \brief Obtain the item presence mask with one field-name dispatch
+  integer function nml_optimization_set_mask__rank__3(this, name, mask, errmsg) result(status)
+    class(nml_optimization_t), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field or derived component path
+    logical, allocatable, intent(out) :: mask(:, :, :) !< item presence
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    integer :: idx__1
+    integer :: idx__2
+    integer :: idx__3
+
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
+    select case (to_lower(trim(name)))
+    case ("name")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: name"
+    case ("method")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: method"
+    case ("try_methods")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "mask rank mismatch for 'try_methods'"
+    case ("complex_sizes")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "mask rank mismatch for 'complex_sizes'"
+    case ("niterations")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: niterations"
+    case ("tolerance")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: tolerance"
+    case ("seed")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: seed"
+    case ("dds_r")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: dds_r"
+    case ("mcmc_opti")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: mcmc_opti"
+    case ("mcmc_error_params")
+      if (.not. allocated(this%mcmc_error_params)) then
+        status = NML_ERR_NOT_SET
+        if (present(errmsg)) errmsg = "array storage unavailable: mcmc_error_params"
+        return
+      end if
+      allocate(mask( &
+        size(this%mcmc_error_params, 1), &
+        size(this%mcmc_error_params, 2), &
+        size(this%mcmc_error_params, 3)))
+      do idx__3 = 1, size(this%mcmc_error_params, 3)
+        do idx__2 = 1, size(this%mcmc_error_params, 2)
+          do idx__1 = 1, size(this%mcmc_error_params, 1)
+            if (ieee_is_nan(this%mcmc_error_params(idx__1, idx__2, idx__3))) then
+              mask(idx__1, idx__2, idx__3) = .false.
+            else
+              mask(idx__1, idx__2, idx__3) = .true.
+            end if
+          end do
+        end do
+      end do
+    case ("include_parameters")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "mask rank mismatch for 'include_parameters'"
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+    end select
+  end function nml_optimization_set_mask__rank__3
+
+  !> \brief Determine the smallest complete populated prefix starting at index 1
+  integer function nml_optimization_filled_shape(this, name, filled, errmsg) result(status)
+    class(nml_optimization_t), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field or derived component path
+    integer, intent(out) :: filled(:) !< prefix extents, retained when the prefix has holes
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+    integer :: idx__1
+    integer :: idx__2
+    integer :: idx__3
+
+    filled = 0
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
+    select case (to_lower(trim(name)))
+    case ("name")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: name"
+    case ("method")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: method"
+    case ("try_methods")
+      if (size(filled) /= 1) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "shape rank mismatch for 'try_methods'"
+        return
+      end if
+      do idx__1 = 1, size(this%try_methods, 1)
+        if (this%try_methods(idx__1) == achar(0)) cycle
+        if (idx__1 > filled(1)) filled(1) = idx__1
+      end do
+      do idx__1 = 1, filled(1)
+        if (this%try_methods(idx__1) == achar(0)) then
+          status = NML_ERR_PARTLY_SET
+          if (present(errmsg)) errmsg = "array partly set: try_methods"
+          return
+        end if
+      end do
+    case ("complex_sizes")
+      if (size(filled) /= 1) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "shape rank mismatch for 'complex_sizes'"
+        return
+      end if
+      do idx__1 = 1, size(this%complex_sizes, 1)
+        if (this%complex_sizes(idx__1) == -huge(this%complex_sizes(idx__1))) cycle
+        if (idx__1 > filled(1)) filled(1) = idx__1
+      end do
+      do idx__1 = 1, filled(1)
+        if (this%complex_sizes(idx__1) == -huge(this%complex_sizes(idx__1))) then
+          status = NML_ERR_PARTLY_SET
+          if (present(errmsg)) errmsg = "array partly set: complex_sizes"
+          return
+        end if
+      end do
+    case ("niterations")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: niterations"
+    case ("tolerance")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: tolerance"
+    case ("seed")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: seed"
+    case ("dds_r")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: dds_r"
+    case ("mcmc_opti")
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: mcmc_opti"
     case ("mcmc_error_params")
       if (size(filled) /= 3) then
         status = NML_ERR_INVALID_INDEX
@@ -593,42 +782,41 @@ contains
         return
       end if
       if (.not. allocated(this%mcmc_error_params)) then
-        filled = 0
+        status = NML_ERR_NOT_SET
+        if (present(errmsg)) errmsg = "array storage unavailable: mcmc_error_params"
         return
       end if
-      do dim = 1, 3
-        filled(dim) = size(this%mcmc_error_params, dim)
+      do idx__3 = 1, size(this%mcmc_error_params, 3)
+        do idx__2 = 1, size(this%mcmc_error_params, 2)
+          do idx__1 = 1, size(this%mcmc_error_params, 1)
+            if (ieee_is_nan(this%mcmc_error_params(idx__1, idx__2, idx__3))) cycle
+            if (idx__1 > filled(1)) filled(1) = idx__1
+            if (idx__2 > filled(2)) filled(2) = idx__2
+            if (idx__3 > filled(3)) filled(3) = idx__3
+          end do
+        end do
       end do
-      filled(2) = 0
-      do idx = ubound(this%mcmc_error_params, 2), &
-        lbound(this%mcmc_error_params, 2), -1
-        if (.not. (all(ieee_is_nan(this%mcmc_error_params(:, idx, :))))) then
-          filled(2) = idx - lbound(this%mcmc_error_params, 2) + 1
-          exit
-        end if
+      do idx__3 = 1, filled(3)
+        do idx__2 = 1, filled(2)
+          do idx__1 = 1, filled(1)
+            if (ieee_is_nan(this%mcmc_error_params(idx__1, idx__2, idx__3))) then
+              status = NML_ERR_PARTLY_SET
+              if (present(errmsg)) errmsg = "array partly set: mcmc_error_params"
+              return
+            end if
+          end do
+        end do
       end do
-      filled(3) = 0
-      do idx = ubound(this%mcmc_error_params, 3), &
-        lbound(this%mcmc_error_params, 3), -1
-        if (.not. (all(ieee_is_nan(this%mcmc_error_params(:, :, idx))))) then
-          filled(3) = idx - lbound(this%mcmc_error_params, 3) + 1
-          exit
-        end if
-      end do
-      if (minval(filled) > 0) then
-        lb__2 = lbound(this%mcmc_error_params, 2)
-        ub__2 = lb__2 + filled(2) - 1
-        lb__3 = lbound(this%mcmc_error_params, 3)
-        ub__3 = lb__3 + filled(3) - 1
-        if (any(ieee_is_nan(this%mcmc_error_params(:, lb__2:ub__2, lb__3:ub__3)))) then
-          status = NML_ERR_PARTLY_SET
-          if (present(errmsg)) errmsg = "array partly set: mcmc_error_params"
-          return
-        end if
+    case ("include_parameters")
+      if (size(filled) /= 1) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "shape rank mismatch for 'include_parameters'"
+        return
       end if
+      filled(1) = size(this%include_parameters, 1)
     case default
       status = NML_ERR_INVALID_NAME
-      if (present(errmsg)) errmsg = "field is not a flexible array: " // trim(name)
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
     end select
   end function nml_optimization_filled_shape
 
@@ -637,7 +825,6 @@ contains
     class(nml_optimization_t), intent(in) :: this !< namelist instance
     character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
     integer :: istat
-    integer, allocatable :: filled(:)
 
     status = NML_OK
     if (present(errmsg)) errmsg = ""
@@ -691,26 +878,6 @@ contains
     end if
     if (istat /= NML_OK) then
       status = istat
-      return
-    end if
-    ! flexible arrays
-    if (allocated(filled)) deallocate(filled)
-    allocate(filled(3))
-    istat = this%filled_shape("mcmc_error_params", filled, errmsg=errmsg)
-    if (istat == NML_ERR_PARTLY_SET) then
-      status = istat
-      if (present(errmsg)) then
-        if (len_trim(errmsg) == 0) errmsg = "array partly set: mcmc_error_params"
-      end if
-      return
-    end if
-    if (istat /= NML_OK) then
-      status = istat
-      return
-    end if
-    if (minval(filled) == 0) then
-      status = NML_ERR_REQUIRED
-      if (present(errmsg)) errmsg = "required field not set: mcmc_error_params"
       return
     end if
     ! enum constraints

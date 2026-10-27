@@ -1,0 +1,14 @@
+&presence
+  counts(2) = 4
+  counts(4) = 8
+  matrix(3,2) = 6.0
+  cube(:,1,1) = 1, 2
+  cube(:,1,2) = 3, 4
+  labels(2) = 'set'
+  runtime(:,1) = 1.0, 2.0, 3.0
+/
+&records
+  entries(1,1)%left = 1
+  entries(1,1)%right = 2
+  entries(2,1)%left = 3
+/

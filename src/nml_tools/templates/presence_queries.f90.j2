@@ -1,0 +1,148 @@
+{% macro state_guard() %}
+    status = NML_OK
+    if (present(errmsg)) errmsg = ""
+    if (.not. this%is_configured) then
+      status = NML_ERR_NOT_SET
+      if (present(errmsg)) errmsg = "namelist not configured; call set or from_file"
+      return
+    end if
+{%- endmacro %}
+{% macro storage_guard(case) %}
+      if (.not. allocated(this%{{ case.storage_name }})) then
+        status = NML_ERR_NOT_SET
+        if (present(errmsg)) errmsg = "array storage unavailable: {{ case.display_name }}"
+        return
+      end if
+{%- endmacro %}
+{% macro open_loops(case, prefix=false) %}
+{% for index in case.indices | reverse %}
+      {{ '  ' * loop.index0 }}do {{ index }} = 1, {{ 'filled(' ~ loop.revindex ~ ')' if prefix else case.extents[loop.revindex0] }}
+{% endfor %}
+{%- endmacro %}
+{% macro close_loops(case) %}
+{% for index in case.indices %}
+      {{ '  ' * loop.revindex0 }}end do
+{% endfor %}
+{%- endmacro %}
+{% for rank in array_ranks %}
+  !> \brief Obtain the item presence mask with one field-name dispatch
+  integer function {{ set_mask_procedures[rank] }}(this, name, mask, errmsg) result(status)
+    class({{ type_name }}), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field or derived component path
+    logical, allocatable, intent(out) :: mask({{ ([':'] * rank) | join(', ') }}) !< item presence
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+{% for index in presence_indices[:rank] %}
+    integer :: {{ index }}
+{% endfor %}
+
+{{ state_guard() }}
+    select case (to_lower(trim(name)))
+{% for case in presence_cases %}
+    case ("{{ case.name }}")
+{% if not case.rank %}
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: {{ case.display_name }}"
+{% elif case.rank != rank %}
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "mask rank mismatch for '{{ case.display_name }}'"
+{% else %}
+{% if case.runtime_array %}
+{{ storage_guard(case).rstrip() }}
+{% endif %}
+      allocate(mask( &
+        {{ case.extents | join(', &\n        ') }}))
+{% if not case.scan_missing_condition %}
+      mask = .true.
+{% else %}
+{{ open_loops(case).rstrip() }}
+{% filter indent(2 * (case.rank - 1), true) %}
+        if ({{ case.scan_missing_condition | indent(10) }}) then
+          mask({{ case.indices | join(', ') }}) = .false.
+        else
+{% if case.scan_partial_condition %}
+          if ({{ case.scan_partial_condition | indent(12) }}) then
+            status = NML_ERR_PARTLY_SET
+            if (present(errmsg)) errmsg = "derived array element partly set: {{ case.display_name }}"
+            deallocate(mask)
+            return
+          end if
+{% endif %}
+          mask({{ case.indices | join(', ') }}) = .true.
+        end if
+{% endfilter %}
+{{ close_loops(case).rstrip() }}
+{% endif %}
+{% endif %}
+{% endfor %}
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+    end select
+  end function {{ set_mask_procedures[rank] }}
+
+{% endfor %}
+  !> \brief Determine the smallest complete populated prefix starting at index 1
+  integer function {{ filled_shape_procedure }}(this, name, filled, errmsg) result(status)
+    class({{ type_name }}), intent(in) :: this !< namelist instance
+    character(len=*), intent(in) :: name !< field or derived component path
+    integer, intent(out) :: filled(:) !< prefix extents, retained when the prefix has holes
+    character(len=*), intent(out), optional :: errmsg !< error message for non-OK status values
+{% for index in presence_indices %}
+    integer :: {{ index }}
+{% endfor %}
+
+    filled = 0
+{{ state_guard() }}
+    select case (to_lower(trim(name)))
+{% for case in presence_cases %}
+    case ("{{ case.name }}")
+{% if not case.rank %}
+      status = NML_ERR_INVALID_INDEX
+      if (present(errmsg)) errmsg = "array query not supported for scalar: {{ case.display_name }}"
+{% else %}
+      if (size(filled) /= {{ case.rank }}) then
+        status = NML_ERR_INVALID_INDEX
+        if (present(errmsg)) errmsg = "shape rank mismatch for '{{ case.display_name }}'"
+        return
+      end if
+{% if case.runtime_array %}
+{{ storage_guard(case).rstrip() }}
+{% endif %}
+{% if not case.scan_missing_condition %}
+{% for index in case.indices %}
+      filled({{ loop.index }}) = size(this%{{ case.storage_name }}, {{ loop.index }})
+{% endfor %}
+{% else %}
+{{ open_loops(case).rstrip() }}
+{% filter indent(2 * (case.rank - 1), true) %}
+        if ({{ case.scan_missing_condition | indent(10) }}) cycle
+{% if case.scan_partial_condition %}
+        if ({{ case.scan_partial_condition | indent(12) }}) then
+          status = NML_ERR_PARTLY_SET
+          if (present(errmsg)) errmsg = "derived array element partly set: {{ case.display_name }}"
+          filled = 0
+          return
+        end if
+{% endif %}
+{% for index in case.indices %}
+        if ({{ index }} > filled({{ loop.index }})) filled({{ loop.index }}) = {{ index }}
+{% endfor %}
+{% endfilter %}
+{{ close_loops(case).rstrip() }}
+{{ open_loops(case, prefix=true).rstrip() }}
+{% filter indent(2 * (case.rank - 1), true) %}
+        if ({{ case.scan_missing_condition | indent(10) }}) then
+          status = NML_ERR_PARTLY_SET
+          if (present(errmsg)) errmsg = "array partly set: {{ case.display_name }}"
+          return
+        end if
+{% endfilter %}
+{{ close_loops(case).rstrip() }}
+{% endif %}
+{% endif %}
+{% endfor %}
+    case default
+      status = NML_ERR_INVALID_NAME
+      if (present(errmsg)) errmsg = "unknown field: " // trim(name)
+    end select
+  end function {{ filled_shape_procedure }}

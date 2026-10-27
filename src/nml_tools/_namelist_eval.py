@@ -29,7 +29,6 @@ from ._utils import (
 )
 from .validate import (
     _normalize_properties,
-    _parse_flex_tail_dims,
     _parse_required,
     _parse_shape,
     _scalar_constraints,
@@ -91,7 +90,6 @@ class _Property:
     schema: Mapping[str, Any]
     value_schema: Mapping[str, Any]
     shape: tuple[int | None, ...]
-    flex_tail_dims: int
     components: Mapping[str, tuple[str, Mapping[str, Any]]]
     required_components: frozenset[str]
     component_defaults: Mapping[str, Any]
@@ -252,14 +250,12 @@ def _compile_schema(
         prop: Mapping[str, Any] = raw
         value_schema = prop
         shape: tuple[int | None, ...] = ()
-        flex = 0
         if prop.get("type") == "array":
             items = prop.get("items")
             if not isinstance(items, Mapping):
                 raise ValueError(f"array property '{property_name}' must define 'items'")
             value_schema = items
             parsed_shape = _parse_shape(prop.get("x-fortran-shape"), shape_values, property_name)
-            flex = _parse_flex_tail_dims(prop, len(parsed_shape), property_name, parsed_shape)
             shape = tuple(parsed_shape)
         components: dict[str, tuple[str, Mapping[str, Any]]] = {}
         required_components: frozenset[str] = frozenset()
@@ -297,7 +293,6 @@ def _compile_schema(
             prop,
             value_schema,
             shape,
-            flex,
             components,
             required_components,
             component_defaults,

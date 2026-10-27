@@ -77,7 +77,6 @@ properties:
       x-fortran-kind: dp
       minimum: 0.0
     x-fortran-shape: [3, 2, max_iter]
-    x-fortran-flex-tail-dims: 2
     examples: [[0.01, 0.6, 0.2]]
   include_parameters:
     title: Include parameters
@@ -92,4 +91,3 @@ required:
   - method
   - niterations
   - tolerance
-  - mcmc_error_params
