@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import keyword
 import re
 from dataclasses import dataclass
@@ -11,6 +10,9 @@ from typing import Any, Iterable, cast
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from ._utils import (
+    bounded_generated_name as _bounded_generated_name,
+)
 from ._utils import (
     normalize_constant_values,
     normalize_runtime_dimensions,
@@ -788,13 +790,6 @@ def _unique_generated_name(base_name: str, taken_names: set[str]) -> str:
         if candidate.lower() not in taken_names:
             return candidate
         index += 1
-
-
-def _bounded_generated_name(base_name: str) -> str:
-    if len(base_name) <= 63:
-        return base_name
-    suffix = hashlib.sha1(base_name.encode("ascii")).hexdigest()[:10]
-    return f"{base_name[:52]}_{suffix}"
 
 
 def _maybe_bridge_name(name: str) -> str:
