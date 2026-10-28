@@ -2,44 +2,27 @@
 <ui version="4.0">
  <class>ProfileTab</class>
  <widget class="QWidget" name="ProfileTab">
-  <property name="autoFillBackground">
-   <bool>true</bool>
-  </property>
   <property name="geometry">
    <rect>
     <x>0</x>
     <y>0</y>
     <width>536</width>
-    <height>108</height>
+    <height>110</height>
    </rect>
+  </property>
+  <property name="autoFillBackground">
+   <bool>true</bool>
   </property>
   <layout class="QVBoxLayout" name="rootLayout">
    <item>
     <widget class="QLabel" name="descriptionLabel">
      <property name="text">
-      <string>File profile description</string>
+      <string>Namelist description</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>
      </property>
     </widget>
-   </item>
-   <item>
-    <layout class="QHBoxLayout" name="horizontalLayout" stretch="1,2">
-     <property name="topMargin">
-      <number>0</number>
-     </property>
-     <item>
-      <widget class="QLabel" name="label">
-       <property name="text">
-        <string>Selected Namelist:</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QComboBox" name="namelistComboBox"/>
-     </item>
-    </layout>
    </item>
    <item>
     <widget class="QStackedWidget" name="namelistStack"/>

@@ -23,7 +23,8 @@ overwrite the other project's settings.
 ## Install the GUI
 
 `nml-tools` requires Python 3.8 or newer. Install the GUI extra and one Qt
-binding. From the root of a source checkout:
+binding. PyQt5 is the tested binding on Python 3.8. From the root of a source
+checkout:
 
 ```bash
 python -m pip install -e '.[gui]' PyQt5
@@ -35,8 +36,9 @@ For an installed release:
 python -m pip install 'nml-tools[gui]' PyQt5
 ```
 
-`PyQt6`, `PySide2`, or `PySide6` may be used instead of `PyQt5`. Prefer one Qt
-binding per environment. The GUI extra installs QtPy, guidata, and NumPy.
+On newer Python versions, `PyQt6`, `PySide2`, or `PySide6` may be used instead
+of `PyQt5`. Prefer one Qt binding per environment. The GUI extra installs QtPy
+and Python-compatible guidata and NumPy versions.
 
 ## Example layout
 

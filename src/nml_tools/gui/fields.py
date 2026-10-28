@@ -9,7 +9,7 @@ import os
 from collections.abc import Mapping
 from itertools import product
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, List, cast
 
 from qtpy.QtCore import QDateTime, QEvent, Qt
 from qtpy.QtGui import QKeySequence, QPalette
@@ -1013,7 +1013,7 @@ class ArrayField(QWidget):
                 data = np.transpose(data, np.argsort(axes))
         edited = _structured_to_objects(data)
         defaults = suggestion(self.items, self.sizes)
-        return cast(list[Any], _preserve_omissions(edited, self._value, defaults, changed))
+        return cast(List[Any], _preserve_omissions(edited, self._value, defaults, changed))
 
     def _display_labels(
         self, displayed_shape: tuple[int, ...], rank: int
@@ -1782,7 +1782,7 @@ def _structured_to_objects(data: Any) -> list[Any]:
             return {name: _numpy_scalar(record[name]) for name in names}
         return [build(axis + 1, (*prefix, index)) for index in range(data.shape[axis])]
 
-    return cast(list[Any], build(0, ()))
+    return cast(List[Any], build(0, ()))
 
 
 def _numpy_scalar(value: Any) -> Any:

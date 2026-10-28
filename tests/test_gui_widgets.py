@@ -1,6 +1,7 @@
 """Offscreen checks of direct namelist editing and singleton fields."""
 
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -20,11 +21,23 @@ pytest.importorskip("qtpy")
 try:
     from qtpy.QtCore import Qt
     from qtpy.QtTest import QTest
-    from qtpy.QtWidgets import QApplication, QMessageBox
+    from qtpy.QtWidgets import (
+        QAbstractScrollArea,
+        QApplication,
+        QHeaderView,
+        QInputDialog,
+        QMessageBox,
+        QSizePolicy,
+    )
 except ImportError:
     pytest.skip("Qt binding unavailable", allow_module_level=True)
 
-from nml_tools.gui.app import ConfigurationDialog, ProfileConfigTab, ProfileTab
+from nml_tools.gui.app import (
+    ConfigurationDialog,
+    FileProfileOverview,
+    ProfileConfigTab,
+    ProfileTab,
+)
 from nml_tools.gui.fields import (
     ArrayField,
     FieldRow,
@@ -77,17 +90,13 @@ def project(tmp_path):
 
 
 def _add_project(dialog, key="default"):
-    index = next(
-        (
-            index
-            for index in range(dialog.sourceComboBox_loadProject.count())
-            if dialog.sourceComboBox_loadProject.itemData(index) == ("configured", key)
-        ),
-        -1,
+    profile = dialog.available_projects[key]
+    profile = replace(
+        profile,
+        output_dir=dialog._available_root(profile),
     )
-    assert index >= 0
-    dialog.sourceComboBox_loadProject.setCurrentIndex(index)
-    dialog._add_selected_project()
+    dialog._register_project(profile)
+    dialog.treeWidget_projectStructure.setCurrentItem(dialog.project_items[key])
     return dialog
 
 
@@ -381,8 +390,8 @@ def test_dialog_load_overlay_save_reload_and_dimension_changes(application, proj
     dialog._save_all()
     reloaded = _add_project(ConfigurationDialog(project))
     assert reloaded.editors[path].values()["run"]["periods"] == [{"year": 2025}]
-    dialog.tabs.setCurrentWidget(dialog.plus_tab)
-    builder = dialog.tabs.currentWidget()
+    dialog.treeWidget_projectStructure.setCurrentItem(dialog.project_items["default"])
+    builder = dialog.config_tab
     assert isinstance(builder, ProfileConfigTab)
     builder.profile_name.setText("extra")
     builder.default_filename.setText("extra.nml")
@@ -428,28 +437,22 @@ def test_example_dimension_source_resize_and_config_tab(application, tmp_path, m
     assert dialog.config_tab.dimension_boxes["n_bodies"].value() == 3
     assert dialog.config_tab.autoFillBackground()
     assert all(editor.autoFillBackground() for editor in dialog.editors.values())
-    detached = []
-    detach = dialog._detach_tab
-    monkeypatch.setattr(
-        dialog, "_detach_tab", lambda widget: detached.append(widget) or detach(widget)
-    )
     root_item = dialog.project_items["simulation"]
     dialog.treeWidget_projectStructure.setCurrentItem(root_item.child(1))
+    assert isinstance(dialog.tabs.currentWidget(), FileProfileOverview)
     dialog.treeWidget_projectStructure.setCurrentItem(root_item.child(0))
-    assert not detached
+    assert isinstance(dialog.tabs.currentWidget(), FileProfileOverview)
     dialog.show()
-    for index in (1, 2, 0, 2, 1, 0):
-        dialog.tabs.setCurrentIndex(index)
-        application.processEvents()
-        current = dialog.tabs.currentWidget()
-        visible = [editor for editor in dialog.editors.values() if editor.isVisibleTo(dialog)]
-        assert visible == ([current] if isinstance(current, ProfileTab) else [])
+    dialog.treeWidget_projectStructure.setCurrentItem(root_item.child(0).child(0))
+    application.processEvents()
+    assert isinstance(dialog.tabs.currentWidget(), ProfileTab)
+    assert dialog.tabs.count() == 1
     old_editors = tuple(dialog.editors.values())
 
+    dialog.treeWidget_projectStructure.setCurrentItem(root_item)
     dialog.config_tab.dimension_boxes["n_bodies"].setValue(2)
     dialog.config_tab.run.click()
     assert all(dialog.tabs.indexOf(editor) < 0 and editor.isHidden() for editor in old_editors)
-    dialog.tabs.setCurrentWidget(dialog.config_tab)
     application.processEvents()
     assert dialog.config_tab.isVisibleTo(dialog)
     assert not any(editor.isVisibleTo(dialog) for editor in dialog.editors.values())
@@ -474,7 +477,10 @@ def test_invalid_existing_input_is_reported_and_never_replaced(application, proj
     path.write_text(invalid)
     dialog = ConfigurationDialog(project)
     assert not errors and not dialog.editors
-    _add_project(dialog)
+    monkeypatch.setattr(
+        QInputDialog, "getItem", lambda *args: ("Default [default] (configured)", True)
+    )
+    dialog._add_selected_project()
     assert errors and not dialog.editors
     dialog._save_all()
     assert path.read_text() == invalid
@@ -482,8 +488,6 @@ def test_invalid_existing_input_is_reported_and_never_replaced(application, proj
 
 
 def test_save_notifications_and_active_project_scope(application, project, monkeypatch):
-    from dataclasses import replace
-
     from nml_tools.gui import app
 
     main = project.profiles[0]
@@ -584,8 +588,7 @@ def test_profile_sources_exclude_namelists_and_include_project_toml(application,
         'file_profiles = ["copy"]\n'
     )
     dialog = _add_project(ConfigurationDialog(project))
-    dialog.tabs.setCurrentWidget(dialog.plus_tab)
-    config = dialog.tabs.currentWidget()
+    config = dialog.config_tab
     assert config.source_combo.findData(str(path)) < 0
     assert any(
         config.source_combo.itemData(index) == ("profile", "copy")
@@ -614,11 +617,36 @@ def test_browsed_project_source_loads(application, project, monkeypatch):
         'file_profiles = ["copy"]\n'
     )
     monkeypatch.setattr(app.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
+    monkeypatch.setattr(app.QInputDialog, "getItem", lambda *args: ("Browse…", True))
     dialog = ConfigurationDialog(project)
-    dialog._browse_project()
-    assert dialog.sourceComboBox_loadProject.currentData() == ("path", str(path.resolve()))
     dialog._add_selected_project()
     assert "external" in dialog.loaded_projects
+    dialog.close()
+
+
+def test_schema_config_uses_full_file_path(application, project, monkeypatch, tmp_path):
+    from nml_tools.gui import app
+
+    original = project.root / "nml-config.toml"
+    original.write_text("")
+    selected = tmp_path / "other" / "nml-config.toml"
+    selected.parent.mkdir()
+    selected.write_text("")
+    replacement = replace(project, root=selected.parent)
+    calls = []
+    monkeypatch.setattr(app.QFileDialog, "getOpenFileName", lambda *args: (str(selected), ""))
+    monkeypatch.setattr(
+        app,
+        "load_project",
+        lambda root, output: calls.append((root, output)) or replacement,
+    )
+    dialog = ConfigurationDialog(project)
+    assert dialog.schemas_path.text() == str(original.resolve())
+    dialog._browse_schemas()
+    assert dialog.schemas_path.text() == str(selected.resolve())
+    dialog._scan_schemas()
+    assert calls == [(selected.parent, project.output_root)]
+    assert dialog.schemas_path.text() == str(selected.resolve())
     dialog.close()
 
 
@@ -659,36 +687,80 @@ def test_public_launch_forwards_profile_selection(application, project, monkeypa
     assert calls["exec"] is dialog
 
 
-def test_active_and_last_config_tabs_close(application, project):
-    dialog = _add_project(ConfigurationDialog(project))
-    assert dialog.projectSourceLayout.stretch(0) == 1
-    assert dialog.projectSourceLayout.stretch(1) == 2
+def test_tree_drives_single_unclosable_view_and_navigation(application, project, monkeypatch):
+    first = project.profiles[0].pages[0]
+    first.schema["description"] = "Run settings."
+    second = NamelistPage(
+        "output",
+        "output",
+        {
+            "type": "object",
+            "x-fortran-namelist": "output",
+            "description": "Output settings.",
+            "properties": {"enabled": {"type": "boolean", "default": False}},
+        },
+    )
+    profile = replace(project.profiles[0], pages=(first, second))
+    project = replace(project, profiles=(profile,), namelists=(first, second))
+    path = project.root / "run.nml"
+    path.write_text("&run count=4 /\n")
+    dialog = ConfigurationDialog(project)
+    monkeypatch.setattr(
+        QInputDialog, "getItem", lambda *args: ("Default [default] (configured)", True)
+    )
+    dialog.browseButton_addProject.click()
     assert dialog.browseButton_addProject.text() == "+"
+    assert dialog.browseButton_addProject.parent() is dialog.treeWidget_projectStructure.header()
     assert dialog.treeWidget_projectStructure.maximumWidth() > 275
-    assert dialog.tabs.tabText(dialog.tabs.indexOf(dialog.config_tab)) == "⚙️"
-    assert next(iter(dialog.editors.values())).label.text() == "Selected Namelist:"
+    assert not dialog.tabs.tabsClosable()
+    assert dialog.tabs.count() == 1 and dialog.tabs.currentWidget() is dialog.config_tab
+    assert dialog.tabs.tabText(0) == "⚙️"
+
+    root = dialog.project_items["default"]
+    file_item = root.child(0)
+    dialog.treeWidget_projectStructure.setCurrentItem(file_item)
+    dialog.show()
+    application.processEvents()
+    overview = dialog.tabs.currentWidget()
+    assert isinstance(overview, FileProfileOverview)
+    assert overview.fileNameEdit.text() == "run.nml"
+    assert overview.currentPathLabel.text() == str(path)
+    assert overview.namelistsTable.rowCount() == 2
+    assert overview.namelistsTable.sizePolicy().verticalPolicy() == QSizePolicy.Expanding
+    assert overview.namelistsTable.sizeAdjustPolicy() == QAbstractScrollArea.AdjustToContents
+    assert overview.rootLayout.stretch(1) == overview.rootLayout.stretch(3) == 1
+    assert abs(overview.namelistsTable.height() - overview.previewBrowser.height()) <= 1
+    compact = overview.namelistsTable.rowHeight(0)
+    assert compact <= overview.namelistsTable.verticalHeader().defaultSectionSize()
+    header = overview.namelistsTable.horizontalHeader()
+    header.setSectionResizeMode(1, QHeaderView.Interactive)
+    header.resizeSection(1, 80)
+    application.processEvents()
+    assert overview.namelistsTable.rowHeight(0) > compact
+    assert "Run settings." in overview.namelistsTable.item(0, 1).text()
+    assert "count=4" in overview.previewBrowser.toPlainText()
+
+    dialog.treeWidget_projectStructure.setCurrentItem(file_item.child(0))
     editor = next(iter(dialog.editors.values()))
-    dialog.tabs.setCurrentWidget(dialog.config_tab)
-    dialog.tabs.setCurrentWidget(editor)
-    selected = dialog.treeWidget_projectStructure.currentItem()
-    assert selected.data(0, Qt.ItemDataRole.UserRole)[:3] == ("profile", "default", "main")
-    assert selected.isExpanded()
-    dialog.tabs.setCurrentWidget(dialog.plus_tab)
-    builder = dialog.tabs.currentWidget()
-    dialog._close_tab(dialog.tabs.indexOf(builder))
-    assert dialog.tabs.indexOf(builder) == -1
-    dialog._close_tab(dialog.tabs.indexOf(dialog.config_tab))
-    assert dialog.config_tab is None
-    dialog._close_tab(dialog.tabs.indexOf(next(iter(dialog.editors.values()))))
-    last = dialog.config_tab
-    dialog._close_tab(dialog.tabs.indexOf(last))
-    assert dialog.config_tab is not last and dialog.tabs.count() == 2
+    assert dialog.tabs.currentWidget() is editor and dialog.tabs.count() == 1
+    assert dialog.tabs.tabText(0) == "main:run"
+    assert editor.descriptionLabel.text() == "Run settings."
+    editor.next.click()
+    assert dialog.treeWidget_projectStructure.currentItem() is file_item.child(1)
+    assert dialog.tabs.tabText(0) == "main:output"
+    assert editor.descriptionLabel.text() == "Output settings."
+    editor.back.click()
+    assert dialog.treeWidget_projectStructure.currentItem() is file_item.child(0)
+    editor.forms["run"].rows["count"].field.set_value(5)
+    dialog.treeWidget_projectStructure.setCurrentItem(file_item)
+    previous_overview = dialog.current_overview
+    dialog._save_all()
+    assert dialog.current_overview is not previous_overview
+    assert "count = 5" in dialog.current_overview.previewBrowser.toPlainText()
     dialog.close()
 
 
 def test_inactive_projects_stay_hidden_and_tree_fills_splitter(application, project):
-    from dataclasses import replace
-
     profile = project.profiles[0]
     project = replace(
         project,
@@ -720,8 +792,6 @@ def test_inactive_projects_stay_hidden_and_tree_fills_splitter(application, proj
 
 
 def test_explicit_project_profiles_are_preloaded(application, project):
-    from dataclasses import replace
-
     profile = project.profiles[0]
     project = replace(
         project,
@@ -740,6 +810,40 @@ def test_explicit_project_profiles_are_preloaded(application, project):
     assert list(dialog.loaded_projects) == ["one", "two"]
     assert dialog.treeWidget_projectStructure.topLevelItemCount() == 2
     assert dialog.active_project == "one"
+    dialog.close()
+
+
+def test_project_picker_distinguishes_duplicate_titles(application, project, monkeypatch):
+    profile = project.profiles[0]
+    project = replace(
+        project,
+        project_profiles=(
+            GuiProjectProfile("one", "one", "Same title", None, (profile,)),
+            GuiProjectProfile("two", "two", "Same title", None, (profile,)),
+        ),
+    )
+    dialog = ConfigurationDialog(project)
+    monkeypatch.setattr(
+        QInputDialog, "getItem", lambda *args: ("Same title [two] (configured)", True)
+    )
+    dialog._add_selected_project()
+    assert list(dialog.loaded_projects) == ["two"]
+    dialog.close()
+
+
+def test_relative_output_profile_discovery_uses_schema_root(application, project, monkeypatch):
+    from nml_tools.gui import app
+
+    roots = []
+    monkeypatch.setattr(
+        app,
+        "discover_project_files",
+        lambda _project, output_roots: roots.append(output_roots) or (),
+    )
+    dialog = _add_project(ConfigurationDialog(project))
+    dialog.config_tab.output_path.setText("relative")
+    dialog.config_tab.reset_builder(())
+    assert roots[-1] == ((project.root / "relative").resolve(),)
     dialog.close()
 
 
@@ -978,8 +1082,6 @@ def test_single_referenced_array_uses_top_aligned_resizable_table(application):
 
 
 def test_project_output_roots_are_isolated(application, project, tmp_path):
-    from dataclasses import replace
-
     profile = project.profiles[0]
     project = replace(
         project,
@@ -1010,7 +1112,7 @@ def test_project_output_roots_are_isolated(application, project, tmp_path):
         ),
     )
     for key, count, size in (("one", 11, 1), ("two", 22, 2)):
-        dialog._show_project(key, force=True)
+        dialog._show_project(key)
         editor = next(iter(dialog.project_editors[key].values()))
         assert editor.values()["run"]["count"] == count
         assert dialog.project_dimensions[key]["n"] == size

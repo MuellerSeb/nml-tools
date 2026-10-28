@@ -11,11 +11,10 @@ from itertools import product
 from pathlib import Path
 from typing import Any
 
-from qtpy.QtCore import QSignalBlocker, Qt
+from qtpy.QtCore import QSignalBlocker, Qt, QTimer
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QApplication,
-    QComboBox,
     QDialog,
     QFileDialog,
     QHeaderView,
@@ -25,7 +24,7 @@ from qtpy.QtWidgets import (
     QMessageBox,
     QScrollArea,
     QSpinBox,
-    QTabBar,
+    QTableWidgetItem,
     QToolButton,
     QTreeWidgetItem,
     QWidget,
@@ -53,6 +52,7 @@ from .model import (
     overlay_values,
     persistence_default,
     recover_dimensions,
+    render_profile,
     save_profiles,
     save_project_profile,
     suggestion,
@@ -175,28 +175,23 @@ class ProfileTab(QWidget):
         self.source_values = copy.deepcopy(dict(source_values or {}))
         self.forms: dict[str, NamelistForm] = {}
         self.form_saved: dict[str, dict[str, Any]] = {}
-        self.selector: QComboBox = self.namelistComboBox
         self.stack = self.namelistStack
         self.back = self.backButton
         self.next = self.nextButton
         self.restore = self.restoreButton
         self.cancel = self.cancelButton
         self.save = self.saveButton
-        self.descriptionLabel.setText(profile.description or "")
-        self.descriptionLabel.setVisible(bool(profile.description))
-        for page in profile.pages:
-            self.selector.addItem(page.name, page.key)
+        for _page in profile.pages:
             self.stack.addWidget(QWidget(self.stack))
-        self.selector.currentIndexChanged.connect(self._page_changed)
+        self.stack.currentChanged.connect(self._page_changed)
         self.back.clicked.connect(
-            lambda: self.selector.setCurrentIndex(self.selector.currentIndex() - 1)
+            lambda: self.stack.setCurrentIndex(self.stack.currentIndex() - 1)
         )
         self.next.clicked.connect(
-            lambda: self.selector.setCurrentIndex(self.selector.currentIndex() + 1)
+            lambda: self.stack.setCurrentIndex(self.stack.currentIndex() + 1)
         )
         self.restore.clicked.connect(self.restore_page)
-        self.selector.setCurrentIndex(-1)
-        self.selector.setCurrentIndex(0 if profile.pages else -1)
+        self._page_changed(self.stack.currentIndex())
         self.saved_values = copy.deepcopy(dict(values))
 
     def values(self) -> dict[str, Any]:
@@ -233,7 +228,7 @@ class ProfileTab(QWidget):
 
     def restore_page(self) -> None:
         """Restore the active namelist page."""
-        index = self.selector.currentIndex()
+        index = self.stack.currentIndex()
         if index >= 0:
             form = self._ensure_form(index)
             form.reset()
@@ -248,15 +243,21 @@ class ProfileTab(QWidget):
 
     def select_page(self, key: str) -> None:
         """Select a namelist page by normalized name."""
-        index = self.selector.findData(key)
-        if index >= 0:
-            self.selector.setCurrentIndex(index)
+        for index, page in enumerate(self.profile.pages):
+            if page.key == key:
+                self.stack.setCurrentIndex(index)
+                return
 
     def _page_changed(self, index: int) -> None:
         """Build the selected page on first use and display it."""
         if index >= 0:
             self._ensure_form(index)
-        self.stack.setCurrentIndex(index)
+            description = str(self.profile.pages[index].schema.get("description") or "")
+            self.descriptionLabel.setText(description)
+            self.descriptionLabel.setVisible(bool(description))
+        else:
+            self.descriptionLabel.clear()
+            self.descriptionLabel.hide()
         self._update_navigation(index)
 
     def _ensure_form(self, index: int) -> NamelistForm:
@@ -283,9 +284,11 @@ class ProfileTab(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setWidget(form)
         old = self.stack.widget(index)
-        self.stack.removeWidget(old)
+        with QSignalBlocker(self.stack):
+            self.stack.removeWidget(old)
+            self.stack.insertWidget(index, scroll)
+            self.stack.setCurrentIndex(index)
         old.deleteLater()
-        self.stack.insertWidget(index, scroll)
         self.forms[page.name] = form
         try:
             self.form_saved[page.name] = copy.deepcopy(form.values())
@@ -304,8 +307,50 @@ class ProfileTab(QWidget):
     def _update_navigation(self, index: int) -> None:
         """Update Back/Next availability for the active page."""
         self.back.setEnabled(index > 0)
-        self.next.setEnabled(0 <= index < self.selector.count() - 1)
+        self.next.setEnabled(0 <= index < len(self.profile.pages) - 1)
         self.restore.setEnabled(index >= 0)
+
+
+class FileProfileOverview(QWidget):
+    """Read-only summary and preview for one namelist file."""
+
+    def __init__(
+        self,
+        project: GuiProject,
+        profile: GuiProfile,
+        editor: ProfileTab,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        load_ui("file_profile_overview.ui", self)
+        path = _profile_path(project, profile, editor.output_root)
+        self.fileNameEdit.setText(profile.default_file)
+        self.currentPathLabel.setText(str(path))
+        self.namelistsTable.setRowCount(len(profile.pages))
+        for row, page in enumerate(profile.pages):
+            self.namelistsTable.setItem(row, 0, QTableWidgetItem(page.name))
+            self.namelistsTable.setItem(
+                row, 1, QTableWidgetItem(str(page.schema.get("description") or ""))
+            )
+        header = self.namelistsTable.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.sectionResized.connect(self._resize_rows)
+        QTimer.singleShot(0, self._resize_rows)
+        try:
+            if path.exists():
+                preview = path.read_text(encoding="utf-8")
+            else:
+                rendered = render_profile(project, profile, editor.values(), editor.dimensions)
+                preview = "\n".join(text.rstrip() for text in rendered.values()) + "\n"
+        except (OSError, ValueError, KeyError) as exc:
+            preview = f"Preview unavailable: {exc}"
+        self.previewBrowser.setPlainText(preview)
+
+    def _resize_rows(self, *_args: Any) -> None:
+        """Refit wrapped rows after the description column receives its width."""
+        self.namelistsTable.resizeRowsToContents()
+        self.namelistsTable.updateGeometry()
 
 
 class ProfileConfigTab(QWidget):
@@ -374,7 +419,10 @@ class ProfileConfigTab(QWidget):
         self.source_combo.clear()
         self.source_combo.addItem("<new>", ("new", ""))
         self.source_profiles = {profile.key: profile for profile in self.project.profiles}
-        output = Path(self.output_path.text()).resolve() if self.output_path.text() else None
+        text = self.output_path.text().strip()
+        output = Path(text).expanduser() if text else None
+        if output is not None:
+            output = (output if output.is_absolute() else self.project.root / output).resolve()
         for path in discover_project_files(self.project, (output,) if output else ()):
             try:
                 discovered = load_project_profile_file(self.project, path)
@@ -468,12 +516,12 @@ class ConfigurationDialog(QDialog):
         self.active_project: str | None = None
         self.editors: dict[Path, ProfileTab] = {}
         self.config_tab: ProfileConfigTab | None = None
-        self.plus_tab = QWidget(self.tabs)
-        self.schemas_path = self.lineEdit_pathSchemasConfigDirectory
-        self.schemas_browse = self.browseButton_browseSchemasConfigDirectory
-        self.schemas_scan = self.browseButton_scanSchemasConfigDirectory
-        self.schemas_path.setText(str(project.root))
-        self.tabs.setTabsClosable(True)
+        self.current_overview: FileProfileOverview | None = None
+        self.schemas_path = self.lineEdit_pathSchemasConfigFile
+        self.schemas_browse = self.browseButton_browseSchemasConfigFile
+        self.schemas_scan = self.browseButton_scanSchemasConfigFile
+        self.schemas_path.setText(str((project.root / "nml-config.toml").resolve()))
+        self.tabs.setTabsClosable(False)
         self.splitter.setSizes([self.width(), self.width() * 3])
         self.treeWidget_projectStructure.setColumnCount(2)
         self.treeWidget_projectStructure.setHeaderLabels(["Project structure", ""])
@@ -483,14 +531,16 @@ class ConfigurationDialog(QDialog):
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(1, QHeaderView.Fixed)
         self.treeWidget_projectStructure.setColumnWidth(1, 28)
-        self._populate_project_sources()
+        self.browseButton_addProject = QToolButton(header)
+        self.browseButton_addProject.setObjectName("browseButton_addProject")
+        self.browseButton_addProject.setText("+")
+        self.browseButton_addProject.setToolTip("Add project")
+        header.geometriesChanged.connect(self._position_add_project)
+        self._position_add_project()
         self.schemas_browse.clicked.connect(self._browse_schemas)
         self.schemas_scan.clicked.connect(self._scan_schemas)
-        self.browseButton_loadProject.clicked.connect(self._browse_project)
         self.browseButton_addProject.clicked.connect(self._add_selected_project)
         self.treeWidget_projectStructure.currentItemChanged.connect(self._tree_selected)
-        self.tabs.currentChanged.connect(self._tab_changed)
-        self.tabs.tabCloseRequested.connect(self._close_tab)
         self.restoreAllButton.clicked.connect(self._restore_all)
         self.saveAllButton.clicked.connect(self._save_all)
         self.closeButton.clicked.connect(self.accept)
@@ -522,6 +572,13 @@ class ConfigurationDialog(QDialog):
         while source.count():
             target.addItem(source.takeItem(0))
 
+    def _position_add_project(self) -> None:
+        """Keep the add-project button over the tree's action header."""
+        header = self.treeWidget_projectStructure.header()
+        self.browseButton_addProject.setGeometry(
+            header.sectionViewportPosition(1), 0, header.sectionSize(1), header.height()
+        )
+
     def _project_root(self, profile: GuiProjectProfile) -> Path:
         """Return the resolved namelist directory owned by a project profile."""
         return (profile.output_dir or self.project.output_root).resolve()
@@ -551,29 +608,37 @@ class ConfigurationDialog(QDialog):
                     f"projects '{other.name}' and '{key}' must use separate output directories"
                 )
 
-    def _populate_project_sources(self) -> None:
-        """List configured and discoverable project-profile sources."""
-        combo = self.sourceComboBox_loadProject
-        combo.clear()
-        combo.addItem("<new>", ("new", ""))
-        for profile in self.available_projects.values():
-            combo.addItem(profile.title, ("configured", profile.key))
+    def _project_sources(self) -> list[tuple[str, tuple[str, str]]]:
+        """Return project choices for the tree-header add dialog."""
+        choices = [("<new>", ("new", ""))]
+        choices.extend(
+            (f"{profile.title} [{profile.name}] (configured)", ("configured", profile.key))
+            for profile in self.available_projects.values()
+        )
         roots = [self._project_root(item) for item in self.loaded_projects.values()]
         for path in discover_project_files(self.project, roots):
-            combo.addItem(path.name, ("path", str(path)))
+            choices.append((f"{path.name} — {path.parent}", ("path", str(path))))
+        choices.append(("Browse…", ("browse", "")))
+        return choices
 
     def _browse_schemas(self) -> None:
-        """Select a directory containing nml-config.toml without loading it yet."""
-        path = QFileDialog.getExistingDirectory(
-            self, "Load schemas and configuration", self.schemas_path.text()
+        """Select nml-config.toml without loading it yet."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load schemas configuration",
+            self.schemas_path.text(),
+            "nml-config.toml (nml-config.toml);;TOML files (*.toml)",
         )
         if path:
-            self.schemas_path.setText(path)
+            self.schemas_path.setText(str(Path(path).resolve()))
 
     def _scan_schemas(self) -> None:
-        """Replace the schema catalog atomically after validating a selected root."""
+        """Replace the schema catalog after validating the selected config file."""
         try:
-            replacement = load_project(self.schemas_path.text(), self.project.output_root)
+            config_path = Path(self.schemas_path.text()).expanduser().resolve()
+            if config_path.name != "nml-config.toml" or not config_path.is_file():
+                raise ValueError("select an existing nml-config.toml file")
+            replacement = load_project(config_path.parent, self.project.output_root)
             if self._has_dirty() and QMessageBox.question(
                 self,
                 "Unsaved changes",
@@ -585,8 +650,7 @@ class ConfigurationDialog(QDialog):
             self.available_projects = {
                 profile.key: profile for profile in replacement.project_profiles
             }
-            self.schemas_path.setText(str(replacement.root))
-            self._populate_project_sources()
+            self.schemas_path.setText(str((replacement.root / "nml-config.toml").resolve()))
         except (OSError, RuntimeError, ValueError) as exc:
             QMessageBox.critical(self, "Invalid schema directory", str(exc))
 
@@ -598,30 +662,21 @@ class ConfigurationDialog(QDialog):
             for editor in editors.values()
         )
 
-    def _browse_project(self) -> None:
-        """Add a browsed TOML path to the source chooser without loading it."""
-        name, _ = QFileDialog.getOpenFileName(
-            self, "Load project profile", str(self.project.root), "TOML files (*.toml)"
-        )
-        if name:
-            data = ("path", str(Path(name).resolve()))
-            index = next(
-                (
-                    index
-                    for index in range(self.sourceComboBox_loadProject.count())
-                    if self.sourceComboBox_loadProject.itemData(index) == data
-                ),
-                -1,
-            )
-            if index < 0:
-                self.sourceComboBox_loadProject.addItem(Path(name).name, data)
-                index = self.sourceComboBox_loadProject.count() - 1
-            self.sourceComboBox_loadProject.setCurrentIndex(index)
-
     def _add_selected_project(self) -> None:
-        """Load the selected configured, external, or new project into the tree."""
+        """Ask for and load a configured, external, or new project."""
         try:
-            kind, value = self.sourceComboBox_loadProject.currentData()
+            choices = self._project_sources()
+            selected, accepted = QInputDialog.getItem(
+                self,
+                "Add project",
+                "Project type",
+                [label for label, _data in choices],
+                0,
+                False,
+            )
+            if not accepted:
+                return
+            kind, value = choices[[label for label, _data in choices].index(selected)][1]
             if kind == "new":
                 name, accepted = QInputDialog.getText(self, "New project", "Project name")
                 if not accepted:
@@ -633,6 +688,15 @@ class ConfigurationDialog(QDialog):
             elif kind == "configured":
                 profile = self.available_projects[value]
             else:
+                if kind == "browse":
+                    value, _ = QFileDialog.getOpenFileName(
+                        self,
+                        "Load project profile",
+                        str(self.project.root),
+                        "TOML files (*.toml)",
+                    )
+                    if not value:
+                        return
                 profile = load_project_profile_file(self.project, Path(value))
             profile = replace(profile, output_dir=self._available_root(profile))
             self._register_project(profile)
@@ -695,13 +759,9 @@ class ConfigurationDialog(QDialog):
         self.project_dimensions[profile.key] = dimensions
         self.project_editors[profile.key] = prepared
         for editor in prepared.values():
-            editor.save.clicked.connect(lambda _checked=False, item=editor: self._save([item]))
-            editor.cancel.clicked.connect(
-                lambda _checked=False, item=editor: self._cancel_profile(profile.key, item)
-            )
+            self._wire_editor(profile.key, editor)
         self._new_config(profile.key)
         self._build_tree(profile)
-        self._populate_project_sources()
 
     def _new_config(self, project_key: str) -> ProfileConfigTab:
         """Create the single reusable Config tab for one loaded project."""
@@ -765,25 +825,29 @@ class ConfigurationDialog(QDialog):
         widget.hide()
         widget.setParent(self)
 
-    def _show_project(self, key: str, *, force: bool = False) -> None:
-        """Show only the selected project's cached tabs."""
+    def _show_view(self, widget: QWidget, title: str) -> None:
+        """Show one unclosable page for the selected tree item."""
+        with QSignalBlocker(self.tabs):
+            while self.tabs.count():
+                self._detach_tab(self.tabs.widget(0))
+            self.tabs.addTab(widget, title)
+            self.tabs.setCurrentWidget(widget)
+        widget.show()
+
+    def _clear_overview(self) -> None:
+        """Dispose the transient file-profile overview."""
+        if self.current_overview is not None:
+            self._detach_tab(self.current_overview)
+            self.current_overview.deleteLater()
+            self.current_overview = None
+
+    def _show_project(self, key: str) -> None:
+        """Activate one project's cached editor state."""
         if key not in self.loaded_projects:
-            return
-        if key == self.active_project and not force:
             return
         self.active_project = key
         self.editors = self.project_editors[key]
         self.config_tab = self.project_configs[key]
-        with QSignalBlocker(self.tabs):
-            while self.tabs.count():
-                self._detach_tab(self.tabs.widget(0))
-            self.tabs.addTab(self.config_tab, "⚙️")
-            for editor in self.editors.values():
-                self.tabs.addTab(editor, editor.profile.title)
-            self.tabs.addTab(self.plus_tab, "+")
-            for side in (QTabBar.LeftSide, QTabBar.RightSide):
-                self.tabs.tabBar().setTabButton(self.tabs.indexOf(self.plus_tab), side, None)
-            self.tabs.setCurrentIndex(1 if self.editors else 0)
 
     def _tree_selected(self, current: QTreeWidgetItem | None, _previous: Any) -> None:
         """Navigate from a tree identity to its project, file, or namelist page."""
@@ -791,64 +855,51 @@ class ConfigurationDialog(QDialog):
             return
         kind, project_key, profile_key, page_key = current.data(0, Qt.ItemDataRole.UserRole)
         self._show_project(project_key)
-        if kind in {"profile", "namelist"}:
-            if kind == "profile":
-                current.setExpanded(True)
-            profile = next(
-                item
-                for item in self.loaded_projects[project_key].profiles
-                if item.key == profile_key
-            )
-            editor = self._ensure_editor(project_key, profile)
-            self._insert_editor_tab(editor)
-            if kind == "namelist":
-                editor.select_page(page_key)
-
-    def _tab_changed(self, index: int) -> None:
-        """Synchronize profile tabs with the tree and handle the trailing plus tab."""
-        widget = self.tabs.widget(index)
-        if isinstance(widget, ProfileTab) and self.active_project is not None:
-            root = self.project_items[self.active_project]
-            for child_index in range(root.childCount()):
-                item = root.child(child_index)
-                if item.data(0, Qt.ItemDataRole.UserRole)[2] == widget.profile.key:
-                    item.setExpanded(True)
-                    with QSignalBlocker(self.treeWidget_projectStructure):
-                        self.treeWidget_projectStructure.setCurrentItem(item)
-                    break
-        elif widget is self.plus_tab and self.active_project is not None:
-            profile = self.loaded_projects[self.active_project]
-            config = self.project_configs[self.active_project]
-            self.config_tab = (
-                self._new_config(self.active_project)
-                if self.tabs.indexOf(config) < 0 and self.config_tab is None
-                else config
-            )
-            self.config_tab.reset_builder(profile.profiles)
-            if self.tabs.indexOf(self.config_tab) < 0:
-                self.tabs.insertTab(0, self.config_tab, "⚙️")
-            self.tabs.setCurrentWidget(self.config_tab)
-
-    def _close_tab(self, index: int) -> None:
-        """Hide a Config or profile tab while keeping its cached state."""
-        widget = self.tabs.widget(index)
-        if widget is None or widget is self.plus_tab:
+        self._clear_overview()
+        if kind == "project":
+            self._show_view(self.project_configs[project_key], "⚙️")
             return
-        if isinstance(widget, ProfileTab):
-            if (
-                widget.is_dirty()
-                and QMessageBox.question(
-                    self, "Unsaved changes", "Hide this profile with unsaved changes?"
-                )
-                != QMessageBox.Yes
-            ):
-                return
-        with QSignalBlocker(self.tabs):
-            self._detach_tab(widget)
-        if widget is self.config_tab:
-            self.config_tab = None
-        if self.tabs.count() == 1:
-            self._tab_changed(self.tabs.indexOf(self.plus_tab))
+        profile = next(
+            item for item in self.loaded_projects[project_key].profiles if item.key == profile_key
+        )
+        editor = self._ensure_editor(project_key, profile)
+        if kind == "profile":
+            current.setExpanded(True)
+            self.current_overview = FileProfileOverview(self.project, profile, editor, self)
+            self._show_view(self.current_overview, profile.title)
+            return
+        editor.select_page(page_key)
+        page = next(item for item in profile.pages if item.key == page_key)
+        self._show_view(editor, f"{profile.name}:{page.name}")
+
+    def _editor_page_selected(self, project_key: str, editor: ProfileTab, index: int) -> None:
+        """Highlight the tree namelist selected inside an editor."""
+        if (
+            index < 0
+            or project_key != self.active_project
+            or self.tabs.currentWidget() is not editor
+        ):
+            return
+        page = editor.profile.pages[index]
+        page_key = page.key
+        self.tabs.setTabText(0, f"{editor.profile.name}:{page.name}")
+        root = self.project_items[project_key]
+        for profile_index in range(root.childCount()):
+            profile_item = root.child(profile_index)
+            if profile_item.data(0, Qt.ItemDataRole.UserRole)[2] != editor.profile.key:
+                continue
+            for page_index in range(profile_item.childCount()):
+                page_item = profile_item.child(page_index)
+                if page_item.data(0, Qt.ItemDataRole.UserRole)[3] == page_key:
+                    with QSignalBlocker(self.treeWidget_projectStructure):
+                        self.treeWidget_projectStructure.setCurrentItem(page_item)
+                    return
+
+    def _refresh_current_view(self) -> None:
+        """Rebuild the single view from the current tree selection."""
+        current = self.treeWidget_projectStructure.currentItem()
+        if current is not None:
+            self._tree_selected(current, current)
 
     def _browse_profile(self, config: ProfileConfigTab) -> None:
         """Add file profiles from a selected project-profile TOML file."""
@@ -943,12 +994,7 @@ class ConfigurationDialog(QDialog):
                     source_values=sources.get(profile.key),
                 )
                 editor.hide()
-                editor.save.clicked.connect(
-                    lambda _checked=False, item=editor: self._save([item])
-                )
-                editor.cancel.clicked.connect(
-                    lambda _checked=False, item=editor: self._cancel_profile(key, item)
-                )
+                self._wire_editor(key, editor)
                 prepared[path] = editor
         except Exception:
             for editor in prepared.values():
@@ -961,7 +1007,8 @@ class ConfigurationDialog(QDialog):
         for editor in old.values():
             self._detach_tab(editor)
             editor.deleteLater()
-        self._show_project(key, force=True)
+        if key == self.active_project:
+            self._refresh_current_view()
 
     def _select_profile_source(self, config: ProfileConfigTab) -> None:
         """Populate builder values from a reusable file profile."""
@@ -1075,8 +1122,9 @@ class ConfigurationDialog(QDialog):
                 }
             self._rebuild_project_editors(current.key, fit_arrays=True)
             config.reset_builder(current.profiles)
-            editor = self._ensure_editor(current.key, profile)
-            self._insert_editor_tab(editor)
+            tree_item = self._profile_tree_item(current.key, profile.key)
+            if tree_item is not None:
+                self.treeWidget_projectStructure.setCurrentItem(tree_item)
         except (OSError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Invalid configuration", str(exc))
 
@@ -1120,6 +1168,28 @@ class ConfigurationDialog(QDialog):
         if was_active:
             self.treeWidget_projectStructure.setCurrentItem(self.project_items[profile.key])
 
+    def _wire_editor(self, project_key: str, editor: ProfileTab) -> None:
+        """Connect one cached editor to project-level actions and navigation."""
+        editor.save.clicked.connect(lambda _checked=False: self._save([editor]))
+        editor.cancel.clicked.connect(
+            lambda _checked=False: self._cancel_profile(project_key, editor)
+        )
+        editor.stack.currentChanged.connect(
+            lambda index: self._editor_page_selected(project_key, editor, index)
+        )
+
+    def _profile_tree_item(
+        self, project_key: str, profile_key: str
+    ) -> QTreeWidgetItem | None:
+        """Find one file-profile node in the project tree."""
+        root = self.project_items.get(project_key)
+        if root is not None:
+            for index in range(root.childCount()):
+                item = root.child(index)
+                if item.data(0, Qt.ItemDataRole.UserRole)[2] == profile_key:
+                    return item
+        return None
+
     def _ensure_editor(self, project_key: str, profile: GuiProfile) -> ProfileTab:
         """Return a cached editor, loading its direct namelist file once."""
         root = self._project_root(self.loaded_projects[project_key])
@@ -1151,18 +1221,9 @@ class ConfigurationDialog(QDialog):
             source_values=sources.get(profile.key),
         )
         editor.hide()
-        editor.save.clicked.connect(lambda: self._save([editor]))
-        editor.cancel.clicked.connect(lambda: self._cancel_profile(project_key, editor))
+        self._wire_editor(project_key, editor)
         editors[path] = editor
         return editor
-
-    def _insert_editor_tab(self, editor: ProfileTab) -> None:
-        """Show and activate a cached file-profile editor."""
-        index = self.tabs.indexOf(editor)
-        if index < 0:
-            index = self.tabs.indexOf(self.plus_tab)
-            self.tabs.insertTab(index, editor, editor.profile.title)
-        self.tabs.setCurrentWidget(editor)
 
     def _rebuild_project_editors(self, key: str, *, fit_arrays: bool = False) -> None:
         """Rebuild a project's editors after dimensions or membership change."""
@@ -1194,17 +1255,14 @@ class ConfigurationDialog(QDialog):
                     source_values=sources.get(profile.key),
                 )
                 editor.hide()
-                editor.save.clicked.connect(lambda _checked=False, item=editor: self._save([item]))
-                editor.cancel.clicked.connect(
-                    lambda _checked=False, item=editor: self._cancel_profile(key, item)
-                )
+                self._wire_editor(key, editor)
                 editor.saved_values = copy.deepcopy(previous.saved_values)
                 editor.saved_dimensions = dict(previous.saved_dimensions)
                 self.project_editors[key][path] = editor
             else:
                 self._ensure_editor(key, profile)
         if key == self.active_project:
-            self._show_project(key, force=True)
+            self._refresh_current_view()
 
     def _cancel_profile(self, project_key: str, editor: ProfileTab) -> None:
         """Replace one editor with its last successfully saved state."""
@@ -1228,13 +1286,11 @@ class ConfigurationDialog(QDialog):
             source_values=sources.get(editor.profile.key),
         )
         replacement.hide()
-        replacement.save.clicked.connect(lambda: self._save([replacement]))
-        replacement.cancel.clicked.connect(lambda: self._cancel_profile(project_key, replacement))
+        self._wire_editor(project_key, replacement)
         self.project_editors[project_key][path] = replacement
-        self._show_project(project_key, force=True)
-        self._insert_editor_tab(replacement)
         editor.setParent(None)
         editor.deleteLater()
+        self._refresh_current_view()
 
     def _save(self, editors: list[ProfileTab]) -> None:
         """Validate and atomically save supplied profile editors."""
@@ -1264,6 +1320,8 @@ class ConfigurationDialog(QDialog):
             )
             for editor, values in collected:
                 editor.mark_saved(values)
+            if self.current_overview is not None:
+                self._refresh_current_view()
             paths = list(unique)
             if len(paths) == 1:
                 message = f"{paths[0].name} has been saved to:\n{paths[0]}"
@@ -1295,6 +1353,8 @@ class ConfigurationDialog(QDialog):
             *self.project_configs.values(),
             *(editor for editors in self.project_editors.values() for editor in editors.values()),
         ]
+        if self.current_overview is not None:
+            widgets.append(self.current_overview)
         with QSignalBlocker(self.tabs):
             while self.tabs.count():
                 self._detach_tab(self.tabs.widget(0))
@@ -1311,6 +1371,7 @@ class ConfigurationDialog(QDialog):
         self.active_project = None
         self.editors = {}
         self.config_tab = None
+        self.current_overview = None
 
     def _remove_tree_item(self, item: QTreeWidgetItem) -> None:
         """Confirm and apply a project, file-profile, or namelist removal."""
@@ -1337,10 +1398,12 @@ class ConfigurationDialog(QDialog):
                     self._detach_tab(widget)
                     widget.deleteLater()
                 if self.loaded_projects and was_active:
-                    self._show_project(next(iter(self.loaded_projects)))
+                    next_key = next(iter(self.loaded_projects))
+                    self.treeWidget_projectStructure.setCurrentItem(
+                        self.project_items[next_key]
+                    )
                 elif not self.loaded_projects:
                     self._clear_projects()
-                self._populate_project_sources()
                 return
             current = self._customize(self.loaded_projects[project_key])
             profiles = list(current.profiles)

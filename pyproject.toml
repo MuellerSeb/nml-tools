@@ -21,9 +21,11 @@ dependencies = [
 
 [project.optional-dependencies]
 gui = [
+    "guidata>=3.6,<3.7; python_version < '3.9'",
     "guidata; python_version >= '3.9'",
+    "numpy>=1.21,<1.25; python_version < '3.9'",
     "numpy; python_version >= '3.9'",
-    "qtpy; python_version >= '3.9'",
+    "qtpy",
 ]
 dev = [
     "numpy>=1.24,<3",

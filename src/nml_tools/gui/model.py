@@ -12,7 +12,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from itertools import product
 from pathlib import Path
-from typing import Any, Mapping, cast
+from typing import Any, List, Mapping, cast
 
 import click
 import yaml
@@ -59,7 +59,7 @@ def _mark_referenced_arrays(loaded: Iterable[Any]) -> None:
                 child[GUI_REF_ORIGIN_KEY] = source["$ref"]
 
 
-class InputArray(list[Any]):
+class InputArray(List[Any]):
     """Dense editor values with the indices selected for namelist output."""
 
     def __init__(self, values: list[Any], assigned: set[tuple[int, ...]]):
@@ -366,7 +366,7 @@ def load_project(
         raise ValueError("project_profiles must be a name or mapping")
     if project_profiles and all(isinstance(value, list) for value in project_profiles.values()):
         selected_profiles = _select_profiles(
-            project, cast(Mapping[str, list[str]], project_profiles)
+            project, cast(Mapping[str, List[str]], project_profiles)
         )
         implicit = GuiProjectProfile(
             "default",
@@ -395,7 +395,7 @@ def load_project(
         chosen = (
             available
             if not selection
-            else _select_profiles(base, cast(Mapping[str, list[str]], selection))
+            else _select_profiles(base, cast(Mapping[str, List[str]], selection))
         )
         item = GuiProjectProfile(
             configured_project.name if configured_project else project_name,
@@ -745,7 +745,7 @@ def _evaluated_array(
             {} if seed is MISSING else seed,
         )
     else:
-        result = cast(list[Any], suggestion({**schema, "x-fortran-shape": shape}, sizes))
+        result = cast(List[Any], suggestion({**schema, "x-fortran-shape": shape}, sizes))
     for coordinates, component, state in states:
         target = result
         for coordinate in coordinates[:-1]:

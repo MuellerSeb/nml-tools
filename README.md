@@ -940,15 +940,16 @@ currently explicit capability boundaries.
 ## GUI
 
 Install the current checkout with its optional GUI dependencies and a Qt binding
-(Python 3.9 or newer):
+(Python 3.8 or newer):
 
 ```bash
 python -m pip install '.[gui]' PyQt5
 nml-tools gui -i /path/to/schemas -o /path/to/project
 ```
 
-QtPy also permits other supported Qt bindings. Omit `-i` to use the current
-directory, and `-o` to save alongside `nml-config.toml`.
+QtPy also permits other supported Qt bindings; PyQt5 is the tested binding on
+Python 3.8. Omit `-i` to use the current directory, and `-o` to save alongside
+`nml-config.toml`.
 
 The editor loads each profile's `default_file` from the output directory and
 saves directly to that namelist file. Missing values use schema defaults, then
@@ -965,23 +966,29 @@ remaining arrays in the saved namelist. Resizable arrays retain a resize action.
 Applications can launch a subset of the configured profiles:
 
 ```python
-from nml_tools.gui import launch_gui
+from nml_tools.gui import GuiProjectRequest, launch_gui
 
 launch_gui(
     schemas_dir="/path/to/schemas",
-    output_dir="/path/to/project",
-    file_profiles={"main": ["mainconfig", "time_periods"], "parameter": []},
-    initial_values={"main": {"mainconfig": {"nDomains": 2}}},
-    initial_dimensions={"max_domains": 2},
+    projects=[
+        GuiProjectRequest(
+            project_profile="simulation",
+            output_dir="/path/to/project",
+            file_profiles={"main": ["mainconfig", "time_periods"], "parameter": []},
+            initial_values={"main": {"mainconfig": {"nDomains": 2}}},
+            initial_dimensions={"max_domains": 2},
+        )
+    ],
 )
 ```
 
-`file_profiles` is the third argument. `None` or `{}` selects all configured
-profiles; an empty list selects every namelist in that profile. Names are
-checked case-insensitively and pages retain TOML order. `initial_values` is an
-in-memory dictionary of profile/namelist/field values applied over existing
-input. Use keyword arguments for values and dimensions when migrating callers
-of the previous GUI API.
+Each request configures one project and its output directory. A `None`
+`file_profiles` value selects every configured profile; an empty namelist list
+selects every namelist in that profile. Names are checked case-insensitively and
+pages retain TOML order. `initial_values` is an in-memory dictionary of
+profile/namelist/field values applied over existing input. With no project
+requests, the tree starts empty for interactive project selection;
+`default_output_dir` controls the initial output directory for those projects.
 
 Named runtime dimensions come from TOML, `initial_dimensions`, or the Config
 controls; partial namelist assignments cannot reliably recover them. Existing

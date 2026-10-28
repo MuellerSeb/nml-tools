@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import math
 from collections.abc import Iterator, Mapping, Sequence
-from typing import Any, cast
+from typing import Any, List, cast
 
 
 def resolve_shape(
@@ -168,7 +168,7 @@ def canonical_array(value: Any, schema: Mapping[str, Any], rank: int) -> list[An
         axes = table_axes(schema, rank)
         if axes is not None and axes != (0, 1):
             data = np.transpose(data, np.argsort(axes))
-    return cast(list[Any], _native_value(data.tolist()))
+    return cast(List[Any], _native_value(data.tolist()))
 
 
 def initial_array(
@@ -186,14 +186,14 @@ def initial_array(
     result = (
         copy.deepcopy(defaults)
         if defaults is not None
-        else cast(list[Any], _filled(shape, leaf_default))
+        else cast(List[Any], _filled(shape, leaf_default))
     )
     if value is None:
         return result
     if not isinstance(value, list):
         if strict:
             raise ValueError("saved array values must be arrays")
-        return cast(list[Any], _filled(shape, value))
+        return cast(List[Any], _filled(shape, value))
     current_shape = _list_shape(value)
     if strict:
         validate_array_shape(schema, sizes, value)
@@ -242,7 +242,7 @@ def _reshape(values: Sequence[Any], shape: tuple[int, ...]) -> list[Any]:
             return [copy.deepcopy(next(iterator)) for _ in range(remaining[0])]
         return [build(remaining[1:]) for _ in range(remaining[0])]
 
-    return cast(list[Any], build(shape))
+    return cast(List[Any], build(shape))
 
 
 def _flatten(value: Any) -> Iterator[Any]:
