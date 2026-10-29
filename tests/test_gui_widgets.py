@@ -5,6 +5,7 @@ from dataclasses import replace
 
 import pytest
 
+from nml_tools._dimensions import DimensionSource
 from nml_tools.gui.model import (
     GUI_REF_ORIGIN_KEY,
     MISSING,
@@ -20,12 +21,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("qtpy")
 try:
     from qtpy.QtCore import Qt
+    from qtpy.QtGui import QTextDocument
     from qtpy.QtTest import QTest
     from qtpy.QtWidgets import (
         QAbstractScrollArea,
         QApplication,
+        QComboBox,
         QHeaderView,
-        QInputDialog,
         QMessageBox,
         QSizePolicy,
     )
@@ -34,8 +36,9 @@ except ImportError:
 
 from nml_tools.gui.app import (
     ConfigurationDialog,
+    FileProfileBuilder,
     FileProfileOverview,
-    ProfileConfigTab,
+    NamelistPicker,
     ProfileTab,
 )
 from nml_tools.gui.fields import (
@@ -46,6 +49,8 @@ from nml_tools.gui.fields import (
     ObjectField,
     ScalarField,
 )
+from nml_tools.gui.highlighter import NamelistHighlighter
+from nml_tools.gui.onboarding import OnboardingTip
 
 
 @pytest.fixture(scope="module")
@@ -370,7 +375,7 @@ def test_dialog_load_overlay_save_reload_and_dimension_changes(application, proj
     dialog._save_all()
     assert "periods(1)%year = 2025" in path.read_text()
     dialog.config_tab.dimension_boxes["n"].setValue(2)
-    dialog.config_tab.run.click()
+    dialog.config_tab.set.click()
     assert dialog.editors[path].forms["run"].rows["weights"].field.inline is None
     assert dialog.editors[path].values()["run"]["weights"] == [2.0, 1.0]
     resized = dialog.editors[path]
@@ -385,23 +390,27 @@ def test_dialog_load_overlay_save_reload_and_dimension_changes(application, proj
     assert loaded.config_tab.dimension_boxes["n"].value() == 2
     loaded.close()
     dialog.config_tab.dimension_boxes["n"].setValue(1)
-    dialog.config_tab.run.click()
+    dialog.config_tab.set.click()
     assert isinstance(dialog.editors[path].forms["run"].rows["weights"].field.inline, ScalarField)
     dialog._save_all()
     reloaded = _add_project(ConfigurationDialog(project))
     assert reloaded.editors[path].values()["run"]["periods"] == [{"year": 2025}]
-    dialog.treeWidget_projectStructure.setCurrentItem(dialog.project_items["default"])
-    builder = dialog.config_tab
-    assert isinstance(builder, ProfileConfigTab)
+    dialog._show_file_builder("default")
+    builder = dialog.current_tool
+    assert isinstance(builder, FileProfileBuilder)
+    builder.source_combo.setCurrentIndex(builder.source_combo.count() - 1)
     builder.profile_name.setText("extra")
     builder.default_filename.setText("extra.nml")
     dialog._move_all(builder.available_schemas, builder.selected_schemas)
-    builder.run.click()
+    builder.add.click()
     assert project.root / "extra.nml" in dialog.editors
     dialog._save_all()
     assert (project.root / "extra.nml").is_file()
     extra = dialog.editors[project.root / "extra.nml"]
     extra.forms["run"].rows["count"].field.set_value(17)
+    dialog._show_file_builder("default")
+    builder = dialog.current_tool
+    assert isinstance(builder, FileProfileBuilder)
     index = next(
         i
         for i in range(builder.source_combo.count())
@@ -410,7 +419,7 @@ def test_dialog_load_overlay_save_reload_and_dimension_changes(application, proj
     assert index >= 0
     builder.source_combo.setCurrentIndex(index)
     builder.default_filename.setText("extra-renamed.nml")
-    builder.run.click()
+    builder.add.click()
     renamed = project.root / "extra-renamed.nml"
     assert dialog.editors[renamed].values()["run"]["count"] == 17
     assert [item.key for item in dialog.loaded_projects["default"].profiles].count("extra") == 1
@@ -451,7 +460,7 @@ def test_example_dimension_source_resize_and_config_tab(application, tmp_path, m
 
     dialog.treeWidget_projectStructure.setCurrentItem(root_item)
     dialog.config_tab.dimension_boxes["n_bodies"].setValue(2)
-    dialog.config_tab.run.click()
+    dialog.config_tab.set.click()
     assert all(dialog.tabs.indexOf(editor) < 0 and editor.isHidden() for editor in old_editors)
     application.processEvents()
     assert dialog.config_tab.isVisibleTo(dialog)
@@ -477,9 +486,7 @@ def test_invalid_existing_input_is_reported_and_never_replaced(application, proj
     path.write_text(invalid)
     dialog = ConfigurationDialog(project)
     assert not errors and not dialog.editors
-    monkeypatch.setattr(
-        QInputDialog, "getItem", lambda *args: ("Default [default] (configured)", True)
-    )
+    monkeypatch.setattr(dialog, "_choose_project_source", lambda: ("configured", "default"))
     dialog._add_selected_project()
     assert errors and not dialog.editors
     dialog._save_all()
@@ -579,7 +586,7 @@ def test_guidata_path_update_and_date_time_editor(application):
         editor.close()
 
 
-def test_profile_sources_exclude_namelists_and_include_project_toml(application, project):
+def test_profile_sources_group_saved_namelists_and_custom_profiles(application, project):
     path = project.root / "external.nml"
     path.write_text("&run count=42 weights(3)=9.0 /\n")
     (project.root / "external.toml").write_text(
@@ -588,22 +595,35 @@ def test_profile_sources_exclude_namelists_and_include_project_toml(application,
         'file_profiles = ["copy"]\n'
     )
     dialog = _add_project(ConfigurationDialog(project))
-    config = dialog.config_tab
-    assert config.source_combo.findData(str(path)) < 0
+    dialog._show_file_builder("default")
+    builder = dialog.current_tool
+    assert isinstance(builder, FileProfileBuilder)
+    assert builder.source_combo.itemData(0) == ("profile", "main")
     assert any(
-        config.source_combo.itemData(index) == ("profile", "copy")
-        for index in range(config.source_combo.count())
+        builder.source_combo.itemData(index) == ("nml", str(path.resolve()))
+        for index in range(builder.source_combo.count())
     )
+    assert any(
+        builder.source_combo.itemData(index) == ("profile", "copy")
+        for index in range(builder.source_combo.count())
+    )
+    nml_index = next(
+        index
+        for index in range(builder.source_combo.count())
+        if builder.source_combo.itemData(index) == ("nml", str(path.resolve()))
+    )
+    builder.source_combo.setCurrentIndex(nml_index)
+    assert builder.profile_name.text() == "external"
     index = next(
         index
-        for index in range(config.source_combo.count())
-        if config.source_combo.itemData(index) == ("profile", "copy")
+        for index in range(builder.source_combo.count())
+        if builder.source_combo.itemData(index) == ("profile", "copy")
     )
-    config.source_combo.setCurrentIndex(index)
-    assert config.profile_name.text() == "copy"
-    config.source_combo.setCurrentIndex(0)
-    assert not config.profile_name.text() and not config.default_filename.text()
-    assert config.selected_schemas.count() == 0
+    builder.source_combo.setCurrentIndex(index)
+    assert builder.profile_name.text() == "copy"
+    builder.source_combo.setCurrentIndex(builder.source_combo.count() - 1)
+    assert not builder.profile_name.text() and not builder.default_filename.text()
+    assert builder.selected_schemas.count() == 0
     dialog.close()
 
 
@@ -617,10 +637,45 @@ def test_browsed_project_source_loads(application, project, monkeypatch):
         'file_profiles = ["copy"]\n'
     )
     monkeypatch.setattr(app.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
-    monkeypatch.setattr(app.QInputDialog, "getItem", lambda *args: ("Browse…", True))
     dialog = ConfigurationDialog(project)
+    monkeypatch.setattr(dialog, "_choose_project_source", lambda: ("browse", ""))
     dialog._add_selected_project()
     assert "external" in dialog.loaded_projects
+    dialog.close()
+
+
+def test_namelist_action_adds_only_missing_schema(application, project):
+    output = NamelistPage(
+        "output",
+        "output",
+        {
+            "type": "object",
+            "x-fortran-namelist": "output",
+            "properties": {"enabled": {"type": "boolean", "default": False}},
+        },
+    )
+    custom = GuiProfile(
+        "custom", "custom", "Custom", None, "custom.nml", project.profiles[0].pages
+    )
+    project = replace(
+        project,
+        namelists=(*project.namelists, output),
+        project_profiles=(
+            GuiProjectProfile("default", "default", "Default", None, (custom,), custom=True),
+        ),
+    )
+    dialog = _add_project(ConfigurationDialog(project))
+    dialog._show_namelist_picker("default", "custom")
+    picker = dialog.current_tool
+    assert isinstance(picker, NamelistPicker)
+    assert picker.available.count() == 1 and picker.available.item(0).text() == "output"
+    picker.available.item(0).setSelected(True)
+    picker.add.click()
+    pages = dialog.loaded_projects["default"].profiles[0].pages
+    assert [page.key for page in pages] == ["run", "output"]
+    file_item = dialog._profile_tree_item("default", "custom")
+    assert file_item.child(1).text(0) == "Nml: output"
+    assert dialog.treeWidget_projectStructure.currentItem() is file_item.child(1)
     dialog.close()
 
 
@@ -632,7 +687,7 @@ def test_schema_config_uses_full_file_path(application, project, monkeypatch, tm
     selected = tmp_path / "other" / "nml-config.toml"
     selected.parent.mkdir()
     selected.write_text("")
-    replacement = replace(project, root=selected.parent)
+    replacement = replace(project, root=selected.parent, config_path=selected)
     calls = []
     monkeypatch.setattr(app.QFileDialog, "getOpenFileName", lambda *args: (str(selected), ""))
     monkeypatch.setattr(
@@ -645,7 +700,7 @@ def test_schema_config_uses_full_file_path(application, project, monkeypatch, tm
     dialog._browse_schemas()
     assert dialog.schemas_path.text() == str(selected.resolve())
     dialog._scan_schemas()
-    assert calls == [(selected.parent, project.output_root)]
+    assert calls == [(selected, project.output_root)]
     assert dialog.schemas_path.text() == str(selected.resolve())
     dialog.close()
 
@@ -704,13 +759,11 @@ def test_tree_drives_single_unclosable_view_and_navigation(application, project,
     project = replace(project, profiles=(profile,), namelists=(first, second))
     path = project.root / "run.nml"
     path.write_text("&run count=4 /\n")
-    dialog = ConfigurationDialog(project)
-    monkeypatch.setattr(
-        QInputDialog, "getItem", lambda *args: ("Default [default] (configured)", True)
-    )
-    dialog.browseButton_addProject.click()
-    assert dialog.browseButton_addProject.text() == "+"
-    assert dialog.browseButton_addProject.parent() is dialog.treeWidget_projectStructure.header()
+    dialog = _add_project(ConfigurationDialog(project))
+    project_add = dialog.treeWidget_projectStructure.itemWidget(dialog.project_add_item, 0)
+    assert project_add.text() == "+ : Project"
+    assert "text-align: left" in project_add.styleSheet()
+    assert project_add.sizePolicy().horizontalPolicy() == QSizePolicy.Expanding
     assert dialog.treeWidget_projectStructure.maximumWidth() > 275
     assert not dialog.tabs.tabsClosable()
     assert dialog.tabs.count() == 1 and dialog.tabs.currentWidget() is dialog.config_tab
@@ -718,11 +771,23 @@ def test_tree_drives_single_unclosable_view_and_navigation(application, project,
 
     root = dialog.project_items["default"]
     file_item = root.child(0)
+    assert root.text(0) == "Project: default"
+    assert file_item.text(0) == "File: run.nml"
+    assert file_item.child(0).text(0) == "Nml: run"
+    assert dialog.treeWidget_projectStructure.itemWidget(root.child(1), 0).text() == "+ : File"
+    assert file_item.childCount() == 2
+    assert dialog.treeWidget_projectStructure.itemWidget(file_item, 1) is None
+    assert dialog.treeWidget_projectStructure.itemWidget(file_item.child(0), 1) is None
+    assert dialog.config_tab.fileProfilesTable.rowCount() == 1
+    assert dialog.config_tab.fileProfilesTable.item(0, 1).text() == str(path)
+    dialog.treeWidget_projectStructure.itemWidget(root.child(1), 0).click()
+    assert isinstance(dialog.tabs.currentWidget(), FileProfileBuilder)
     dialog.treeWidget_projectStructure.setCurrentItem(file_item)
     dialog.show()
     application.processEvents()
     overview = dialog.tabs.currentWidget()
     assert isinstance(overview, FileProfileOverview)
+    assert isinstance(overview.highlighter, NamelistHighlighter)
     assert overview.fileNameEdit.text() == "run.nml"
     assert overview.currentPathLabel.text() == str(path)
     assert overview.namelistsTable.rowCount() == 2
@@ -760,6 +825,106 @@ def test_tree_drives_single_unclosable_view_and_navigation(application, project,
     dialog.close()
 
 
+def test_standard_project_only_allows_project_removal(application, project, monkeypatch):
+    standard = GuiProjectProfile(
+        "standard", "standard", "Standard", None, project.profiles, custom=False
+    )
+    project = replace(project, project_profiles=(standard,))
+    dialog = _add_project(ConfigurationDialog(project), "standard")
+    root = dialog.project_items["standard"]
+    file_item = root.child(0)
+    assert root.childCount() == 1
+    assert dialog.treeWidget_projectStructure.itemWidget(root, 1) is not None
+    assert file_item.childCount() == 1
+    assert dialog.treeWidget_projectStructure.itemWidget(file_item, 1) is None
+    assert dialog.treeWidget_projectStructure.itemWidget(file_item.child(0), 1) is None
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
+    dialog._remove_tree_item(root)
+    assert not dialog.loaded_projects and "standard" in dialog.available_projects
+    dialog.close()
+
+
+def test_project_file_summary_refits_wrapped_rows(application, project):
+    profile = replace(project.profiles[0], description="wrapped description " * 12)
+    project = replace(project, profiles=(profile,))
+    dialog = _add_project(ConfigurationDialog(project))
+    dialog.show()
+    application.processEvents()
+    table = dialog.config_tab.fileProfilesTable
+    compact = table.rowHeight(0)
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(2, QHeaderView.Interactive)
+    header.resizeSection(2, 60)
+    application.processEvents()
+    assert table.rowHeight(0) > compact
+    dialog.close()
+
+
+def test_empty_dialog_points_to_add_project_once(application, project, monkeypatch):
+    monkeypatch.setattr(ConfigurationDialog, "_choose_project_source", lambda _self: None)
+    dialog = ConfigurationDialog(project)
+    dialog.show()
+    QTest.qWait(250)
+    tip = dialog.onboarding_tip
+    assert isinstance(tip, OnboardingTip)
+    assert tip.isVisible() and tip.outline.isVisible()
+    assert tip.textLabel.text() == "Click here to add a project."
+    dialog.project_add_button.click()
+    application.processEvents()
+    assert not tip.isVisible() and not tip.outline.isVisible()
+    dialog.hide()
+    dialog.show()
+    QTest.qWait(250)
+    assert dialog.onboarding_tip is tip and not tip.isVisible()
+    dialog.close()
+
+
+def test_namelist_highlighter_formats_grammar_tokens(application):
+    document = QTextDocument()
+    highlighter = NamelistHighlighter(document)
+    document.setPlainText(
+        '&run\n  count = 2 ! comment\n  label = "value"\n  enabled = .true.\n/\n'
+    )
+    highlighter.rehighlight()
+    for block_number, token in (
+        (0, "&run"),
+        (1, "count"),
+        (1, "2"),
+        (1, "comment"),
+        (2, '"value"'),
+        (3, ".true."),
+        (4, "/"),
+    ):
+        block = document.findBlockByNumber(block_number)
+        position = block.text().index(token)
+        assert any(
+            item.start <= position and position + len(token) <= item.start + item.length
+            for item in block.layout().formats()
+        )
+
+
+def test_referenced_dimension_button_opens_source(application, project, monkeypatch):
+    project = replace(
+        project,
+        dimension_sources={"n": DimensionSource("run", "count")},
+    )
+    opened = []
+    monkeypatch.setattr(
+        ProfileTab,
+        "reveal_property",
+        lambda _self, page, prop: opened.append((page, prop)),
+    )
+    dialog = _add_project(ConfigurationDialog(project))
+    button = dialog.config_tab.dimension_source_buttons["n"]
+    assert button.text() == "R" and "red" in button.styleSheet() and button.isEnabled()
+    button.click()
+    assert opened == [("run", "count")]
+    assert dialog.treeWidget_projectStructure.currentItem().data(
+        0, Qt.ItemDataRole.UserRole
+    ) == ("namelist", "default", "main", "run")
+    dialog.close()
+
+
 def test_inactive_projects_stay_hidden_and_tree_fills_splitter(application, project):
     profile = project.profiles[0]
     project = replace(
@@ -771,7 +936,7 @@ def test_inactive_projects_stay_hidden_and_tree_fills_splitter(application, proj
     )
     dialog = ConfigurationDialog(project)
     assert not dialog.loaded_projects
-    assert dialog.treeWidget_projectStructure.topLevelItemCount() == 0
+    assert dialog.treeWidget_projectStructure.topLevelItemCount() == 1
     _add_project(dialog, "one")
     _add_project(dialog, "two")
     dialog.treeWidget_projectStructure.setCurrentItem(dialog.project_items["one"])
@@ -808,12 +973,14 @@ def test_explicit_project_profiles_are_preloaded(application, project):
         ),
     )
     assert list(dialog.loaded_projects) == ["one", "two"]
-    assert dialog.treeWidget_projectStructure.topLevelItemCount() == 2
+    assert dialog.treeWidget_projectStructure.topLevelItemCount() == 3
     assert dialog.active_project == "one"
     dialog.close()
 
 
 def test_project_picker_distinguishes_duplicate_titles(application, project, monkeypatch):
+    from nml_tools.gui import app
+
     profile = project.profiles[0]
     project = replace(
         project,
@@ -823,27 +990,29 @@ def test_project_picker_distinguishes_duplicate_titles(application, project, mon
         ),
     )
     dialog = ConfigurationDialog(project)
-    monkeypatch.setattr(
-        QInputDialog, "getItem", lambda *args: ("Same title [two] (configured)", True)
-    )
+
+    def choose_two(picker):
+        combo = picker.findChild(QComboBox)
+        data = [combo.itemData(index) for index in range(combo.count())]
+        assert data[0:2] == [("configured", "one"), ("configured", "two")]
+        assert data[-1] == ("custom", "") and None in data
+        combo.setCurrentIndex(data.index(("configured", "two")))
+        return 1
+
+    monkeypatch.setattr(app, "_exec", choose_two)
     dialog._add_selected_project()
     assert list(dialog.loaded_projects) == ["two"]
     dialog.close()
 
 
-def test_relative_output_profile_discovery_uses_schema_root(application, project, monkeypatch):
-    from nml_tools.gui import app
-
-    roots = []
-    monkeypatch.setattr(
-        app,
-        "discover_project_files",
-        lambda _project, output_roots: roots.append(output_roots) or (),
-    )
+def test_relative_output_uses_schema_root(application, project):
     dialog = _add_project(ConfigurationDialog(project))
     dialog.config_tab.output_path.setText("relative")
-    dialog.config_tab.reset_builder(())
-    assert roots[-1] == ((project.root / "relative").resolve(),)
+    dialog.config_tab.set.click()
+    assert dialog.loaded_projects["default"].output_dir == (project.root / "relative").resolve()
+    assert dialog.config_tab.fileProfilesTable.item(0, 1).text() == str(
+        (project.root / "relative" / "run.nml").resolve()
+    )
     dialog.close()
 
 

@@ -127,6 +127,24 @@ def test_profiles_filter_in_toml_order_and_validate_names(tmp_path):
             load_project(tmp_path, file_profiles=selection)
 
 
+def test_load_project_falls_back_to_pyproject_tool_table(tmp_path):
+    _write_project(tmp_path)
+    config = (tmp_path / "nml-config.toml").read_text(encoding="utf-8")
+    config = "[tool.nml-tools]\n" + config.replace(
+        "[dimensions]", "[tool.nml-tools.dimensions]"
+    ).replace("[[namelists]]", "[[tool.nml-tools.namelists]]").replace(
+        "[[file_profiles]]", "[[tool.nml-tools.file_profiles]]"
+    )
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(config, encoding="utf-8")
+    assert load_project(tmp_path).config_path == (tmp_path / "nml-config.toml").resolve()
+    assert load_project(pyproject).config_path == pyproject.resolve()
+    (tmp_path / "nml-config.toml").unlink()
+    project = load_project(tmp_path)
+    assert project.config_path == pyproject.resolve()
+    assert [profile.key for profile in project.profiles] == ["secondary", "main"]
+
+
 def test_load_project_marks_only_referenced_arrays(tmp_path):
     _write_project(tmp_path)
     schemas = tmp_path / "nml-schemas"

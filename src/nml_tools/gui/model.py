@@ -223,6 +223,7 @@ class GuiProject:
     namelists: tuple[NamelistPage, ...] = ()
     project_profiles: tuple[GuiProjectProfile, ...] = ()
     dimension_sources: dict[str, DimensionSource] = field(default_factory=dict)
+    config_path: Path | None = None
 
     @property
     def output_root(self) -> Path:
@@ -259,8 +260,10 @@ def load_project(
         if project_profiles is not None:
             raise ValueError("pass project_profiles or file_profiles, not both")
         project_profiles = file_profiles
-    root = Path.cwd() if schemas_dir is None else Path(schemas_dir)
-    root = root.resolve()
+    source = Path.cwd() if schemas_dir is None else Path(schemas_dir)
+    source = source.resolve()
+    config_path = source if source.is_file() else find_config_path(source)
+    root = config_path.parent
     output_dirs: dict[str, Path] | None = None
     if isinstance(output_dir, Mapping):
         output_dirs = {}
@@ -274,10 +277,6 @@ def load_project(
         output_root = root
     else:
         output_root = root if output_dir is None else Path(output_dir).resolve()
-    config_path = root / "nml-config.toml"
-    if not config_path.is_file():
-        raise RuntimeError(f"nml-config.toml was not found in {root}")
-
     try:
         config, resolved_path = _load_config_checked(config_path)
         constants, _ = _load_constants(config)
@@ -317,7 +316,7 @@ def load_project(
             configured.title or configured.name,
             configured.description,
             tuple(by_key[key] for key in configured.file_profiles),
-            config_path,
+            resolved_path,
             False,
             output_dirs.get(configured.key) if output_dirs is not None else output_root,
         )
@@ -331,7 +330,7 @@ def load_project(
                 "Default",
                 None,
                 tuple(profiles),
-                config_path,
+                resolved_path,
                 False,
                 output_dirs.get("default") if output_dirs is not None else output_root,
             ),
@@ -345,6 +344,7 @@ def load_project(
         namelists,
         configured_projects,
         metadata.dimension_sources,
+        resolved_path.resolve(),
     )
     if project_profiles is None or project_profiles == {}:
         if output_dirs is not None:
@@ -415,6 +415,23 @@ def load_project(
         raise ValueError("output_dir must contain exactly the selected project profiles")
     return replace(
         project, profiles=tuple(union.values()), project_profiles=tuple(selected_projects)
+    )
+
+
+def find_config_path(root: Path) -> Path:
+    """Prefer nml-config.toml, then pyproject.toml, in one schema directory."""
+    config = root / "nml-config.toml"
+    if config.is_file():
+        return config
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file():
+        raw = _load_toml(pyproject)
+        tool = raw.get("tool")
+        if isinstance(tool, Mapping) and isinstance(tool.get("nml-tools"), Mapping):
+            return pyproject
+    raise RuntimeError(
+        f"no config found in {root}; create nml-config.toml or add "
+        "[tool.nml-tools] to pyproject.toml"
     )
 
 
@@ -509,17 +526,34 @@ def create_virtual_project(
     return replace(project, profiles=(profile,))
 
 
+def profile_from_namelist(project: GuiProject, path: Path) -> GuiProfile:
+    """Describe one saved namelist file using the configured schema registry."""
+    _, groups = _parsed_groups(path)
+    pages = {page.key: page for page in project.namelists}
+    unknown = [name for name in groups if name not in pages]
+    if unknown:
+        raise ValueError(f"'{path.name}' has unknown namelists: {', '.join(unknown)}")
+    name = path.stem
+    return GuiProfile(
+        name, name.lower(), name, None, path.name, tuple(pages[group] for group in groups)
+    )
+
+
 def discover_project_files(
     project: GuiProject, output_roots: Iterable[Path] = ()
 ) -> tuple[Path, ...]:
     """Find additional project-profile TOML files in input and output roots."""
-    config = (project.root / "nml-config.toml").resolve()
+    config = (
+        project.config_path.resolve()
+        if project.config_path
+        else (project.root / "nml-config.toml").resolve()
+    )
     paths = {
         path.resolve()
         for root in {project.root, project.output_root, *output_roots}
         if root.is_dir()
         for path in root.glob("*.toml")
-        if path.name != "nml-config.toml" and path.resolve() != config
+        if path.name not in {"nml-config.toml", "pyproject.toml"} and path.resolve() != config
     }
     return tuple(sorted(paths))
 
