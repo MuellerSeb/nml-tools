@@ -20,7 +20,7 @@ from nml_tools.schema import resolve_schema
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("qtpy")
 try:
-    from qtpy.QtCore import Qt
+    from qtpy.QtCore import QPoint, QRect, Qt
     from qtpy.QtGui import QTextDocument
     from qtpy.QtTest import QTest
     from qtpy.QtWidgets import (
@@ -166,6 +166,7 @@ def test_inline_array_title_and_hint_styles(application, monkeypatch):
     inline = array.field.table_editor
     assert inline.titleLabel.text() == "Body weights (weights) *"
     assert inline.separatorLine is not None and not inline.infoButton.isHidden()
+    assert inline.infoButton.styleSheet().startswith("QToolButton#infoButton")
     assert array.fieldLabel.isHidden() and array.infoButton.isHidden()
     assert inline.tableWidget.columnCount() == 2
     assert [inline.tableWidget.horizontalHeaderItem(i).text() for i in range(2)] == ["1", "2"]
@@ -869,6 +870,11 @@ def test_empty_dialog_points_to_add_project_once(application, project, monkeypat
     assert isinstance(tip, OnboardingTip)
     assert tip.isVisible() and tip.outline.isVisible()
     assert tip.textLabel.text() == "Click here to add a project."
+    target = QRect(
+        dialog.project_add_button.mapTo(dialog, QPoint(0, 0)),
+        dialog.project_add_button.size(),
+    )
+    assert tip.x() > target.right()
     dialog.project_add_button.click()
     application.processEvents()
     assert not tip.isVisible() and not tip.outline.isVisible()
@@ -883,7 +889,8 @@ def test_namelist_highlighter_formats_grammar_tokens(application):
     document = QTextDocument()
     highlighter = NamelistHighlighter(document)
     document.setPlainText(
-        '&run\n  count = 2 ! comment\n  label = "value"\n  enabled = .true.\n/\n'
+        "&run\n  count = 2 ! comment\n  values(:,2) = 1\n  domains(1)%nx = 3\n"
+        '  label = "value"\n  enabled = .true.\n/\n'
     )
     highlighter.rehighlight()
     for block_number, token in (
@@ -891,9 +898,12 @@ def test_namelist_highlighter_formats_grammar_tokens(application):
         (1, "count"),
         (1, "2"),
         (1, "comment"),
-        (2, '"value"'),
-        (3, ".true."),
-        (4, "/"),
+        (2, "values"),
+        (3, "domains"),
+        (3, "nx"),
+        (4, '"value"'),
+        (5, ".true."),
+        (6, "/"),
     ):
         block = document.findBlockByNumber(block_number)
         position = block.text().index(token)
@@ -916,7 +926,9 @@ def test_referenced_dimension_button_opens_source(application, project, monkeypa
     )
     dialog = _add_project(ConfigurationDialog(project))
     button = dialog.config_tab.dimension_source_buttons["n"]
-    assert button.text() == "R" and "red" in button.styleSheet() and button.isEnabled()
+    assert button.text() == "R" and button.isEnabled()
+    assert button.styleSheet().startswith("QPushButton#dimensionSourceButton")
+    assert "red" in button.styleSheet()
     button.click()
     assert opened == [("run", "count")]
     assert dialog.treeWidget_projectStructure.currentItem().data(

@@ -13,7 +13,7 @@
     },
     {
       "name": "variable.assignment.namelist",
-      "match": "\\w+(?=\\s*=)"
+      "match": "\\b\\w+(?:\\s*\\([^)]*\\))?(?:%\\w+(?:\\s*\\([^)]*\\))?)*(?=\\s*=)"
     },
     {
       "name": "keyword.operator.assignment.namelist",

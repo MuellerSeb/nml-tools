@@ -618,7 +618,10 @@ class InlineArrayTable(QWidget):
         description = schema.get("description")
         has_description = isinstance(description, str) and bool(description.strip())
         self.infoButton.setVisible(has_description)
-        self.infoButton.setStyleSheet(f"color: {_palette_color(QPalette.Link)}; font-weight: bold;")
+        self.infoButton.setStyleSheet(
+            f"QToolButton#infoButton {{ color: {_palette_color(QPalette.Link)}; "
+            "font-weight: bold; }}"
+        )
         if has_description:
             self.infoButton.clicked.connect(
                 lambda: QMessageBox.information(
@@ -1067,7 +1070,10 @@ class FieldRow(QWidget):
             self.infoButton.clicked.connect(
                 lambda: QMessageBox.information(self, str(schema.get("title", name)), description)
             )
-        self.infoButton.setStyleSheet(f"color: {_palette_color(QPalette.Link)}; font-weight: bold;")
+        self.infoButton.setStyleSheet(
+            f"QToolButton#infoButton {{ color: {_palette_color(QPalette.Link)}; "
+            "font-weight: bold; }}"
+        )
         self._update_decorations()
         self.editorLayout.addWidget(self.field)
         if isinstance(self.field, ScalarField) and (value is MISSING or value == ""):
@@ -1757,7 +1763,10 @@ def _property_widget(
     widget.editorHost.hide()
     description = str(schema.get("description", "")).strip()
     widget.infoButton.setVisible(bool(description))
-    widget.infoButton.setStyleSheet(f"color: {_palette_color(QPalette.Link)}; font-weight: bold;")
+    widget.infoButton.setStyleSheet(
+        f"QToolButton#infoButton {{ color: {_palette_color(QPalette.Link)}; "
+        "font-weight: bold; }}"
+    )
     if description:
         widget.infoButton.clicked.connect(
             lambda: QMessageBox.information(widget, str(schema.get("title", name)), description)

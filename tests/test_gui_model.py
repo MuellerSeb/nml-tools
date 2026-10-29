@@ -210,6 +210,37 @@ def test_all_saves_validate_before_replacing_any_file(tmp_path):
     assert not (tmp_path / "main.nml").exists()
 
 
+def test_all_saves_roll_back_when_one_replace_fails(tmp_path, monkeypatch):
+    from nml_tools.gui import model
+
+    _write_project(tmp_path)
+    project = load_project(tmp_path)
+    secondary = tmp_path / "secondary.nml"
+    main = tmp_path / "main.nml"
+    secondary.write_text("&beta enabled=.true. /\n")
+    main.write_text("&alpha count=1 /\n")
+    original = {path: path.read_text() for path in (secondary, main)}
+    replace = model.os.replace
+
+    def fail_second(source, destination):
+        source_path, destination_path = Path(source), Path(destination)
+        if destination_path == main and ".backup." not in source_path.name:
+            raise OSError("simulated replacement failure")
+        replace(source, destination)
+
+    monkeypatch.setattr(model.os, "replace", fail_second)
+    with pytest.raises(OSError, match="simulated replacement failure"):
+        save_profiles(
+            project,
+            [
+                (project.profile("secondary"), {"beta": {"enabled": False}}, {}),
+                (project.profile("main"), {"alpha": {"count": 2}}, {}),
+            ],
+        )
+    assert {path: path.read_text() for path in (secondary, main)} == original
+    assert not list(tmp_path.glob(".*.nml.*"))
+
+
 def test_missing_input_errors_and_partial_array_input(tmp_path):
     _write_project(tmp_path)
     project = load_project(tmp_path)

@@ -1282,12 +1282,11 @@ def save_profiles(
         for replacement in rendered.values():
             text += ("\n" if text and not text.endswith("\n") else "") + replacement
         outputs[path] = text
-    for path, text in outputs.items():
-        _atomic_write(path, text)
+    _atomic_write_many(outputs)
 
 
-def _atomic_write(path: Path, content: str) -> None:
-    """Replace a namelist file atomically after writing beside the target."""
+def _stage_write(path: Path, content: str) -> Path:
+    """Write and return one temporary file beside its destination."""
     path.parent.mkdir(parents=True, exist_ok=True)
     mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else None
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -1297,7 +1296,59 @@ def _atomic_write(path: Path, content: str) -> None:
             handle.write(content)
         if mode is not None:
             os.chmod(temporary, mode)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return temporary
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Replace one file atomically after writing beside the target."""
+    temporary = _stage_write(path, content)
+    try:
         os.replace(temporary, path)
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
+
+
+def _atomic_write_many(outputs: Mapping[Path, str]) -> None:
+    """Stage every output, then replace all destinations with rollback."""
+    staged: dict[Path, Path] = {}
+    backups: dict[Path, Path | None] = {}
+    try:
+        for path, content in outputs.items():
+            staged[path] = _stage_write(path, content)
+        for path, temporary in staged.items():
+            backup = None
+            if path.exists():
+                descriptor, backup_name = tempfile.mkstemp(
+                    prefix=f".{path.name}.backup.", dir=path.parent
+                )
+                os.close(descriptor)
+                backup = Path(backup_name)
+                try:
+                    os.replace(path, backup)
+                except Exception:
+                    backup.unlink(missing_ok=True)
+                    raise
+            backups[path] = backup
+            os.replace(temporary, path)
+    except Exception as error:
+        rollback_error = None
+        for path, backup in reversed(tuple(backups.items())):
+            try:
+                if backup is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    os.replace(backup, path)
+            except OSError as exc:
+                rollback_error = rollback_error or exc
+        for temporary in staged.values():
+            temporary.unlink(missing_ok=True)
+        if rollback_error is not None:
+            raise RuntimeError("failed to roll back namelist outputs") from error
+        raise
+    for backup in backups.values():
+        if backup is not None:
+            backup.unlink(missing_ok=True)

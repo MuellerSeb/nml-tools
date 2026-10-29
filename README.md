@@ -725,10 +725,11 @@ file_profiles = ["main"]
 ```
 
 All members describe files needed for the selected project setup, each subject
-to its existing file-profile validation rules. These profiles are metadata for
-future tooling: defining them does not select a project, validate files
-together, or change generated outputs. Project profiles impose no dimension
-source uniqueness restriction and are independent of dimension source wiring.
+to its existing file-profile validation rules. The GUI uses this metadata to
+offer complete projects for editing; generation and validation commands do not
+select a project or change their outputs because it exists. When the GUI edits
+a project, every dimension-source namelist used by that project must occur in
+exactly one of its file profiles.
 
 ### templates (array)
 
@@ -948,20 +949,34 @@ nml-tools gui -i /path/to/schemas -o /path/to/project
 ```
 
 QtPy also permits other supported Qt bindings; PyQt5 is the tested binding on
-Python 3.8. Omit `-i` to use the current directory, and `-o` to save alongside
-`nml-config.toml`.
+Python 3.8. The input directory may contain `nml-config.toml` or a
+`pyproject.toml` with `[tool.nml-tools]`; `nml-config.toml` takes precedence.
+Omit `-i` to use the current directory. Omit `-o` to start projects beside the
+selected config; each project's Settings page can choose a different output
+directory.
 
 The editor loads each profile's `default_file` from the output directory and
-saves directly to that namelist file. Missing values use schema defaults, then
-examples or type-specific suggestions. Invalid input is reported. No JSON
-configuration or JSON-to-namelist conversion is involved. Selected groups are
-rewritten on save; other groups and their comments remain intact.
+saves directly to that namelist file. Schema defaults are written when needed;
+examples and type-specific suggestions are hints until the user accepts or
+edits them. Invalid input is reported. No JSON configuration or
+JSON-to-namelist conversion is involved. Selected groups are rewritten on
+save; other groups and their comments remain intact.
 
-Each profile has a tab with a namelist list, editable pages, navigation, reset,
-cancel, and save actions. The Config tab applies runtime dimensions with Run;
-the `+` tab can import a `.nml` file or create another profile. One-element
-one-dimensional arrays use inline scalar or derived-object editors while
-remaining arrays in the saved namelist. Resizable arrays retain a resize action.
+An interactive launch starts with an empty project tree and points to
+`+ : Project`. Configured projects can be added from the config, while custom
+projects can be built from file profiles and namelist schemas. Selecting a
+project opens its Settings page; selecting a file shows its namelists and a
+syntax-highlighted file preview; selecting a namelist opens its editable form.
+The Back and Next controls move through that file's namelists. Standard project
+definitions may be removed from the session and re-added, but their configured
+file/namelist structure is protected. Custom projects expose the corresponding
+add and remove actions.
+
+One- and two-dimensional arrays use inline tables with copy/paste; a
+one-element one-dimensional array presents its element editor directly.
+Higher-rank arrays use the guidata array editor. Deferred `:` dimensions retain
+a resize action. File-path fields provide browsing and store paths relative to
+the project's output directory.
 
 Applications can launch a subset of the configured profiles:
 
@@ -990,10 +1005,13 @@ profile/namelist/field values applied over existing input. With no project
 requests, the tree starts empty for interactive project selection;
 `default_output_dir` controls the initial output directory for those projects.
 
-Named runtime dimensions come from TOML, `initial_dimensions`, or the Config
-controls; partial namelist assignments cannot reliably recover them. Existing
-Qt applications reuse their QApplication; importing `nml_tools.gui` alone
-does not import Qt.
+For sourced runtime dimensions, `initial_dimensions` takes precedence over an
+explicit saved source property, which takes precedence over the TOML default.
+The GUI also recovers extents for older unsourced schemas from saved indexed
+arrays where possible. Settings controls can then change the dimensions and
+rebuild the affected editors; `R` opens a configured source property. Existing
+Qt applications reuse their QApplication; importing `nml_tools.gui` alone does
+not import Qt.
 
 ## Error handling
 

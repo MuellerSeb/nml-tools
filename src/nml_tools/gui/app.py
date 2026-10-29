@@ -409,8 +409,11 @@ class ProfileConfigTab(QWidget):
                 layout.setContentsMargins(0, 0, 0, 0)
                 layout.addWidget(box)
                 button = QPushButton("R", container)
+                button.setObjectName("dimensionSourceButton")
                 button.setFixedWidth(24)
-                button.setStyleSheet("color: red; font-weight: bold")
+                button.setStyleSheet(
+                    "QPushButton#dimensionSourceButton { color: red; font-weight: bold; }"
+                )
                 button.setToolTip(f"Open source: {source.namelist}%{source.property}")
                 layout.addWidget(button)
                 self.dimensionsLayout.addRow(name, container)

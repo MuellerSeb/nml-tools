@@ -49,10 +49,14 @@ class OnboardingTip(QFrame):
         width = max(160, min(300, self.dialog.width() - 32))
         self.setFixedWidth(width)
         self.adjustSize()
-        y = target.bottom() + 8
-        if y + self.height() > self.dialog.height() - 8:
-            y = max(8, target.top() - self.height() - 8)
-        x = min(max(16, target.left()), self.dialog.width() - width - 16)
+        x = max(16, min(target.right() + 8, self.dialog.width() - width - 16))
+        y = max(
+            8,
+            min(
+                target.center().y() - self.height() // 2,
+                self.dialog.height() - self.height() - 8,
+            ),
+        )
         self.move(x, y)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
