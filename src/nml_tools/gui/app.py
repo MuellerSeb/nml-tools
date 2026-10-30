@@ -1828,6 +1828,16 @@ class ConfigurationDialog(QDialog):
                 if previous is not None:
                     editor.saved_values = copy.deepcopy(previous.saved_values)
                     editor.saved_dimensions = dict(previous.saved_dimensions)
+                    for index, page in enumerate(profile.pages):
+                        if page.name in previous.forms:
+                            editor._ensure_form(index)
+                    editor.form_saved.update(
+                        {
+                            name: copy.deepcopy(values)
+                            for name, values in previous.form_saved.items()
+                            if name in editor.forms
+                        }
+                    )
         except Exception:
             for editor in prepared.values():
                 editor.deleteLater()

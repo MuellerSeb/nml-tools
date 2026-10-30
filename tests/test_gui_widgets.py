@@ -472,6 +472,35 @@ def test_failed_editor_rebuild_preserves_previous_state(application, project, mo
     dialog.close()
 
 
+def test_editor_rebuild_preserves_unsaved_lazy_form(application, project, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
+    output = NamelistPage(
+        "output",
+        "output",
+        {
+            "type": "object",
+            "x-fortran-namelist": "output",
+            "properties": {"enabled": {"type": "boolean", "default": False}},
+        },
+    )
+    profile = replace(project.profiles[0], pages=(*project.profiles[0].pages, output))
+    project = replace(project, profiles=(profile,), namelists=(*project.namelists, output))
+    dialog = _add_project(ConfigurationDialog(project))
+    path = project.root / "run.nml"
+    editor = dialog.editors[path]
+    editor.select_page("output")
+    editor.forms["output"].rows["enabled"].field.set_value(True)
+    assert editor.is_dirty()
+
+    dialog._rebuild_project_editors("default")
+    rebuilt = dialog.editors[path]
+    assert rebuilt.values()["output"]["enabled"] is True
+    assert "output" in rebuilt.forms
+    assert rebuilt.form_saved["output"]["enabled"] is False
+    assert rebuilt.is_dirty()
+    dialog.close()
+
+
 def test_example_dimension_source_resize_and_config_tab(application, tmp_path, monkeypatch):
     from pathlib import Path
     from shutil import copytree, rmtree
@@ -790,6 +819,7 @@ def test_browsed_namelist_imports_values_into_project_output(
 ):
     from nml_tools.gui import app
 
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
     source = project.root / "outside" / "main.nml"
     source.parent.mkdir()
     source.write_text("&run count=42 /\n")
