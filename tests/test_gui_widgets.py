@@ -1280,6 +1280,34 @@ def test_namelist_highlighter_formats_grammar_tokens(application):
         )
 
 
+def test_namelist_highlighter_handles_fortran_quoted_strings(application):
+    document = QTextDocument()
+    highlighter = NamelistHighlighter(document)
+    document.setPlainText(
+        'label = "He said ""Hello"" ! still text"\n'
+        "author = 'It''s working'\n"
+        'message = "quoted" ! actual comment\n'
+        '! comment "quoted"\n'
+    )
+    highlighter.rehighlight()
+
+    def colour(block_number, token):
+        block = document.findBlockByNumber(block_number)
+        position = block.text().index(token)
+        item = next(
+            item
+            for item in block.layout().formats()
+            if item.start <= position < item.start + item.length
+        )
+        return item.format.foreground().color().name()
+
+    assert colour(0, '""Hello""') == "#ab2b2c"
+    assert colour(0, "!") == "#ab2b2c"
+    assert colour(1, "''") == "#ab2b2c"
+    assert colour(2, "!") == "#4ddd48"
+    assert colour(3, '"') == "#4ddd48"
+
+
 def test_referenced_dimension_button_opens_source(application, project, monkeypatch):
     project = replace(
         project,

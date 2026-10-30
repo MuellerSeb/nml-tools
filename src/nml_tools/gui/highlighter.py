@@ -74,7 +74,7 @@ class NamelistHighlighter(QSyntaxHighlighter):
     def __init__(self, document: QTextDocument) -> None:
         super().__init__(document)
         patterns = _grammar().get("patterns", ())
-        self.rules: list[tuple[int, QRegularExpression, QTextCharFormat]] = []
+        self.rules: list[tuple[int, str, QRegularExpression, QTextCharFormat]] = []
         if not isinstance(patterns, Sequence) or isinstance(patterns, (str, bytes)):
             raise RuntimeError("namelist syntax grammar patterns must be an array")
         for rule in patterns:
@@ -88,13 +88,25 @@ class NamelistHighlighter(QSyntaxHighlighter):
             if not expression.isValid():
                 raise RuntimeError(f"invalid namelist syntax pattern: {expression.errorString()}")
             priority = 2 if scope.startswith("comment.") else int(scope.startswith("string."))
-            self.rules.append((priority, expression, _text_format(scope)))
+            self.rules.append((priority, scope, expression, _text_format(scope)))
         self.rules.sort(key=lambda item: item[0])
 
     def highlightBlock(self, text: str) -> None:
         """Highlight every grammar match in one document block."""
-        for _priority, expression, text_format in self.rules:
+        quoted = []
+        for _priority, scope, expression, _text_format in self.rules:
+            if not scope.startswith("string.quoted."):
+                continue
             matches = expression.globalMatch(text)
             while matches.hasNext():
                 match = matches.next()
+                quoted.append((match.capturedStart(), match.capturedEnd()))
+        for _priority, scope, expression, text_format in self.rules:
+            matches = expression.globalMatch(text)
+            while matches.hasNext():
+                match = matches.next()
+                if scope.startswith("comment.") and any(
+                    start <= match.capturedStart() < end for start, end in quoted
+                ):
+                    continue
                 self.setFormat(match.capturedStart(), match.capturedLength(), text_format)

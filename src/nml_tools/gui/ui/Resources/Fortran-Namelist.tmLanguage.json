@@ -27,10 +27,23 @@
       "name": "string.quoted.double.namelist",
       "begin": "\"",
       "end": "\"",
+      "applyEndPatternLast": true,
       "patterns": [
         {
           "name": "constant.character.escape.namelist",
-          "match": "\\\\."
+          "match": "\"\""
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.namelist",
+      "begin": "'",
+      "end": "'",
+      "applyEndPatternLast": true,
+      "patterns": [
+        {
+          "name": "constant.character.escape.namelist",
+          "match": "''"
         }
       ]
     },
