@@ -19,11 +19,14 @@ from qtpy.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -33,6 +36,7 @@ from qtpy.QtWidgets import (
     QSpinBox,
     QTableWidgetItem,
     QToolButton,
+    QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -597,9 +601,24 @@ class NamelistPicker(QWidget):
         self.available.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.add = self.addButton
         present = {page.key for page in profile.pages}
+        standard = next(
+            (item for item in project.profiles if item.key == profile.key), None
+        )
+        allowed = {page.key for page in standard.pages} if standard is not None else None
         for page in project.namelists:
             if page.key not in present:
-                self.available.addItem(ConfigurationDialog._schema_item(page.name, page.key))
+                item = ConfigurationDialog._schema_item(page.name, page.key)
+                if allowed is not None and page.key not in allowed:
+                    item.setForeground(
+                        self.palette().color(
+                            QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text
+                        )
+                    )
+                    item.setToolTip(
+                        f"The standard file profile '{profile.name}' does not contain "
+                        "this namelist."
+                    )
+                self.available.addItem(item)
 
     def schema_keys(self) -> list[str]:
         """Return selected schema keys in list order."""
@@ -902,20 +921,36 @@ class ConfigurationDialog(QDialog):
         self, title: str, suggested: str = "", current_key: str | None = None
     ) -> tuple[str, str] | None:
         """Ask for a unique custom project name and TOML filename."""
-        name, accepted = QInputDialog.getText(
-            self, title, "Project name", text=suggested
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        layout = QFormLayout(dialog)
+        name_edit = QLineEdit(suggested, dialog)
+        name_edit.setObjectName("projectNameEdit")
+        filename_edit = QLineEdit(f"{suggested}.toml" if suggested else "", dialog)
+        filename_edit.setObjectName("projectFilenameEdit")
+        automatic = [filename_edit.text()]
+
+        def update_filename(name: str) -> None:
+            if filename_edit.text() == automatic[0]:
+                automatic[0] = f"{name}.toml" if name else ""
+                filename_edit.setText(automatic[0])
+
+        name_edit.textChanged.connect(update_filename)
+        layout.addRow("Project name", name_edit)
+        layout.addRow("Project profile TOML filename", filename_edit)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
         )
-        if not accepted:
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+        if not _exec(dialog):
             return None
-        name = validate_project_name(name)
+        name = validate_project_name(name_edit.text())
         if name.lower() in self.loaded_projects and name.lower() != current_key:
             raise ValueError(f"project '{name}' is already loaded")
-        filename, accepted = QInputDialog.getText(
-            self, title, "Project profile TOML filename", text=f"{name}.toml"
-        )
-        if not accepted:
-            return None
-        filename = validate_project_filename(filename)
+        filename = validate_project_filename(filename_edit.text())
         if (self.project.root / filename).exists():
             raise ValueError(f"TOML file '{filename}' already exists")
         return name, filename
@@ -1035,10 +1070,23 @@ class ConfigurationDialog(QDialog):
             item = file_item.child(index)
             data = item.data(0, Qt.ItemDataRole.UserRole)
             if data and data[0] == "namelist" and data[3] == source.namelist:
+                file_item.setExpanded(True)
                 self.treeWidget_projectStructure.setCurrentItem(item)
                 self._ensure_editor(project_key, profile).reveal_property(
                     source.namelist, source.property
                 )
+                tree = self.treeWidget_projectStructure
+
+                def highlight(
+                    selected_tree: QTreeWidget = tree,
+                    selected_item: QTreeWidgetItem = item,
+                ) -> None:
+                    selected_tree.clearSelection()
+                    selected_item.setSelected(True)
+                    selected_tree.scrollToItem(selected_item)
+                    selected_tree.setFocus()
+
+                QTimer.singleShot(0, highlight)
                 return
 
     def _build_tree(self, profile: GuiProjectProfile) -> None:
@@ -1153,18 +1201,18 @@ class ConfigurationDialog(QDialog):
 
     def _clear_overview(self) -> None:
         """Dispose transient overview and add-form pages."""
-        if self.empty_view is not None:
-            self._detach_tab(self.empty_view)
-            self.empty_view.deleteLater()
-            self.empty_view = None
-        if self.current_overview is not None:
-            self._detach_tab(self.current_overview)
-            self.current_overview.deleteLater()
-            self.current_overview = None
-        if self.current_tool is not None:
-            self._detach_tab(self.current_tool)
-            self.current_tool.deleteLater()
-            self.current_tool = None
+        empty_view, self.empty_view = self.empty_view, None
+        if empty_view is not None:
+            self._detach_tab(empty_view)
+            empty_view.deleteLater()
+        overview, self.current_overview = self.current_overview, None
+        if overview is not None:
+            self._detach_tab(overview)
+            overview.deleteLater()
+        tool, self.current_tool = self.current_tool, None
+        if tool is not None:
+            self._detach_tab(tool)
+            tool.deleteLater()
 
     def _show_project(self, key: str) -> None:
         """Activate one project's cached editor state."""
@@ -1565,7 +1613,7 @@ class ConfigurationDialog(QDialog):
         try:
             if not selected:
                 raise ValueError("select at least one namelist")
-            current = self._customize(self.loaded_projects[project_key])
+            current = self.loaded_projects[project_key]
             profiles = list(current.profiles)
             index = next(i for i, item in enumerate(profiles) if item.key == profile_key)
             profile = profiles[index]
@@ -1573,6 +1621,21 @@ class ConfigurationDialog(QDialog):
             additions = tuple(page for page in self.project.namelists if page.key in selected_keys)
             if len(additions) != len(selected_keys):
                 raise ValueError("selected namelist is unknown")
+            standard = next(
+                (item for item in self.project.profiles if item.key == profile_key), None
+            )
+            allowed = {page.key for page in standard.pages} if standard is not None else set()
+            outside = [page.name for page in additions if page.key not in allowed]
+            if standard is not None and outside and not current.custom:
+                QMessageBox.information(
+                    self,
+                    "Custom project required",
+                    f"Standard file profile '{standard.name}' does not contain: "
+                    f"{', '.join(outside)}.\n\nA custom project will be created.",
+                )
+            current = self._customize(current)
+            profiles = list(current.profiles)
+            profile = profiles[index]
             profiles[index] = replace(profile, pages=(*profile.pages, *additions))
             checked = ensure_dimension_sources(self.project, profiles)
             current = replace(current, profiles=checked)

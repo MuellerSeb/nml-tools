@@ -30,6 +30,7 @@ try:
         QComboBox,
         QHeaderView,
         QLabel,
+        QLineEdit,
         QMessageBox,
         QPushButton,
         QSizePolicy,
@@ -859,6 +860,76 @@ def test_namelist_action_adds_only_missing_schema(application, project):
     dialog.close()
 
 
+def test_transient_cleanup_is_reentrant(application, project, monkeypatch):
+    dialog = _add_project(ConfigurationDialog(project))
+    dialog._show_namelist_picker("default", "main")
+    tool = dialog.current_tool
+    original = dialog._detach_tab
+    reentered = []
+
+    def detach(widget):
+        original(widget)
+        if widget is tool and not reentered:
+            reentered.append(widget)
+            dialog._clear_overview()
+
+    monkeypatch.setattr(dialog, "_detach_tab", detach)
+    dialog._clear_overview()
+    assert reentered == [tool] and dialog.current_tool is None
+    dialog.close()
+
+
+def test_standard_profile_marks_external_namelist_and_customizes(
+    application, project, monkeypatch
+):
+    output = NamelistPage(
+        "output",
+        "output",
+        {
+            "type": "object",
+            "x-fortran-namelist": "output",
+            "properties": {"enabled": {"type": "boolean"}},
+        },
+    )
+    standard = GuiProjectProfile(
+        "standard", "standard", "Standard", None, project.profiles
+    )
+    project = replace(
+        project,
+        namelists=(*project.namelists, output),
+        project_profiles=(standard,),
+    )
+    dialog = _add_project(ConfigurationDialog(project), "standard")
+    dialog._show_namelist_picker("standard", "main")
+    picker = dialog.current_tool
+    assert isinstance(picker, NamelistPicker)
+    item = picker.available.item(0)
+    assert item.text() == "output" and item.flags() & Qt.ItemFlag.ItemIsSelectable
+    assert item.foreground().color() == picker.palette().color(
+        QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text
+    )
+    messages = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, _title, message: messages.append(message),
+    )
+
+    def custom_identity(*_args):
+        assert messages
+        return "custom", "custom.toml"
+
+    monkeypatch.setattr(dialog, "_custom_project_identity", custom_identity)
+    item.setSelected(True)
+    picker.add.click()
+    assert "'main' does not contain: output" in messages[0]
+    assert [page.key for page in dialog.loaded_projects["custom"].profiles[0].pages] == [
+        "run",
+        "output",
+    ]
+    dialog.close()
+
+
 def test_schema_config_uses_full_file_path(application, project, monkeypatch, tmp_path):
     from nml_tools.gui import app
 
@@ -1117,14 +1188,25 @@ def test_referenced_dimension_button_opens_source(application, project, monkeypa
     )
     dialog = _add_project(ConfigurationDialog(project))
     button = dialog.config_tab.dimension_source_buttons["n"]
+    file_item = dialog._profile_tree_item("default", "main")
+    assert file_item is not None
+    file_item.setExpanded(False)
+    dialog.show()
+    application.processEvents()
     assert button.text() == "R" and button.isEnabled()
     assert button.font().bold() and not button.styleSheet()
     assert button.palette().color(QPalette.ButtonText).name() == "#ff0000"
     button.click()
+    application.processEvents()
     assert opened == [("run", "count")]
+    assert file_item.isExpanded()
     assert dialog.treeWidget_projectStructure.currentItem().data(
         0, Qt.ItemDataRole.UserRole
     ) == ("namelist", "default", "main", "run")
+    assert dialog.treeWidget_projectStructure.selectedItems() == [
+        dialog.treeWidget_projectStructure.currentItem()
+    ]
+    assert dialog.treeWidget_projectStructure.hasFocus()
     dialog.close()
 
 
@@ -1259,15 +1341,29 @@ def test_custom_project_asks_for_available_toml_filename(
 
     dialog = ConfigurationDialog(project)
     monkeypatch.setattr(dialog, "_choose_project_source", lambda: ("custom", ""))
-    answers = iter((("custom", True), ("project-settings.toml", True)))
-    monkeypatch.setattr(app.QInputDialog, "getText", lambda *args, **kwargs: next(answers))
+
+    def submit_identity(name, filename):
+        def submit(identity_dialog):
+            name_edit = identity_dialog.findChild(QLineEdit, "projectNameEdit")
+            filename_edit = identity_dialog.findChild(
+                QLineEdit, "projectFilenameEdit"
+            )
+            name_edit.setText(name)
+            assert filename_edit.text() == f"{name}.toml"
+            filename_edit.setText(filename)
+            return 1
+
+        return submit
+
+    monkeypatch.setattr(
+        app, "_exec", submit_identity("custom", "project-settings.toml")
+    )
     dialog._add_selected_project()
     assert dialog.loaded_projects["custom"].toml_file == "project-settings.toml"
 
     (project.root / "existing.toml").write_text("")
     errors = []
-    answers = iter((("another", True), ("existing.toml", True)))
-    monkeypatch.setattr(app.QInputDialog, "getText", lambda *args, **kwargs: next(answers))
+    monkeypatch.setattr(app, "_exec", submit_identity("another", "existing.toml"))
     monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))
     dialog._add_selected_project()
     assert errors == ["TOML file 'existing.toml' already exists"]
@@ -1276,8 +1372,11 @@ def test_custom_project_asks_for_available_toml_filename(
     configured = GuiProjectProfile(
         "simulation", "simulation", "Simulation", None, project.profiles
     )
-    answers = iter((("simulation-custom", True), ("simulation-edit.toml", True)))
-    monkeypatch.setattr(app.QInputDialog, "getText", lambda *args, **kwargs: next(answers))
+    monkeypatch.setattr(
+        app,
+        "_exec",
+        submit_identity("simulation-custom", "simulation-edit.toml"),
+    )
     customized = dialog._customize(configured)
     assert customized.custom and customized.toml_file == "simulation-edit.toml"
     dialog.close()
