@@ -11,7 +11,7 @@ __all__ = ["GuiProjectRequest", "launch_gui"]
 
 
 def launch_gui(
-    schemas_dir: Path | str | None = None,
+    config_path: Path | str | None = None,
     projects: Sequence[GuiProjectRequest] = (),
     *,
     default_output_dir: Path | str | None = None,
@@ -20,8 +20,9 @@ def launch_gui(
 
     With no project requests, configured projects remain available in the GUI
     without being preloaded. The default output directory is used for projects
-    added interactively and otherwise defaults to ``schemas_dir``.
+    added interactively and otherwise defaults to the current directory.
+    ``config_path`` may name nml-config.toml or pyproject.toml.
     """
     from .app import launch_gui as _launch_gui
 
-    return _launch_gui(schemas_dir, projects, default_output_dir=default_output_dir)
+    return _launch_gui(config_path, projects, default_output_dir=default_output_dir)

@@ -69,3 +69,52 @@ properties:
     default: ["2026-01-01 00:00"]
     examples: [["2026-01-01 00:00", "2026-01-01 00:05", "2026-01-01 00:10"]]
     x-fortran-default-repeat: true
+  tracking_periods:
+    title: Tracking periods
+    description: Start and end date of trajectory tracking for each body.
+    type: array
+    x-fortran-shape: n_bodies
+    items:
+      type: object
+      x-fortran-type: tracking_period_t
+      x-fortran-module: example_types
+      properties:
+        start_year:
+          type: integer
+          default: 2026
+          description: First year of the tracking period.
+        start_month:
+          type: integer
+          minimum: 1
+          maximum: 12
+          default: 1
+          description: First month of the tracking period.
+        start_day:
+          type: integer
+          minimum: 1
+          maximum: 31
+          default: 1
+          description: First day of the tracking period.
+        end_year:
+          type: integer
+          default: 2026
+          description: Last year of the tracking period.
+        end_month:
+          type: integer
+          minimum: 1
+          maximum: 12
+          default: 12
+          description: Last month of the tracking period.
+        end_day:
+          type: integer
+          minimum: 1
+          maximum: 31
+          default: 31
+          description: Last day of the tracking period.
+    examples:
+      - - start_year: 2026
+          start_month: 1
+          start_day: 1
+          end_year: 2026
+          end_month: 12
+          end_day: 31

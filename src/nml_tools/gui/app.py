@@ -59,6 +59,7 @@ from .model import (
     dimension_source_values,
     discover_project_files,
     ensure_dimension_sources,
+    find_config_path,
     load_profile,
     load_project,
     load_project_profile_file,
@@ -1108,7 +1109,7 @@ class ConfigurationDialog(QDialog):
             if editable:
                 self._remove_button(file_item)
             for page in file_profile.pages:
-                child = QTreeWidgetItem([f"Nml: {page.name}", ""])
+                child = QTreeWidgetItem([f"Namelist: &{page.name}", ""])
                 child.setData(
                     0,
                     Qt.ItemDataRole.UserRole,
@@ -1119,7 +1120,7 @@ class ConfigurationDialog(QDialog):
                     self._remove_button(child)
             self._action_item(
                 file_item,
-                "Nml",
+                "Namelist",
                 ("add_namelist", profile.key, file_profile.key, ""),
                 lambda _checked=False, p=profile.key, f=file_profile.key: (
                     self._show_namelist_picker(p, f)
@@ -1246,7 +1247,7 @@ class ConfigurationDialog(QDialog):
             return
         editor.select_page(page_key)
         page = next(item for item in profile.pages if item.key == page_key)
-        self._show_view(editor, f"{profile.name}:{page.name}")
+        self._show_view(editor, f"{profile.name} / &&{page.name}")
 
     def _editor_page_selected(self, project_key: str, editor: ProfileTab, index: int) -> None:
         """Highlight the tree namelist selected inside an editor."""
@@ -1258,7 +1259,7 @@ class ConfigurationDialog(QDialog):
             return
         page = editor.profile.pages[index]
         page_key = page.key
-        self.tabs.setTabText(0, f"{editor.profile.name}:{page.name}")
+        self.tabs.setTabText(0, f"{editor.profile.name} / &&{page.name}")
         root = self.project_items[project_key]
         for profile_index in range(root.childCount()):
             profile_item = root.child(profile_index)
@@ -2067,7 +2068,7 @@ class ConfigurationDialog(QDialog):
 
 
 def launch_gui(
-    schemas_dir: Path | str | None = None,
+    config_path: Path | str | None = None,
     projects: Sequence[GuiProjectRequest] = (),
     *,
     default_output_dir: Path | str | None = None,
@@ -2105,10 +2106,27 @@ def launch_gui(
         selections[name] = selected
         output_dirs[name] = request.output_dir
         seen.add(key)
-    project = load_project(
-        schemas_dir,
-        output_dirs if requests else default_output_dir,
-        selections if requests else None,
+    output_root = Path(default_output_dir or Path.cwd()).resolve()
+    source: Path | str | None = config_path
+    if source is not None and Path(source).name not in {
+        "nml-config.toml",
+        "pyproject.toml",
+    }:
+        raise ValueError("config must be nml-config.toml or pyproject.toml")
+    if source is None:
+        try:
+            source = find_config_path(Path.cwd())
+        except RuntimeError:
+            if requests:
+                raise ValueError("a config file is required when loading a project") from None
+    project = (
+        load_project(
+            source,
+            output_dirs if requests else output_root,
+            selections if requests else None,
+        )
+        if source is not None
+        else GuiProject(Path.cwd(), {}, {}, (), output_root)
     )
     if requests and default_output_dir is not None:
         project = replace(project, output_dir=Path(default_output_dir).resolve())

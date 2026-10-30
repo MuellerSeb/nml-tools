@@ -158,11 +158,13 @@ def test_inline_array_title_and_hint_styles(application, monkeypatch):
             "title": "Body weights",
             "description": "Weight for each body.",
             "type": "array",
-            "x-fortran-shape": 2,
-            "items": {"type": "number"},
+            "x-fortran-shape": "n",
+            "items": {"type": "number", "minimum": 0.0, "maximum": 10.0},
+            "default": [1.0, 2.0],
+            GUI_REF_ORIGIN_KEY: "parameters.yml#/$defs/weights",
         },
         [1.0, 2.0],
-        {},
+        {"n": 2},
         required=True,
         show_label=True,
     )
@@ -180,7 +182,21 @@ def test_inline_array_title_and_hint_styles(application, monkeypatch):
         + inline.tableWidget.horizontalScrollBar().sizeHint().height()
     )
     inline.infoButton.click()
-    assert messages == [("Body weights", "Weight for each body.")]
+    information = messages[0][1]
+    assert messages[0][0] == "Body weights"
+    assert all(
+        text in information
+        for text in (
+            "Weight for each body.",
+            "Type: array of number",
+            "Dimensions: n (2)",
+            "Reference: parameters.yml#/$defs/weights",
+            "Minimum: 0.0",
+            "Maximum: 10.0",
+            "Default: [1.0, 2.0]",
+        )
+    )
+    assert inline.infoButton.toolTip() == information
 
     aligned = NamelistForm(
         {
@@ -478,6 +494,28 @@ def test_example_dimension_source_resize_and_config_tab(application, tmp_path, m
     dialog.treeWidget_projectStructure.setCurrentItem(root_item.child(0))
     assert isinstance(dialog.tabs.currentWidget(), FileProfileOverview)
     dialog.show()
+    dialog.treeWidget_projectStructure.setCurrentItem(root_item.child(1).child(1))
+    application.processEvents()
+    materials = dialog.tabs.currentWidget().forms["materials"].tables[0]
+    assert materials.rowCount() == 2
+    assert set(materials.header_info_buttons) == {
+        "density",
+        "drag_coefficient",
+        "enabled",
+    }
+    dialog.treeWidget_projectStructure.setCurrentItem(root_item.child(1).child(0))
+    application.processEvents()
+    bodies = dialog.tabs.currentWidget().forms["bodies"]
+    periods = next(table for table in bodies.tables if "tracking_periods" in table.schemas)
+    assert periods.rowCount() == 3
+    assert set(periods.header_info_buttons) == {
+        "start_year",
+        "start_month",
+        "start_day",
+        "end_year",
+        "end_month",
+        "end_day",
+    }
     dialog.treeWidget_projectStructure.setCurrentItem(root_item.child(0).child(0))
     application.processEvents()
     assert isinstance(dialog.tabs.currentWidget(), ProfileTab)
@@ -496,6 +534,7 @@ def test_example_dimension_source_resize_and_config_tab(application, tmp_path, m
     bodies = (root / "out" / "bodies.nml").read_text()
     setup = (root / "out" / "setup.nml").read_text()
     assert "body_ids(2)" in bodies and "body_ids(3)" not in bodies
+    assert "primary_material%density = 7800.0" in bodies
     assert "body_count = 2" in setup
     dialog.close()
 
@@ -678,7 +717,10 @@ def test_standard_profile_selects_members_and_locks_required(application, projec
     dialog = _add_project(ConfigurationDialog(project))
     file_item = dialog.project_items["default"].child(0)
     assert dialog.treeWidget_projectStructure.itemWidget(file_item.child(0), 1) is None
-    assert dialog.treeWidget_projectStructure.itemWidget(file_item.child(1), 0).text() == "+ : Nml"
+    assert (
+        dialog.treeWidget_projectStructure.itemWidget(file_item.child(1), 0).text()
+        == "+ : Namelist"
+    )
     dialog._show_file_builder("default")
     builder = dialog.current_tool
     assert isinstance(builder, FileProfileBuilder)
@@ -875,7 +917,7 @@ def test_namelist_action_adds_only_missing_schema(application, project):
     pages = dialog.loaded_projects["default"].profiles[0].pages
     assert [page.key for page in pages] == ["run", "output"]
     file_item = dialog._profile_tree_item("default", "custom")
-    assert file_item.child(1).text(0) == "Nml: output"
+    assert file_item.child(1).text(0) == "Namelist: &output"
     assert dialog.treeWidget_projectStructure.currentItem() is file_item.child(1)
     dialog.close()
 
@@ -1011,14 +1053,46 @@ def test_public_launch_forwards_profile_selection(application, project, monkeypa
         values,
         {"n": 1},
     )
-    assert launch_gui(tmp_path, [request]) == 0
+    config = tmp_path / "nml-config.toml"
+    assert launch_gui(config, [request]) == 0
     assert calls["load"] == (
-        tmp_path,
+        config,
         {"default": tmp_path / "out"},
         {"default": {"main": ["run"]}},
     )
     assert calls["dialog"] == (project, (request,))
     assert calls["exec"] is dialog
+
+
+def test_launch_without_config_opens_empty_gui(application, monkeypatch, tmp_path):
+    from nml_tools.gui import app
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        app, "find_config_path", lambda _root: (_ for _ in ()).throw(RuntimeError())
+    )
+    calls = {}
+    dialog = object()
+    monkeypatch.setattr(
+        app,
+        "ConfigurationDialog",
+        lambda project, project_requests: calls.setdefault(
+            "dialog", (project, project_requests)
+        )
+        and dialog,
+    )
+    monkeypatch.setattr(app, "_exec", lambda loaded: calls.setdefault("exec", loaded))
+    assert app.launch_gui() == 0
+    project, requests = calls["dialog"]
+    assert project.root == project.output_root == tmp_path
+    assert not project.profiles and not requests
+
+
+def test_launch_rejects_config_directory(application, tmp_path):
+    from nml_tools.gui import app
+
+    with pytest.raises(ValueError, match="config must be"):
+        app.launch_gui(tmp_path)
 
 
 def test_launch_rejects_non_gui_worker_thread(project, monkeypatch):
@@ -1035,7 +1109,7 @@ def test_launch_rejects_non_gui_worker_thread(project, monkeypatch):
     monkeypatch.setattr(app, "current_thread", lambda: worker)
     monkeypatch.setattr(app, "main_thread", lambda: main)
     with pytest.raises(RuntimeError, match="main GUI thread"):
-        app.launch_gui(project.root)
+        app.launch_gui(project.root / "nml-config.toml")
 
 
 def test_tree_drives_single_unclosable_view_and_navigation(application, project, monkeypatch):
@@ -1070,7 +1144,7 @@ def test_tree_drives_single_unclosable_view_and_navigation(application, project,
     file_item = root.child(0)
     assert root.text(0) == "Project: default"
     assert file_item.text(0) == "File: run.nml"
-    assert file_item.child(0).text(0) == "Nml: run"
+    assert file_item.child(0).text(0) == "Namelist: &run"
     assert dialog.treeWidget_projectStructure.itemWidget(root.child(1), 0).text() == "+ : File"
     assert file_item.childCount() == 3
     assert dialog.treeWidget_projectStructure.itemWidget(file_item, 1) is None
@@ -1107,11 +1181,11 @@ def test_tree_drives_single_unclosable_view_and_navigation(application, project,
     dialog.treeWidget_projectStructure.setCurrentItem(file_item.child(0))
     editor = next(iter(dialog.editors.values()))
     assert dialog.tabs.currentWidget() is editor and dialog.tabs.count() == 1
-    assert dialog.tabs.tabText(0) == "main:run"
+    assert dialog.tabs.tabText(0) == "main / &&run"
     assert editor.descriptionLabel.text() == "Run settings."
     editor.next.click()
     assert dialog.treeWidget_projectStructure.currentItem() is file_item.child(1)
-    assert dialog.tabs.tabText(0) == "main:output"
+    assert dialog.tabs.tabText(0) == "main / &&output"
     assert editor.descriptionLabel.text() == "Output settings."
     editor.back.click()
     assert dialog.treeWidget_projectStructure.currentItem() is file_item.child(0)
@@ -1137,7 +1211,10 @@ def test_standard_project_allows_optional_namelist_changes(application, project,
     assert file_item.childCount() == 2
     assert dialog.treeWidget_projectStructure.itemWidget(file_item, 1) is None
     assert dialog.treeWidget_projectStructure.itemWidget(file_item.child(0), 1) is not None
-    assert dialog.treeWidget_projectStructure.itemWidget(file_item.child(1), 0).text() == "+ : Nml"
+    assert (
+        dialog.treeWidget_projectStructure.itemWidget(file_item.child(1), 0).text()
+        == "+ : Namelist"
+    )
     monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
     dialog._remove_tree_item(root)
     assert not dialog.loaded_projects and "standard" in dialog.available_projects
@@ -1504,7 +1581,9 @@ def test_unopened_required_derived_array_uses_component_defaults(application, tm
     assert value.assigned == {(1,), (2,)}
 
 
-def test_shared_reference_table_edit_reset_and_round_trip(application, tmp_path):
+def test_shared_reference_table_edit_reset_and_round_trip(
+    application, tmp_path, monkeypatch
+):
     from nml_tools.gui.model import load_profile, recover_dimensions, save_profiles
 
     schema = resolve_schema(
@@ -1516,8 +1595,16 @@ def test_shared_reference_table_edit_reset_and_round_trip(application, tmp_path)
                     "type": "object",
                     "x-fortran-type": "period_t",
                     "properties": {
-                        "year": {"type": "integer", "default": 2000},
-                        "enabled": {"type": "boolean", "default": False},
+                            "year": {
+                                "type": "integer",
+                                "description": "Calendar year.",
+                                "default": 2000,
+                            },
+                            "enabled": {
+                                "type": "boolean",
+                                "description": "Enable this period.",
+                                "default": False,
+                            },
                     },
                     "required": ["year"],
                 }
@@ -1550,6 +1637,26 @@ def test_shared_reference_table_edit_reset_and_round_trip(application, tmp_path)
     assert table.horizontalHeaderItem(1).text() == "year *"
     assert table.cellWidget(0, 0).fieldLabel.text() == "start *"
     assert not table.cellWidget(0, 0).infoButton.isHidden()
+    information = table.cellWidget(0, 0).infoButton.toolTip()
+    assert "Type: derived period_t" in information and "Reference:" in information
+    assert set(table.header_info_buttons) == {"year", "enabled"}
+    assert all(
+        obj.rows["year"].infoButton.isHidden() for obj in table.objects.values()
+    )
+    messages = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: messages.append(args[1:]))
+    year_info = table.header_info_buttons["year"]
+    year_info.click()
+    assert messages == [("year", year_info.toolTip())]
+    assert "Calendar year." in year_info.toolTip()
+    position = year_info.x()
+    table.setColumnWidth(1, table.columnWidth(1) + 30)
+    assert year_info.x() == position + 30
+    table.resizeColumnToContents(1)
+    fitted = table.columnWidth(1)
+    table.setColumnWidth(1, fitted + 40)
+    table.horizontalHeader().sectionHandleDoubleClicked.emit(1)
+    assert table.columnWidth(1) == fitted + 26
     table.objects["periods", (1,)].rows["year"].field.set_value(2025)
     table.objects["periods", (1,)].rows["enabled"].field.set_value(True)
     values = form.values()
@@ -1576,6 +1683,47 @@ def test_shared_reference_table_edit_reset_and_round_trip(application, tmp_path)
         assert single.values()[name] == ([edited] if indices else edited)
         single.reset()
         assert single.values() == defaults
+
+
+def test_shared_header_uses_base_metadata_and_rows_keep_effective_defaults(application):
+    schema = resolve_schema(
+        {
+            "type": "object",
+            "$defs": {
+                "parameter": {
+                    "type": "object",
+                    "x-fortran-type": "parameter_t",
+                    "properties": {
+                        "value": {
+                            "type": "number",
+                            "description": "Shared value.",
+                            "default": 1.0,
+                        }
+                    },
+                }
+            },
+            "properties": {
+                "first": {
+                    "$ref": "#/$defs/parameter",
+                    "properties": {"value": {"default": 2.0}},
+                },
+                "second": {
+                    "$ref": "#/$defs/parameter",
+                    "properties": {"value": {"default": 3.0}},
+                },
+            },
+        }
+    )
+    form = NamelistForm(schema, None, {})
+    (table,) = form.tables
+    header = table.header_info_buttons["value"].toolTip()
+    assert "Shared value." in header and "Default: 1.0" in header
+    assert "Component defaults: {'value': 2.0}" in table.cellWidget(
+        0, 0
+    ).infoButton.toolTip()
+    assert "Component defaults: {'value': 3.0}" in table.cellWidget(
+        1, 0
+    ).infoButton.toolTip()
 
 
 def test_required_derived_array_writes_item_defaults(application, tmp_path):

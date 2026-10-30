@@ -26,6 +26,10 @@ name = "bodies"
 schema = "schemas/bodies.yml"
 
 [[namelists]]
+name = "materials"
+schema = "schemas/materials.yml"
+
+[[namelists]]
 name = "outputs"
 schema = "schemas/outputs.yml"
 
@@ -42,8 +46,8 @@ name = "bodies"
 title = "Falling bodies"
 description = "Inputs for the bodies in the full simulation."
 default_file = "bodies.nml"
-namelists = ["bodies"]
-required = ["bodies"]
+namelists = ["bodies", "materials"]
+required = ["bodies", "materials"]
 
 [[file_profiles]]
 name = "reporting"

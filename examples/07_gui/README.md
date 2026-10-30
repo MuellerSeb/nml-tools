@@ -3,12 +3,13 @@
 This example configures a small multi-body gravity simulation with the
 `nml-tools` GUI. It demonstrates project and file profiles, scalar fields,
 one-dimensional arrays, integers, floating-point numbers, strings, booleans,
-file paths, date-times, defaults, examples, and schema descriptions.
+file paths, date-times, defaults, examples, schema descriptions, external
+references, and derived-object tables.
 
-Four namelist schemas are split across three reusable file profiles:
+Five namelist schemas are split across three reusable file profiles:
 
 - `setup`: `run` and `gravity` → `setup.nml`
-- `bodies`: `bodies` → `bodies.nml`
+- `bodies`: `bodies` and referenced derived-type `materials` → `bodies.nml`
 - `reporting`: `outputs` → `reporting.nml`
 
 The configured project profiles are:
@@ -52,6 +53,8 @@ and Python-compatible guidata and NumPy versions.
 │   ├── run.yml
 │   ├── gravity.yml
 │   ├── bodies.yml
+│   ├── material.yml       # reusable material_t definition
+│   ├── materials.yml      # namelist using material.yml through $ref
 │   └── outputs.yml
 ├── input/                # files selectable from path fields
 │   ├── restart_state.dat
@@ -105,7 +108,10 @@ the initial namelist output directory. Select a project with **+**, then use its
 One- and two-dimensional arrays are edited directly in their namelist pages;
 higher-dimensional arrays use the guidata array editor. Array values are saved
 with explicit one-based Fortran indices. File browsers store paths relative to
-the output directory where possible.
+the output directory where possible. The `materials` page groups referenced
+`material_t` objects by row and shows component information once in each table
+header. The `bodies` page also demonstrates an inline array of
+`tracking_period_t` objects using the `n_bodies` runtime dimension.
 
 The project selector can also browse an additional project-profile TOML file.
 Selecting `<new>` lets you compose a custom project from configured schemas and
@@ -126,7 +132,7 @@ Applications may preload a project with its complete runtime configuration:
 from nml_tools.gui import GuiProjectRequest, launch_gui
 
 launch_gui(
-    "examples/07_gui",
+    "examples/07_gui/nml-config.toml",
     [GuiProjectRequest("simulation", "examples/07_gui/out/simulation")],
 )
 ```

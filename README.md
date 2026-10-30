@@ -945,15 +945,15 @@ Install the current checkout with its optional GUI dependencies and a Qt binding
 
 ```bash
 python -m pip install '.[gui]' PyQt5
-nml-tools gui -i /path/to/schemas -o /path/to/project
+nml-tools gui -c /path/to/nml-config.toml -p simulation -o /path/to/project
 ```
 
 QtPy also permits other supported Qt bindings; PyQt5 is the tested binding on
-Python 3.8. The input directory may contain `nml-config.toml` or a
-`pyproject.toml` with `[tool.nml-tools]`; `nml-config.toml` takes precedence.
-Omit `-i` to use the current directory. Omit `-o` to start projects beside the
-selected config; each project's Settings page can choose a different output
-directory.
+Python 3.8. `-c` accepts `nml-config.toml` or a `pyproject.toml` containing
+`[tool.nml-tools]`; relative schema paths are resolved from that file. Omit
+`-c` to discover either file in the current directory, `-p` to choose a project
+inside the GUI, and `-o` to use the current directory. Each project's Settings
+page can choose a different output directory.
 
 The editor loads each profile's `default_file` from the output directory and
 saves directly to that namelist file. Schema defaults are written when needed;
@@ -988,7 +988,7 @@ Applications can launch a subset of the configured profiles:
 from nml_tools.gui import GuiProjectRequest, launch_gui
 
 launch_gui(
-    schemas_dir="/path/to/schemas",
+    config_path="/path/to/nml-config.toml",
     projects=[
         GuiProjectRequest(
             project_profile="simulation",

@@ -32,6 +32,7 @@ from qtpy.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QWidget,
 )
 
@@ -112,6 +113,77 @@ def _style_info_button(button: QWidget) -> None:
     palette = button.palette()
     palette.setColor(QPalette.ButtonText, QApplication.palette().color(QPalette.Link))
     button.setPalette(palette)
+
+
+def _property_information(
+    schema: Mapping[str, Any], sizes: Mapping[str, int]
+) -> str:
+    """Summarize useful schema metadata for one property."""
+    lines = []
+    description = schema.get("description")
+    if isinstance(description, str) and description.strip():
+        lines.append(description.strip())
+
+    kind = str(schema.get("type", "unknown"))
+    item = schema.get("items") if kind == "array" else schema
+    item = item if isinstance(item, Mapping) else {}
+    item_kind = str(item.get("type", "unknown"))
+    type_name = item.get("x-fortran-type")
+    value_type = f"derived {type_name}" if type_name else item_kind
+    lines.append(f"Type: {'array of ' + value_type if kind == 'array' else value_type}")
+    value_format = item.get("format")
+    if isinstance(value_format, str):
+        lines.append(f"Format: {value_format}")
+
+    if kind == "array":
+        declared = schema.get("x-fortran-shape")
+        try:
+            resolved = " × ".join(str(value) for value in resolve_shape(schema, sizes))
+        except ValueError:
+            resolved = ""
+        shape = str(declared) if not isinstance(declared, list) else " × ".join(map(str, declared))
+        resolved_label = f" ({resolved})" if resolved and resolved != shape else ""
+        lines.append(f"Dimensions: {shape}{resolved_label}")
+
+    reference = schema.get(GUI_REF_ORIGIN_KEY)
+    origin = item.get(DERIVED_REF_ORIGIN_KEY)
+    if not reference and isinstance(origin, Mapping):
+        identity = origin.get("identity")
+        if isinstance(identity, (list, tuple)) and len(identity) == 2:
+            reference = f"{identity[0]}{identity[1]}"
+    if reference:
+        lines.append(f"Reference: {reference}")
+
+    for label, key in (("Minimum", "minimum"), ("Maximum", "maximum")):
+        if key in item:
+            lines.append(f"{label}: {item[key]}")
+    if "default" in schema:
+        lines.append(f"Default: {schema['default']}")
+    elif kind in {"array", "object"}:
+        default = persistence_default(item, sizes)
+        if default is not MISSING:
+            label = "Element defaults" if kind == "array" else "Component defaults"
+            lines.append(f"{label}: {default}")
+    return "\n".join(lines)
+
+
+def _configure_info_button(
+    button: QWidget,
+    owner: QWidget,
+    title: str,
+    schema: Mapping[str, Any],
+    sizes: Mapping[str, int],
+) -> str:
+    """Show the same property metadata on hover and click."""
+    information = _property_information(schema, sizes)
+    button.setVisible(bool(information))
+    button.setToolTip(information)
+    _style_info_button(button)
+    if information:
+        button.clicked.connect(
+            lambda _checked=False: QMessageBox.information(owner, title, information)
+        )
+    return information
 
 
 def _hint_style(default: bool) -> str:
@@ -620,16 +692,9 @@ class InlineArrayTable(QWidget):
         self._hinted = set(hinted)
         self.cells: dict[tuple[int, ...], FieldRow] = {}
         self.titleLabel.setText(_field_label(name, schema, required))
-        description = schema.get("description")
-        has_description = isinstance(description, str) and bool(description.strip())
-        self.infoButton.setVisible(has_description)
-        _style_info_button(self.infoButton)
-        if has_description:
-            self.infoButton.clicked.connect(
-                lambda: QMessageBox.information(
-                    self, str(schema.get("title", name)), str(description).strip()
-                )
-            )
+        _configure_info_button(
+            self.infoButton, self, str(schema.get("title", name)), schema, sizes
+        )
         self.tableWidget.installEventFilter(self)
         self._populate()
 
@@ -1065,14 +1130,10 @@ class FieldRow(QWidget):
         self.field = _field_widget(
             name, schema, initial, sizes, self, fit_arrays=fit_arrays, required=self.required
         )
-        description = schema.get("description")
-        if isinstance(description, str):
-            description = description.strip()
-            self.field.setToolTip(description)
-            self.infoButton.clicked.connect(
-                lambda: QMessageBox.information(self, str(schema.get("title", name)), description)
-            )
-        _style_info_button(self.infoButton)
+        information = _configure_info_button(
+            self.infoButton, self, str(schema.get("title", name)), schema, sizes
+        )
+        self.field.setToolTip(information)
         self._update_decorations()
         self.editorLayout.addWidget(self.field)
         if isinstance(self.field, ScalarField) and (value is MISSING or value == ""):
@@ -1088,8 +1149,7 @@ class FieldRow(QWidget):
         """Keep labels and information actions outside inline array tables."""
         inline = isinstance(self.field, ArrayField) and self.field.table_editor is not None
         self.fieldLabel.setVisible(self.show_label and not inline)
-        description = str(self.schema.get("description", "")).strip()
-        self.infoButton.setVisible(self.show_label and not inline and bool(description))
+        self.infoButton.setVisible(self.show_label and not inline)
 
     def value(self) -> Any:
         """Return the row value, omitting untouched fields without seed data."""
@@ -1234,10 +1294,34 @@ class DerivedTable(QTableWidget):
         self.table_rows: list[tuple[str, tuple[int, ...], Mapping[str, Any]]] = []
         first = next(iter(schemas.values()))
         first = first["items"] if first["type"] == "array" else first
+        origin = first.get(DERIVED_REF_ORIGIN_KEY)
+        definition = origin.get("definition") if isinstance(origin, Mapping) else None
+        header_schema = definition if isinstance(definition, Mapping) else first
         columns = list(first["properties"])
+        self.header_info_buttons: dict[str, QToolButton] = {}
         self.setColumnCount(len(columns) + 1)
         self.setHorizontalHeaderLabels(["Namelist Property", *columns])
         self.verticalHeader().setVisible(False)
+        header = self.horizontalHeader()
+        for column, component in enumerate(columns, 1):
+            component_schema = header_schema["properties"][component]
+            label = QTableWidgetItem(
+                component + (" *" if component in header_schema.get("required", []) else "")
+            )
+            self.setHorizontalHeaderItem(column, label)
+            button = QToolButton(header.viewport())
+            button.setText("i")
+            button.setFixedSize(18, 18)
+            button.setAutoRaise(True)
+            button.setAccessibleName(f"{component} information")
+            _configure_info_button(
+                button,
+                self,
+                str(component_schema.get("title", component)),
+                component_schema,
+                sizes,
+            )
+            self.header_info_buttons[component] = button
         for name, schema in schemas.items():
             value = values.get(name, MISSING)
             is_array = schema["type"] == "array"
@@ -1294,24 +1378,51 @@ class DerivedTable(QTableWidget):
                 self.setCellWidget(
                     row,
                     0,
-                    _property_widget(name + suffix, schema, name.lower() in required, self),
+                    _property_widget(
+                        name + suffix, schema, name.lower() in required, sizes, self
+                    ),
                 )
                 for column, component in enumerate(columns):
                     component_row = obj.rows[component]
-                    component_row.fieldLabel.hide()
+                    component_row.show_label = False
+                    component_row._update_decorations()
                     self.setCellWidget(row, column + 1, component_row)
-                    label = QTableWidgetItem(
-                        component + (" *" if component in item.get("required", []) else "")
-                    )
-                    label.setToolTip(
-                        str(item["properties"][component].get("description", component))
-                    )
-                    self.setHorizontalHeaderItem(column + 1, label)
                 self.objects[name, indices] = obj
                 self.table_rows.append((name, indices, item))
         _configure_table_columns(self, 0)
+        for column in range(1, self.columnCount()):
+            self._pad_component_column(column)
         _fit_table_height(self)
+        header.sectionHandleDoubleClicked.connect(self._pad_component_column)
+        header.sectionResized.connect(self._position_header_info_buttons)
+        header.sectionMoved.connect(self._position_header_info_buttons)
+        header.geometriesChanged.connect(self._position_header_info_buttons)
+        self.horizontalScrollBar().valueChanged.connect(self._position_header_info_buttons)
+        self._position_header_info_buttons()
         self.installEventFilter(self)
+
+    def _pad_component_column(self, column: int) -> None:
+        """Reserve header space for one component information button."""
+        if column > 0:
+            self.setColumnWidth(column, self.columnWidth(column) + 26)
+
+    def _position_header_info_buttons(self, *_args: Any) -> None:
+        """Keep component information buttons inside their header sections."""
+        header = self.horizontalHeader()
+        viewport = header.viewport()
+        for column, component in enumerate(self.header_info_buttons, 1):
+            button = self.header_info_buttons[component]
+            left = header.sectionViewportPosition(column)
+            button.move(
+                left + header.sectionSize(column) - button.width() - 4,
+                max(0, (viewport.height() - button.height()) // 2),
+            )
+            button.setVisible(left < viewport.width() and left + header.sectionSize(column) > 0)
+
+    def resizeEvent(self, event: Any) -> None:
+        """Reposition header information buttons after table resizing."""
+        super().resizeEvent(event)
+        self._position_header_info_buttons()
 
     def values(self) -> dict[str, Any]:
         """Collect each table row into scalar or indexed derived values."""
@@ -1448,7 +1559,7 @@ class ReferencedArrayTable(QTableWidget):
             self.setCellWidget(
                 row_index,
                 0,
-                _property_widget(name, schema, name.lower() in required, self),
+                _property_widget(name, schema, name.lower() in required, sizes, self),
             )
             cells = []
             for index in range(size):
@@ -1757,20 +1868,20 @@ def _copy_table_selection(table: QTableWidget) -> None:
 
 
 def _property_widget(
-    name: str, schema: Mapping[str, Any], required: bool, parent: QWidget
+    name: str,
+    schema: Mapping[str, Any],
+    required: bool,
+    sizes: Mapping[str, int],
+    parent: QWidget,
 ) -> QWidget:
     """Build the Designer property label and information action for a table."""
     widget = QWidget(parent)
     load_ui("field_row.ui", widget)
     widget.fieldLabel.setText(name + (" *" if required else ""))
     widget.editorHost.hide()
-    description = str(schema.get("description", "")).strip()
-    widget.infoButton.setVisible(bool(description))
-    _style_info_button(widget.infoButton)
-    if description:
-        widget.infoButton.clicked.connect(
-            lambda: QMessageBox.information(widget, str(schema.get("title", name)), description)
-        )
+    _configure_info_button(
+        widget.infoButton, widget, str(schema.get("title", name)), schema, sizes
+    )
     return widget
 
 

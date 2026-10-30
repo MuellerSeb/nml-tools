@@ -1387,21 +1387,33 @@ def cli(verbose: int, quiet: int) -> None:
 
 @cli.command("gui", context_settings=_CONTEXT_SETTINGS)
 @click.option(
-    "--input-path", "-i",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Directory containing nml-config.toml and schemas (default: current directory).",
+    "--config", "config_path", "-c",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Path to nml-config.toml or pyproject.toml (default: discover locally).",
+)
+@click.option(
+    "--project", "project_name", "-p",
+    help="Configured project profile to open.",
 )
 @click.option(
     "--output-path", "-o",
     type=click.Path(file_okay=False, path_type=Path),
-    help="Directory for namelist files (default: input path).",
+    help="Directory for namelist files (default: current directory).",
 )
-def gui(input_path: Path | None, output_path: Path | None) -> None:
+def gui(
+    config_path: Path | None, project_name: str | None, output_path: Path | None
+) -> None:
     """Edit and save namelist files using schema-driven Qt forms."""
     try:
-        from .gui import launch_gui
+        from .gui import GuiProjectRequest, launch_gui
 
-        exit_code = launch_gui(input_path, default_output_dir=output_path)
+        output_root = output_path or Path.cwd()
+        projects = (
+            (GuiProjectRequest(project_name, output_root),) if project_name else ()
+        )
+        exit_code = launch_gui(
+            config_path, projects, default_output_dir=output_root
+        )
     except ImportError as exc:
         raise click.ClickException(
             "GUI dependencies are unavailable; install 'nml-tools[gui]' "
