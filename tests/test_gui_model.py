@@ -10,6 +10,7 @@ import pytest
 from nml_tools._dimensions import DimensionSource
 from nml_tools.gui.model import (
     GUI_REF_ORIGIN_KEY,
+    InputArray,
     create_virtual_project,
     load_profile,
     load_project,
@@ -22,6 +23,12 @@ from nml_tools.gui.model import (
     validate_project_filename,
     validate_project_name,
 )
+
+
+def test_input_array_equality_includes_explicit_assignments():
+    left = InputArray([1.0, 2.0], {(1,)})
+    assert left != InputArray([1.0, 2.0], {(2,)})
+    assert left == InputArray([1.0, 2.0], {(1,)})
 
 
 def _write_project(root: Path, *, duplicate_output: bool = False) -> None:

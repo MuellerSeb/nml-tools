@@ -1355,7 +1355,7 @@ class DerivedTable(QTableWidget):
                 shape = array_shape(data)
                 data.assigned = (
                     set(product(*(range(1, n + 1) for n in shape)))
-                    if _seeded(self.schemas[name])
+                    if persistence_default(self.schemas[name], self.sizes) is not MISSING
                     or name.lower() in self.required
                     and _contains_default(self.schemas[name]["items"])
                     else set()
@@ -1572,7 +1572,11 @@ class NamelistForm(QWidget):
             if child.get("type") == "array" and child.get(GUI_REF_ORIGIN_KEY):
                 shape = resolve_shape(child, sizes)
                 if len(shape) == 1:
-                    identity = ("array", str(child[GUI_REF_ORIGIN_KEY]))
+                    identity = (
+                        "array",
+                        str(child[GUI_REF_ORIGIN_KEY]),
+                        str(shape[0]),
+                    )
             if identity:
                 identities[name] = identity
                 groups.setdefault(identity, {})[name] = child

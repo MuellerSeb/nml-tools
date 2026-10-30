@@ -436,6 +436,26 @@ def test_dialog_load_overlay_save_reload_and_dimension_changes(application, proj
     reloaded.close()
 
 
+def test_failed_editor_rebuild_preserves_previous_state(application, project, monkeypatch):
+    from nml_tools.gui import app
+
+    dialog = _add_project(ConfigurationDialog(project))
+    path = project.root / "run.nml"
+    previous = dialog.project_editors["default"][path]
+
+    def fail(*_args, **_kwargs):
+        raise ValueError("cannot rebuild")
+
+    monkeypatch.setattr(app, "ProfileTab", fail)
+    with pytest.raises(ValueError, match="cannot rebuild"):
+        dialog._rebuild_project_editors(
+            "default", fit_arrays=True, dimensions={"n": 2}
+        )
+    assert dialog.project_dimensions["default"] == {"n": 1}
+    assert dialog.project_editors["default"] == {path: previous}
+    dialog.close()
+
+
 def test_example_dimension_source_resize_and_config_tab(application, tmp_path, monkeypatch):
     from pathlib import Path
     from shutil import copytree, rmtree
@@ -909,18 +929,26 @@ def test_standard_profile_marks_external_namelist_and_customizes(
         QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text
     )
     messages = []
+    errors = []
     monkeypatch.setattr(
         QMessageBox,
         "information",
         lambda _parent, _title, message: messages.append(message),
     )
+    monkeypatch.setattr(
+        QMessageBox, "critical", lambda _parent, _title, message: errors.append(message)
+    )
+
+    monkeypatch.setattr(dialog, "_custom_project_identity", lambda *_args: None)
+    item.setSelected(True)
+    picker.add.click()
+    assert not errors and list(dialog.loaded_projects) == ["standard"]
 
     def custom_identity(*_args):
         assert messages
         return "custom", "custom.toml"
 
     monkeypatch.setattr(dialog, "_custom_project_identity", custom_identity)
-    item.setSelected(True)
     picker.add.click()
     assert "'main' does not contain: output" in messages[0]
     assert [page.key for page in dialog.loaded_projects["custom"].profiles[0].pages] == [
@@ -1378,6 +1406,7 @@ def test_custom_project_asks_for_available_toml_filename(
         submit_identity("simulation-custom", "simulation-edit.toml"),
     )
     customized = dialog._customize(configured)
+    assert customized is not None
     assert customized.custom and customized.toml_file == "simulation-edit.toml"
     dialog.close()
 
@@ -1625,6 +1654,30 @@ def test_single_referenced_array_uses_top_aligned_resizable_table(application):
     control = table.rows["factor"][0].field.control
     assert control.placeholderText() == "75.0"
     assert table.values()["factor"] == [75.0, 200.0]
+
+
+def test_referenced_arrays_with_different_shapes_use_separate_tables(application):
+    reference = "parameter.yml#/$defs/parameter"
+    schema = {
+        "type": "object",
+        "properties": {
+            "long": {
+                "type": "array",
+                "x-fortran-shape": 2,
+                "items": {"type": "number"},
+                GUI_REF_ORIGIN_KEY: reference,
+            },
+            "short": {
+                "type": "array",
+                "x-fortran-shape": 1,
+                "items": {"type": "number"},
+                GUI_REF_ORIGIN_KEY: reference,
+            },
+        },
+    }
+    form = NamelistForm(schema, {"long": [1.0, 2.0], "short": [3.0]}, {})
+    assert len(form.tables) == 2
+    assert form.values() == {"long": [1.0, 2.0], "short": [3.0]}
 
 
 def test_project_output_roots_are_isolated(application, project, tmp_path):

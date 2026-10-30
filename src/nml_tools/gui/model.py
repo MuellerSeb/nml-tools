@@ -66,6 +66,16 @@ class InputArray(List[Any]):
         super().__init__(values)
         self.assigned = assigned
 
+    def __eq__(self, other: object) -> bool:
+        """Compare explicit assignments when both values are GUI arrays."""
+        return super().__eq__(other) and (
+            not isinstance(other, InputArray) or self.assigned == other.assigned
+        )
+
+    def __ne__(self, other: object) -> bool:
+        """Keep inequality consistent with assignment-aware equality."""
+        return not self == other
+
 
 @dataclass(frozen=True)
 class GuiProjectRequest:

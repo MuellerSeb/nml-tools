@@ -1527,8 +1527,9 @@ class ConfigurationDialog(QDialog):
                 current = self.loaded_projects[current.key]
                 config.output_path.setText(str(output_root))
             else:
-                self.project_dimensions[current.key] = dimensions
-                self._rebuild_project_editors(current.key, fit_arrays=True)
+                self._rebuild_project_editors(
+                    current.key, fit_arrays=True, dimensions=dimensions
+                )
             config.set_profiles(current.profiles, output_root)
         except (OSError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Invalid configuration", str(exc))
@@ -1590,7 +1591,10 @@ class ConfigurationDialog(QDialog):
                     old_path = _profile_path(self.project, old, output_root)
                     imported = self.project_editors[current.key][old_path].values()
             profiles = ensure_dimension_sources(self.project, profiles)
-            current = self._customize(current)
+            customized = self._customize(current)
+            if customized is None:
+                return
+            current = customized
             current = replace(current, profiles=profiles)
             saved_path = save_project_profile(self.project, current)
             current = replace(current, source=saved_path)
@@ -1633,7 +1637,10 @@ class ConfigurationDialog(QDialog):
                     f"Standard file profile '{standard.name}' does not contain: "
                     f"{', '.join(outside)}.\n\nA custom project will be created.",
                 )
-            current = self._customize(current)
+            customized = self._customize(current)
+            if customized is None:
+                return
+            current = customized
             profiles = list(current.profiles)
             profile = profiles[index]
             profiles[index] = replace(profile, pages=(*profile.pages, *additions))
@@ -1654,7 +1661,7 @@ class ConfigurationDialog(QDialog):
         except (OSError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Add namelist", str(exc))
 
-    def _customize(self, profile: GuiProjectProfile) -> GuiProjectProfile:
+    def _customize(self, profile: GuiProjectProfile) -> GuiProjectProfile | None:
         """Copy a configured project before a structural edit."""
         if profile.custom:
             return profile
@@ -1662,7 +1669,7 @@ class ConfigurationDialog(QDialog):
             "Custom project", f"{profile.name}-custom", profile.key
         )
         if identity is None:
-            raise ValueError("structural change cancelled")
+            return None
         name, filename = identity
         return replace(
             profile,
@@ -1759,25 +1766,40 @@ class ConfigurationDialog(QDialog):
         editors[path] = editor
         return editor
 
-    def _rebuild_project_editors(self, key: str, *, fit_arrays: bool = False) -> None:
+    def _rebuild_project_editors(
+        self,
+        key: str,
+        *,
+        fit_arrays: bool = False,
+        dimensions: Mapping[str, int] | None = None,
+    ) -> None:
         """Rebuild a project's editors after dimensions or membership change."""
         root = self._project_root(self.loaded_projects[key])
         old = self.project_editors[key]
         old_values = {path: editor.values() for path, editor in old.items()}
+        new_dimensions = dict(
+            self.project_dimensions[key] if dimensions is None else dimensions
+        )
         sources = dimension_source_values(
             self.project,
             self.loaded_projects[key].profiles,
-            self.project_dimensions[key],
+            new_dimensions,
         )
-        for editor in old.values():
-            self._detach_tab(editor)
-            editor.deleteLater()
-        self.project_editors[key] = {}
-        for profile in self.loaded_projects[key].profiles:
-            path = _profile_path(self.project, profile, root)
-            if path in old_values:
-                previous = old[path]
-                values = old_values[path]
+        prepared: dict[Path, ProfileTab] = {}
+        try:
+            for profile in self.loaded_projects[key].profiles:
+                path = _profile_path(self.project, profile, root)
+                previous = old.get(path)
+                values = (
+                    old_values[path]
+                    if previous is not None
+                    else load_profile(
+                        self.project,
+                        profile,
+                        new_dimensions,
+                        output_root=root,
+                    )
+                )
                 supplied = self.project_initial_values.get(key, {}).get(profile.key, {})
                 if supplied:
                     values = overlay_values(
@@ -1785,7 +1807,7 @@ class ConfigurationDialog(QDialog):
                         _normalize_profile_values(
                             supplied,
                             profile,
-                            {**self.project.constants, **self.project_dimensions[key]},
+                            {**self.project.constants, **new_dimensions},
                         ),
                     )
                 values = overlay_values(values, sources.get(profile.key, {}))
@@ -1793,19 +1815,27 @@ class ConfigurationDialog(QDialog):
                     self.project,
                     profile,
                     values,
-                    self.project_dimensions[key],
+                    new_dimensions,
                     self,
                     fit_arrays=fit_arrays,
                     output_root=root,
                     source_values=sources.get(profile.key),
                 )
                 editor.hide()
+                prepared[path] = editor
                 self._wire_editor(key, editor)
-                editor.saved_values = copy.deepcopy(previous.saved_values)
-                editor.saved_dimensions = dict(previous.saved_dimensions)
-                self.project_editors[key][path] = editor
-            else:
-                self._ensure_editor(key, profile)
+                if previous is not None:
+                    editor.saved_values = copy.deepcopy(previous.saved_values)
+                    editor.saved_dimensions = dict(previous.saved_dimensions)
+        except Exception:
+            for editor in prepared.values():
+                editor.deleteLater()
+            raise
+        self.project_dimensions[key] = new_dimensions
+        self.project_editors[key] = prepared
+        for editor in old.values():
+            self._detach_tab(editor)
+            editor.deleteLater()
         if key == self.active_project:
             self._refresh_current_view()
         self.project_initial_values.pop(key, None)
@@ -1985,6 +2015,8 @@ class ConfigurationDialog(QDialog):
                     self._clear_projects()
                 return
             current = self._customize(self.loaded_projects[project_key])
+            if current is None:
+                return
             profiles = list(current.profiles)
             index = next(i for i, profile in enumerate(profiles) if profile.key == profile_key)
             if kind == "profile":
