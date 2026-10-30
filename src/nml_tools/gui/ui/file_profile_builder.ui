@@ -2,40 +2,184 @@
 <ui version="4.0">
  <class>FileProfileBuilder</class>
  <widget class="QWidget" name="FileProfileBuilder">
-  <property name="geometry"><rect><x>0</x><y>0</y><width>650</width><height>512</height></rect></property>
-  <property name="autoFillBackground"><bool>true</bool></property>
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>650</width>
+    <height>512</height>
+   </rect>
+  </property>
+  <property name="autoFillBackground">
+   <bool>true</bool>
+  </property>
   <layout class="QVBoxLayout" name="rootLayout">
-   <item><layout class="QHBoxLayout" name="sourceLayout">
-    <item><widget class="QLabel" name="sourceLabel_loadProfile"><property name="text"><string>Load file profile</string></property></widget></item>
-    <item><widget class="QComboBox" name="sourceComboBox_loadProfile"/></item>
-    <item><widget class="QPushButton" name="browseButton_loadProfile"><property name="text"><string>Browse…</string></property></widget></item>
-   </layout></item>
-   <item><layout class="QGridLayout" name="schemasLayout">
-    <item row="0" column="0"><widget class="QLabel" name="availableLabel"><property name="text"><string>Available Namelist</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
-    <item row="0" column="2"><widget class="QLabel" name="selectedLabel"><property name="text"><string>Selected Namelist</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
-    <item row="1" column="0"><widget class="QListWidget" name="availableSchemasList"/></item>
-    <item row="1" column="1"><layout class="QVBoxLayout" name="transferLayout">
-     <item><spacer name="upperSpacer"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property></spacer></item>
-     <item><widget class="QPushButton" name="addSchemaButton"><property name="text"><string>&gt;</string></property></widget></item>
-     <item><widget class="QPushButton" name="addAllSchemasButton"><property name="text"><string>&gt;&gt;</string></property></widget></item>
-     <item><widget class="QPushButton" name="removeSchemaButton"><property name="text"><string>&lt;</string></property></widget></item>
-     <item><widget class="QPushButton" name="removeAllSchemasButton"><property name="text"><string>&lt;&lt;</string></property></widget></item>
-     <item><spacer name="lowerSpacer"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property></spacer></item>
-    </layout></item>
-    <item row="1" column="2"><widget class="QListWidget" name="selectedSchemasList"/></item>
-   </layout></item>
-   <item><layout class="QFormLayout" name="profileMetadataLayout">
-    <item row="0" column="0"><widget class="QLabel" name="profileNameLabel"><property name="text"><string>File Profile name:</string></property></widget></item>
-    <item row="0" column="1"><widget class="QLineEdit" name="profileNameEdit"/></item>
-    <item row="1" column="0"><widget class="QLabel" name="defaultFileLabel"><property name="text"><string>Namelist file name:</string></property></widget></item>
-    <item row="1" column="1"><widget class="QLineEdit" name="defaultFileEdit"/></item>
-    <item row="2" column="0"><widget class="QLabel" name="fileDescriptionLabel"><property name="text"><string>Description:</string></property></widget></item>
-    <item row="2" column="1"><widget class="QLineEdit" name="fileDescriptionEdit"/></item>
-   </layout></item>
-   <item><layout class="QHBoxLayout" name="addLayout">
-    <item><spacer name="addSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
-    <item><widget class="QPushButton" name="addButton"><property name="text"><string>Add</string></property></widget></item>
-   </layout></item>
+   <item>
+    <layout class="QHBoxLayout" name="sourceLayout">
+     <item>
+      <widget class="QLabel" name="sourceLabel_loadProfile">
+       <property name="text">
+        <string>Load file profile</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="sourceComboBox_loadProfile"/>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QGridLayout" name="schemasLayout">
+     <item row="0" column="0">
+      <widget class="QLabel" name="availableLabel">
+       <property name="text">
+        <string>Available Namelist</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="2">
+      <widget class="QLabel" name="selectedLabel">
+       <property name="text">
+        <string>Selected Namelist</string>
+       </property>
+       <property name="alignment">
+        <set>Qt::AlignCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QListWidget" name="availableSchemasList"/>
+     </item>
+     <item row="1" column="1">
+      <layout class="QVBoxLayout" name="transferLayout">
+       <item>
+        <spacer name="upperSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <widget class="QPushButton" name="addSchemaButton">
+         <property name="autoDefault"><bool>false</bool></property>
+         <property name="text">
+          <string>&gt;</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="addAllSchemasButton">
+         <property name="autoDefault"><bool>false</bool></property>
+         <property name="text">
+          <string>&gt;&gt;</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="removeSchemaButton">
+         <property name="autoDefault"><bool>false</bool></property>
+         <property name="text">
+          <string>&lt;</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="removeAllSchemasButton">
+         <property name="autoDefault"><bool>false</bool></property>
+         <property name="text">
+          <string>&lt;&lt;</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="lowerSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </item>
+     <item row="1" column="2">
+      <widget class="QListWidget" name="selectedSchemasList"/>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QFormLayout" name="profileMetadataLayout">
+     <item row="0" column="0">
+      <widget class="QLabel" name="profileNameLabel">
+       <property name="text">
+        <string>File Profile name:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLineEdit" name="profileNameEdit"/>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="defaultFileLabel">
+       <property name="text">
+        <string>Namelist file name:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QLineEdit" name="defaultFileEdit"/>
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="fileDescriptionLabel">
+       <property name="text">
+        <string>Description:</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QLineEdit" name="fileDescriptionEdit"/>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="addLayout">
+     <item>
+      <spacer name="addSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
+       </property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="addButton">
+       <property name="autoDefault"><bool>true</bool></property>
+       <property name="default"><bool>true</bool></property>
+       <property name="text">
+        <string>Add</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
   </layout>
  </widget>
  <resources/>

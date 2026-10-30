@@ -104,9 +104,14 @@ def _relative_path(path: str, widget: QWidget) -> str:
     return Path(os.path.relpath(path, _output_root(widget))).as_posix()
 
 
-def _palette_color(role: Any) -> str:
-    """Return a theme-aware palette color for lightweight hint styling."""
-    return str(QApplication.palette().color(role).name())
+def _style_info_button(button: QWidget) -> None:
+    """Emphasize information buttons without styling their tooltips."""
+    font = button.font()
+    font.setBold(True)
+    button.setFont(font)
+    palette = button.palette()
+    palette.setColor(QPalette.ButtonText, QApplication.palette().color(QPalette.Link))
+    button.setPalette(palette)
 
 
 def _hint_style(default: bool) -> str:
@@ -618,10 +623,7 @@ class InlineArrayTable(QWidget):
         description = schema.get("description")
         has_description = isinstance(description, str) and bool(description.strip())
         self.infoButton.setVisible(has_description)
-        self.infoButton.setStyleSheet(
-            f"QToolButton#infoButton {{ color: {_palette_color(QPalette.Link)}; "
-            "font-weight: bold; }}"
-        )
+        _style_info_button(self.infoButton)
         if has_description:
             self.infoButton.clicked.connect(
                 lambda: QMessageBox.information(
@@ -1070,10 +1072,7 @@ class FieldRow(QWidget):
             self.infoButton.clicked.connect(
                 lambda: QMessageBox.information(self, str(schema.get("title", name)), description)
             )
-        self.infoButton.setStyleSheet(
-            f"QToolButton#infoButton {{ color: {_palette_color(QPalette.Link)}; "
-            "font-weight: bold; }}"
-        )
+        _style_info_button(self.infoButton)
         self._update_decorations()
         self.editorLayout.addWidget(self.field)
         if isinstance(self.field, ScalarField) and (value is MISSING or value == ""):
@@ -1763,10 +1762,7 @@ def _property_widget(
     widget.editorHost.hide()
     description = str(schema.get("description", "")).strip()
     widget.infoButton.setVisible(bool(description))
-    widget.infoButton.setStyleSheet(
-        f"QToolButton#infoButton {{ color: {_palette_color(QPalette.Link)}; "
-        "font-weight: bold; }}"
-    )
+    _style_info_button(widget.infoButton)
     if description:
         widget.infoButton.clicked.connect(
             lambda: QMessageBox.information(widget, str(schema.get("title", name)), description)

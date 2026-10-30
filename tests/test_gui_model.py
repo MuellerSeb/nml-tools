@@ -19,6 +19,7 @@ from nml_tools.gui.model import (
     save_profiles,
     save_project_profile,
     suggestion,
+    validate_project_filename,
     validate_project_name,
 )
 
@@ -415,14 +416,27 @@ def test_custom_project_ownership_names_and_file_mode(tmp_path):
     _write_project(tmp_path)
     project = load_project(tmp_path)
     profile = project.project_profiles[0]
-    custom = replace(profile, name="my-project_1", key="my-project_1", custom=True, source=None)
+    custom = replace(
+        profile,
+        name="my-project_1",
+        key="my-project_1",
+        custom=True,
+        source=None,
+        toml_file="chosen.toml",
+    )
     assert validate_project_name(custom.name) == custom.name
     path = save_project_profile(project, custom)
+    assert path.name == "chosen.toml"
     owned = replace(custom, source=path)
     os.chmod(path, 0o640)
     save_project_profile(project, owned)
     assert path.stat().st_mode & 0o777 == 0o640
-    with pytest.raises(ValueError, match="unowned"):
+    with pytest.raises(ValueError, match="TOML file 'chosen.toml' already exists"):
         save_project_profile(project, replace(owned, source=None))
     with pytest.raises(ValueError, match="may contain"):
         validate_project_name("bad/name")
+    with pytest.raises(ValueError, match="plain .toml filename"):
+        validate_project_filename("folder/project.toml")
+    for reserved in ("nml-config.toml", "pyproject.toml"):
+        with pytest.raises(ValueError, match="reserved for nml-tools configuration"):
+            validate_project_filename(reserved)

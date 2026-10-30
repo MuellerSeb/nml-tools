@@ -209,6 +209,7 @@ class GuiProjectProfile:
     source: Path | None = None
     custom: bool = False
     output_dir: Path | None = None
+    toml_file: str | None = None
 
 
 @dataclass(frozen=True)
@@ -648,6 +649,7 @@ def load_project_profile_file(
         tuple(available[item] for item in member_keys),
         path.resolve(),
         True,
+        toml_file=path.name,
     )
 
 
@@ -666,11 +668,12 @@ def save_project_profile(project: GuiProject, profile: GuiProjectProfile) -> Pat
     if not profile.custom:
         raise ValueError("configured project profiles are read-only")
     validate_project_name(profile.key)
-    path = (project.root / f"{profile.key}.toml").resolve()
+    filename = validate_project_filename(profile.toml_file or f"{profile.key}.toml")
+    path = (project.root / filename).resolve()
     if project.root not in path.parents:
         raise ValueError("custom project file must remain inside the schema directory")
     if path.exists() and (profile.source is None or path != profile.source.resolve()):
-        raise ValueError(f"refusing to overwrite unowned TOML file '{path.name}'")
+        raise ValueError(f"TOML file '{path.name}' already exists")
     lines: list[str] = []
     for item in profile.profiles:
         lines.extend(
@@ -715,6 +718,22 @@ def save_project_profile(project: GuiProject, profile: GuiProjectProfile) -> Pat
 def _toml_escape(value: str) -> str:
     """Escape a string for the small TOML subset written by the GUI."""
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def validate_project_filename(filename: str) -> str:
+    """Validate one custom project filename confined to the schema directory."""
+    clean = filename.strip()
+    if (
+        not clean
+        or Path(clean).name != clean
+        or "/" in clean
+        or "\\" in clean
+        or not clean.endswith(".toml")
+    ):
+        raise ValueError("project profile filename must be a plain .toml filename")
+    if clean.lower() in {"nml-config.toml", "pyproject.toml"}:
+        raise ValueError(f"TOML file '{clean}' is reserved for nml-tools configuration")
+    return clean
 
 
 def _evaluated_group_values(
@@ -997,6 +1016,7 @@ def recover_dimensions(
     paths: Iterable[Path] | None = None,
     overrides: Mapping[str, int] | None = None,
     output_root: Path | None = None,
+    profiles: Iterable[GuiProfile] | None = None,
 ) -> dict[str, int]:
     """Infer editable sizes from saved indices before evaluating the namelists."""
     if paths is None:
@@ -1004,6 +1024,14 @@ def recover_dimensions(
     pages = project.namelists or tuple(page for p in project.profiles for page in p.pages)
     schemas = {page.key: page.schema for page in pages}
     unique_paths = tuple(dict.fromkeys(paths))
+    sources = project.dimension_sources
+    if profiles is not None:
+        present = {page.key for profile in profiles for page in profile.pages}
+        sources = {
+            name: source
+            for name, source in sources.items()
+            if source.namelist in present
+        }
     parsed = [
         parse_namelist(path.read_text(encoding="utf-8"), source=str(path))
         for path in unique_paths
@@ -1012,13 +1040,13 @@ def recover_dimensions(
     inferred = (
         infer_runtime_dimensions(
             parsed,
-            sources=project.dimension_sources,
+            sources=sources,
             schemas=schemas,
             defaults=project.default_dimensions,
             overrides=overrides,
             constants=project.constants,
         )
-        if project.dimension_sources
+        if sources
         else _normalize_dimensions(overrides or {}, project)
     )
     extents: dict[str, int] = {}
@@ -1040,7 +1068,7 @@ def recover_dimensions(
                 prop = properties.get(name, {})
                 if (
                     name in project.default_dimensions
-                    and name not in project.dimension_sources
+                    and name not in sources
                     and prop.get("type") == "integer"
                     and len(assignment.designator.parts) == 1
                     and not part.selectors
@@ -1061,7 +1089,7 @@ def recover_dimensions(
                     dimension = str(token).lower()
                     if (
                         dimension not in project.default_dimensions
-                        or dimension in project.dimension_sources
+                        or dimension in sources
                     ):
                         continue
                     selector = selectors[axis] if axis < len(selectors) else None
@@ -1104,23 +1132,15 @@ def recover_dimensions(
 def ensure_dimension_sources(
     project: GuiProject, profiles: Iterable[GuiProfile]
 ) -> tuple[GuiProfile, ...]:
-    """Ensure every configured dimension source occurs in exactly one file."""
+    """Reject ambiguous dimension sources while allowing manual dimensions."""
     result = list(profiles)
-    used = set().union(*(_schema_dimensions(page.schema) for item in result for page in item.pages))
     for dimension, source in project.dimension_sources.items():
-        if dimension not in used:
-            continue
         occurrences = [
             index
             for index, profile in enumerate(result)
             if any(page.key == source.namelist for page in profile.pages)
         ]
         if len(occurrences) > 1:
-            raise ValueError(
-                f"dimension '{dimension}' source namelist '{source.namelist}' "
-                "must occur in exactly one file profile"
-            )
-        if not occurrences:
             raise ValueError(
                 f"dimension '{dimension}' source namelist '{source.namelist}' "
                 "must occur in exactly one file profile"
@@ -1154,22 +1174,19 @@ def dimension_source_values(
     """Return project dimensions expressed as their source namelist fields."""
     result: dict[str, dict[str, dict[str, int]]] = {}
     profile_items = tuple(profiles)
-    used = set().union(
-        *(_schema_dimensions(page.schema) for item in profile_items for page in item.pages)
-    )
     for dimension, source in project.dimension_sources.items():
-        if dimension not in used:
-            continue
         matches = [
             profile
             for profile in profile_items
             if any(page.key == source.namelist for page in profile.pages)
         ]
-        if len(matches) != 1:
+        if len(matches) > 1:
             raise ValueError(
                 f"dimension '{dimension}' source namelist '{source.namelist}' "
                 "must occur in exactly one file profile"
             )
+        if not matches:
+            continue
         profile = matches[0]
         page = next(page for page in profile.pages if page.key == source.namelist)
         result.setdefault(profile.key, {}).setdefault(page.name, {})[source.property] = dimensions[

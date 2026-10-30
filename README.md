@@ -962,15 +962,19 @@ edits them. Invalid input is reported. No JSON configuration or
 JSON-to-namelist conversion is involved. Selected groups are rewritten on
 save; other groups and their comments remain intact.
 
-An interactive launch starts with an empty project tree and points to
-`+ : Project`. Configured projects can be added from the config, while custom
-projects can be built from file profiles and namelist schemas. Selecting a
-project opens its Settings page; selecting a file shows its namelists and a
+An interactive launch starts with an empty project tree and a central
+`+ : Project` action. Configured projects can be added from the config, while
+custom projects can be built from file profiles and namelist schemas. Selecting
+a project opens its Settings page; selecting a file shows its namelists and a
 syntax-highlighted file preview; selecting a namelist opens its editable form.
-The Back and Next controls move through that file's namelists. Standard project
-definitions may be removed from the session and re-added, but their configured
-file/namelist structure is protected. Custom projects expose the corresponding
-add and remove actions.
+Creating a custom project asks for its project name and a new `.toml` filename
+in the schemas directory.
+The Back and Next controls move through that file's namelists. Standard file
+profiles initially select their configured namelists and lock required members;
+optional members may be removed and more namelists may be added. Saved `.nml`
+files can be loaded through `+ : File` → `Browse…`, associated with a configured
+profile or treated as custom. A file outside the project output directory is
+imported and later saved under the same filename in that output directory.
 
 One- and two-dimensional arrays use inline tables with copy/paste; a
 one-element one-dimensional array presents its element editor directly.
@@ -1007,6 +1011,8 @@ requests, the tree starts empty for interactive project selection;
 
 For sourced runtime dimensions, `initial_dimensions` takes precedence over an
 explicit saved source property, which takes precedence over the TOML default.
+The source link appears only while its namelist belongs to the current project;
+removing that namelist returns the dimension to manual input.
 The GUI also recovers extents for older unsourced schemas from saved indexed
 arrays where possible. Settings controls can then change the dimensions and
 rebuild the affected editors; `R` opens a configured source property. Existing

@@ -9,9 +9,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 from itertools import product
 from pathlib import Path
+from threading import current_thread, main_thread
 from typing import Any
 
-from qtpy.QtCore import QSignalBlocker, Qt, QTimer
+from qtpy.QtCore import QSignalBlocker, Qt, QThread, QTimer
+from qtpy.QtGui import QColor, QFont, QPalette
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -21,6 +23,7 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
+    QLabel,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -31,6 +34,7 @@ from qtpy.QtWidgets import (
     QTableWidgetItem,
     QToolButton,
     QTreeWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -62,9 +66,9 @@ from .model import (
     save_profiles,
     save_project_profile,
     suggestion,
+    validate_project_filename,
     validate_project_name,
 )
-from .onboarding import OnboardingTip
 from .ui import load_ui
 
 _UNSET = object()
@@ -367,6 +371,7 @@ class FileProfileOverview(QWidget):
                 preview = "\n".join(text.rstrip() for text in rendered.values()) + "\n"
         except (OSError, ValueError, KeyError) as exc:
             preview = f"Preview unavailable: {exc}"
+        self.previewBrowser.setFont(QFont("JetBrains Mono", 11))
         self.highlighter = NamelistHighlighter(self.previewBrowser.document())
         self.previewBrowser.setPlainText(preview)
 
@@ -385,6 +390,7 @@ class ProfileConfigTab(QWidget):
         dimensions: Mapping[str, int],
         parent: QWidget,
         output_root: Path | None = None,
+        linked_dimensions: Iterable[str] = (),
     ) -> None:
         super().__init__(parent)
         load_ui("profile_config.ui", self)
@@ -396,11 +402,12 @@ class ProfileConfigTab(QWidget):
         self.output_path.setText(str((output_root or project.output_root).resolve()))
         self.dimension_boxes: dict[str, QSpinBox] = {}
         self.dimension_source_buttons: dict[str, QPushButton] = {}
+        linked = set(linked_dimensions)
         for name, default in project.default_dimensions.items():
             box = QSpinBox(self.dimensionsGroup)
             box.setRange(1, 2_147_483_647)
             box.setValue(dimensions.get(name, default))
-            source = project.dimension_sources.get(name)
+            source = project.dimension_sources.get(name) if name in linked else None
             if source is None:
                 self.dimensionsLayout.addRow(name, box)
             else:
@@ -411,9 +418,12 @@ class ProfileConfigTab(QWidget):
                 button = QPushButton("R", container)
                 button.setObjectName("dimensionSourceButton")
                 button.setFixedWidth(24)
-                button.setStyleSheet(
-                    "QPushButton#dimensionSourceButton { color: red; font-weight: bold; }"
-                )
+                font = button.font()
+                font.setBold(True)
+                button.setFont(font)
+                palette = button.palette()
+                palette.setColor(QPalette.ButtonText, QColor("red"))
+                button.setPalette(palette)
                 button.setToolTip(f"Open source: {source.namelist}%{source.property}")
                 layout.addWidget(button)
                 self.dimensionsLayout.addRow(name, container)
@@ -465,11 +475,12 @@ class FileProfileBuilder(QWidget):
         self.project = project
         self.output_root = output_root
         self.source_profile: GuiProfile | None = None
+        self.source_path: Path | None = None
         self.source_profiles: dict[str, GuiProfile] = {}
-        self.external_profiles: list[GuiProfile] = []
+        self.active_source: tuple[str, str] | None = None
         self.source_combo = self.sourceComboBox_loadProfile
-        self.browse = self.browseButton_loadProfile
         self.add = self.addButton
+        self.add.setDefault(True)
         self.available_schemas: QListWidget = self.availableSchemasList
         self.selected_schemas: QListWidget = self.selectedSchemasList
         self.profile_name = self.profileNameEdit
@@ -510,56 +521,63 @@ class FileProfileBuilder(QWidget):
             for profile in profiles:
                 if profile.key not in standard_keys:
                     custom.setdefault(profile.key, profile)
-        for profile in (*current, *self.external_profiles):
+        for profile in current:
             if profile.key not in standard_keys:
                 custom[profile.key] = profile
-        all_profiles = [*standard, *custom.values()]
-        represented = {
-            _profile_path(self.project, profile, self.output_root) for profile in all_profiles
+        self.source_profiles = {
+            profile.key: profile for profile in (*standard, *custom.values())
         }
-        saved = [
-            path
-            for path in sorted(self.output_root.glob("*.nml"))
-            if path.is_file() and path.resolve() not in represented
-        ]
-        self.source_profiles = {profile.key: profile for profile in all_profiles}
         combo = self.source_combo
         with QSignalBlocker(combo):
             combo.clear()
             self._add_profiles(standard)
-            if saved:
-                combo.insertSeparator(combo.count())
-                for path in saved:
-                    combo.addItem(path.name, ("nml", str(path.resolve())))
             if custom:
                 combo.insertSeparator(combo.count())
                 self._add_profiles(custom.values())
             if combo.count():
                 combo.insertSeparator(combo.count())
+            combo.addItem("Browse…", ("browse", ""))
+            combo.insertSeparator(combo.count())
             combo.addItem("<custom>", ("custom", ""))
-            combo.setCurrentIndex(0)
+            combo.setCurrentIndex(0 if self.source_profiles else combo.count() - 1)
+            self.active_source = combo.currentData()
 
     def _add_profiles(self, profiles: Iterable[GuiProfile]) -> None:
         """Append profile choices while keeping identity in item data."""
         for profile in profiles:
             self.source_combo.addItem(profile.title, ("profile", profile.key))
 
-    def set_profile(self, profile: GuiProfile) -> None:
+    def set_profile(self, profile: GuiProfile, *, configured: bool = True) -> None:
         """Populate the builder from one reusable profile."""
         self.source_profile = profile
         self.profile_name.setText(profile.name)
         self.default_filename.setText(profile.default_file)
         self.description.setText(profile.description or "")
+        standard = (
+            next((item for item in self.project.profiles if item.key == profile.key), None)
+            if configured
+            else None
+        )
         selected = {page.key for page in profile.pages}
+        required = set(standard.required if standard is not None else ())
         self.available_schemas.clear()
         self.selected_schemas.clear()
-        for page in self.project.namelists:
+        pages = profile.pages if standard is not None else self.project.namelists
+        for page in pages:
             target = self.selected_schemas if page.key in selected else self.available_schemas
-            target.addItem(ConfigurationDialog._schema_item(page.name, page.key))
+            item = ConfigurationDialog._schema_item(page.name, page.key)
+            if page.key in required:
+                item.setFlags(
+                    item.flags()
+                    & ~Qt.ItemFlag.ItemIsEnabled
+                    & ~Qt.ItemFlag.ItemIsSelectable
+                )
+            target.addItem(item)
 
     def clear_builder(self) -> None:
         """Clear metadata and make every configured namelist available."""
         self.source_profile = None
+        self.source_path = None
         self.profile_name.clear()
         self.default_filename.clear()
         self.description.clear()
@@ -664,7 +682,7 @@ class ConfigurationDialog(QDialog):
         self.config_tab: ProfileConfigTab | None = None
         self.current_overview: FileProfileOverview | None = None
         self.current_tool: QWidget | None = None
-        self.onboarding_tip: OnboardingTip | None = None
+        self.empty_view: QWidget | None = None
         self.schemas_path = self.lineEdit_pathSchemasConfigFile
         self.schemas_browse = self.browseButton_browseSchemasConfigFile
         self.schemas_scan = self.browseButton_scanSchemasConfigFile
@@ -694,7 +712,6 @@ class ConfigurationDialog(QDialog):
             self.project_add_item, 0
         )
         self.project_add_button.setToolTip("Click here to add a project")
-        self._show_project_hint = not requested_keys
         if requested_keys:
             try:
                 for key in requested_keys:
@@ -703,6 +720,8 @@ class ConfigurationDialog(QDialog):
                 self.treeWidget_projectStructure.setCurrentItem(self.project_items[first])
             except (OSError, ValueError, KeyError) as exc:
                 QMessageBox.critical(self, "Invalid configuration", str(exc))
+        if not self.loaded_projects:
+            self._show_empty_project()
 
     @staticmethod
     def _schema_item(name: str, key: str) -> QListWidgetItem:
@@ -720,8 +739,13 @@ class ConfigurationDialog(QDialog):
     @staticmethod
     def _move_all(source: QListWidget, target: QListWidget) -> None:
         """Move every schema between profile-builder lists."""
-        while source.count():
-            target.addItem(source.takeItem(0))
+        index = 0
+        while index < source.count():
+            item = source.item(index)
+            if item.flags() & Qt.ItemFlag.ItemIsEnabled:
+                target.addItem(source.takeItem(index))
+            else:
+                index += 1
 
     def _project_root(self, profile: GuiProjectProfile) -> Path:
         """Return the resolved namelist directory owned by a project profile."""
@@ -842,13 +866,19 @@ class ConfigurationDialog(QDialog):
                 return
             kind, value = selected
             if kind == "custom":
-                name, accepted = QInputDialog.getText(self, "New project", "Project name")
-                if not accepted:
+                identity = self._custom_project_identity("New project")
+                if identity is None:
                     return
-                name = validate_project_name(name)
-                profile = GuiProjectProfile(name, name.lower(), name, None, (), custom=True)
-                if profile.key in self.loaded_projects:
-                    raise ValueError(f"project '{name}' is already loaded")
+                name, filename = identity
+                profile = GuiProjectProfile(
+                    name,
+                    name.lower(),
+                    name,
+                    None,
+                    (),
+                    custom=True,
+                    toml_file=filename,
+                )
             elif kind == "configured":
                 profile = self.available_projects[value]
             else:
@@ -867,6 +897,28 @@ class ConfigurationDialog(QDialog):
             self.treeWidget_projectStructure.setCurrentItem(self.project_items[profile.key])
         except (OSError, ValueError, KeyError, TypeError) as exc:
             QMessageBox.critical(self, "Load project", str(exc))
+
+    def _custom_project_identity(
+        self, title: str, suggested: str = "", current_key: str | None = None
+    ) -> tuple[str, str] | None:
+        """Ask for a unique custom project name and TOML filename."""
+        name, accepted = QInputDialog.getText(
+            self, title, "Project name", text=suggested
+        )
+        if not accepted:
+            return None
+        name = validate_project_name(name)
+        if name.lower() in self.loaded_projects and name.lower() != current_key:
+            raise ValueError(f"project '{name}' is already loaded")
+        filename, accepted = QInputDialog.getText(
+            self, title, "Project profile TOML filename", text=f"{name}.toml"
+        )
+        if not accepted:
+            return None
+        filename = validate_project_filename(filename)
+        if (self.project.root / filename).exists():
+            raise ValueError(f"TOML file '{filename}' already exists")
+        return name, filename
 
     def _register_project(self, profile: GuiProjectProfile) -> None:
         """Validate and add one project profile without duplicating it."""
@@ -887,6 +939,7 @@ class ConfigurationDialog(QDialog):
             paths,
             self.project_initial_dimensions.get(profile.key, {}),
             output_root=root,
+            profiles=profiles,
         )
         initial_values = self.project_initial_values.get(profile.key, {})
         source_values = dimension_source_values(self.project, profiles, dimensions)
@@ -926,6 +979,7 @@ class ConfigurationDialog(QDialog):
             self._wire_editor(profile.key, editor)
         self._new_config(profile.key)
         self._build_tree(profile)
+        self.project_initial_values.pop(profile.key, None)
 
     def _new_config(self, project_key: str) -> ProfileConfigTab:
         """Create the single reusable Config tab for one loaded project."""
@@ -933,29 +987,31 @@ class ConfigurationDialog(QDialog):
         if old is not None:
             self._detach_tab(old)
             old.deleteLater()
+        profiles = self.loaded_projects[project_key].profiles
+        linked = {
+            name
+            for name, source in self.project.dimension_sources.items()
+            if sum(
+                any(page.key == source.namelist for page in profile.pages)
+                for profile in profiles
+            )
+            == 1
+        }
         config = ProfileConfigTab(
             self.project,
             self.project_dimensions[project_key],
             self,
             self._project_root(self.loaded_projects[project_key]),
+            linked,
         )
         config.hide()
         config.set_profiles(
-            self.loaded_projects[project_key].profiles,
+            profiles,
             self._project_root(self.loaded_projects[project_key]),
         )
         config.output_browse.clicked.connect(lambda: self._browse_output(config))
         config.set.clicked.connect(lambda: self._set_configuration(project_key, config))
         for dimension, button in config.dimension_source_buttons.items():
-            source = self.project.dimension_sources[dimension]
-            matches = [
-                profile
-                for profile in self.loaded_projects[project_key].profiles
-                if any(page.key == source.namelist for page in profile.pages)
-            ]
-            button.setEnabled(len(matches) == 1)
-            if len(matches) != 1:
-                button.setToolTip("Source namelist is not present in this project")
             button.clicked.connect(
                 lambda _checked=False, key=project_key, name=dimension: (
                     self._open_dimension_source(key, name)
@@ -992,9 +1048,10 @@ class ConfigurationDialog(QDialog):
         index = self.treeWidget_projectStructure.indexOfTopLevelItem(self.project_add_item)
         self.treeWidget_projectStructure.insertTopLevelItem(max(index, 0), root)
         self._remove_button(root)
-        standard_files = {item.key for item in self.project.profiles}
+        standard_files = {item.key: item for item in self.project.profiles}
         for file_profile in profile.profiles:
-            editable = profile.custom and file_profile.key not in standard_files
+            standard = standard_files.get(file_profile.key)
+            editable = profile.custom and standard is None
             file_item = QTreeWidgetItem([f"File: {file_profile.default_file}", ""])
             file_item.setData(
                 0, Qt.ItemDataRole.UserRole, ("profile", profile.key, file_profile.key, "")
@@ -1010,17 +1067,16 @@ class ConfigurationDialog(QDialog):
                     ("namelist", profile.key, file_profile.key, page.key),
                 )
                 file_item.addChild(child)
-                if editable:
+                if standard is None or page.key not in standard.required:
                     self._remove_button(child)
-            if editable:
-                self._action_item(
-                    file_item,
-                    "Nml",
-                    ("add_namelist", profile.key, file_profile.key, ""),
-                    lambda _checked=False, p=profile.key, f=file_profile.key: (
-                        self._show_namelist_picker(p, f)
-                    ),
-                )
+            self._action_item(
+                file_item,
+                "Nml",
+                ("add_namelist", profile.key, file_profile.key, ""),
+                lambda _checked=False, p=profile.key, f=file_profile.key: (
+                    self._show_namelist_picker(p, f)
+                ),
+            )
         if profile.custom:
             self._action_item(
                 root,
@@ -1048,9 +1104,8 @@ class ConfigurationDialog(QDialog):
             parent.addChild(item)
         button = QPushButton(self.treeWidget_projectStructure)
         button.setText(f"+ : {label}")
-        button.setFlat(True)
         button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        button.setStyleSheet("text-align: left; padding-left: 0")
+        button.setStyleSheet("text-align: left; padding-left: 4px")
         button.clicked.connect(callback)
         self.treeWidget_projectStructure.setItemWidget(item, 0, button)
         return item
@@ -1080,8 +1135,28 @@ class ConfigurationDialog(QDialog):
             self.tabs.setCurrentWidget(widget)
         widget.show()
 
+    def _show_empty_project(self) -> None:
+        """Show the primary project action when no project is loaded."""
+        self._clear_overview()
+        view = QWidget(self)
+        layout = QVBoxLayout(view)
+        layout.addStretch()
+        label = QLabel("Click here to add a project", view)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+        button = QPushButton("+ : Project", view)
+        button.clicked.connect(self._add_selected_project)
+        layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch()
+        self.empty_view = view
+        self._show_view(view, "Projects")
+
     def _clear_overview(self) -> None:
         """Dispose transient overview and add-form pages."""
+        if self.empty_view is not None:
+            self._detach_tab(self.empty_view)
+            self.empty_view.deleteLater()
+            self.empty_view = None
         if self.current_overview is not None:
             self._detach_tab(self.current_overview)
             self.current_overview.deleteLater()
@@ -1162,7 +1237,6 @@ class ConfigurationDialog(QDialog):
         builder = FileProfileBuilder(
             self.project, current.profiles, self._project_root(current), self
         )
-        builder.browse.clicked.connect(lambda: self._browse_profile(builder, project_key))
         builder.source_combo.currentIndexChanged.connect(
             lambda: self._select_profile_source(builder)
         )
@@ -1185,30 +1259,6 @@ class ConfigurationDialog(QDialog):
         self.current_tool = picker
         self._show_view(picker, f"Add namelist to {profile.name}")
 
-    def _browse_profile(self, builder: FileProfileBuilder, project_key: str) -> None:
-        """Add file profiles from a selected project-profile TOML file."""
-        name, _ = QFileDialog.getOpenFileName(
-            self, "Load file profiles", str(self.project.root), "TOML files (*.toml)"
-        )
-        if name:
-            try:
-                profiles = load_project_profile_file(
-                    self.project, Path(name), builder.output_root
-                ).profiles
-                builder.external_profiles.extend(profiles)
-                builder.reset_sources(self.loaded_projects[project_key].profiles)
-                if profiles:
-                    builder.source_combo.setCurrentIndex(
-                        next(
-                            index
-                            for index in range(builder.source_combo.count())
-                            if builder.source_combo.itemData(index)
-                            == ("profile", profiles[0].key)
-                        )
-                    )
-            except (OSError, ValueError) as exc:
-                QMessageBox.critical(self, "Invalid profile", str(exc))
-
     def _browse_output(self, config: ProfileConfigTab) -> None:
         """Select the namelist output directory for one project settings tab."""
         path = QFileDialog.getExistingDirectory(
@@ -1216,6 +1266,99 @@ class ConfigurationDialog(QDialog):
         )
         if path:
             config.output_path.setText(path)
+
+    def _choose_namelist_profile(
+        self, builder: FileProfileBuilder
+    ) -> tuple[str, str] | None:
+        """Choose the file-profile contract followed by a saved namelist."""
+        standard = list(self.project.profiles)
+        standard_keys = {profile.key for profile in standard}
+        custom = [
+            profile
+            for profile in builder.source_profiles.values()
+            if profile.key not in standard_keys
+        ]
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle("Namelist file profile")
+        dialog.setLabelText("Which file profile does this namelist follow?")
+        dialog.setComboBoxEditable(False)
+        dialog.setComboBoxItems([""])
+        combo = dialog.findChild(QComboBox)
+        if combo is None:
+            return None
+        combo.clear()
+        for profile in standard:
+            combo.addItem(profile.title, ("profile", profile.key))
+        if standard and custom:
+            combo.insertSeparator(combo.count())
+        for profile in custom:
+            combo.addItem(profile.title, ("profile", profile.key))
+        if combo.count():
+            combo.insertSeparator(combo.count())
+        combo.addItem("<custom>", ("custom", ""))
+        return combo.currentData() if _exec(dialog) else None
+
+    def _associate_namelist(
+        self, builder: FileProfileBuilder, path: Path
+    ) -> tuple[GuiProfile, tuple[str, str]] | None:
+        """Validate a saved namelist against its selected file profile."""
+        parsed = profile_from_namelist(self.project, path)
+        selected = self._choose_namelist_profile(builder)
+        if selected is None:
+            return None
+        kind, key = selected
+        if kind == "custom":
+            return parsed, selected
+        profile = builder.source_profiles[key]
+        actual = {page.key for page in parsed.pages}
+        allowed = {page.key for page in profile.pages}
+        extra = actual - allowed
+        missing = set(profile.required) - actual
+        if extra:
+            raise ValueError(
+                f"'{path.name}' contains namelists outside profile '{profile.name}': "
+                + ", ".join(sorted(extra))
+            )
+        if missing:
+            raise ValueError(
+                f"'{path.name}' is missing required namelists from profile "
+                f"'{profile.name}': " + ", ".join(sorted(missing))
+            )
+        return replace(profile, default_file=path.name), selected
+
+    @staticmethod
+    def _set_profile_source(
+        builder: FileProfileBuilder, selected: tuple[str, str]
+    ) -> None:
+        """Select a source-combo entry without re-running its handler."""
+        with QSignalBlocker(builder.source_combo):
+            for index in range(builder.source_combo.count()):
+                if builder.source_combo.itemData(index) == selected:
+                    builder.source_combo.setCurrentIndex(index)
+                    return
+
+    def _browse_namelist(self, builder: FileProfileBuilder) -> bool:
+        """Browse and associate one namelist with a configured profile type."""
+        name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load namelist",
+            str(builder.output_root),
+            "Fortran namelist files (*.nml)",
+        )
+        if not name:
+            return False
+        path = Path(name).resolve()
+        associated = self._associate_namelist(builder, path)
+        if associated is None:
+            return False
+        profile, selected = associated
+        self._set_profile_source(builder, selected)
+        builder.set_profile(profile, configured=selected[0] != "custom")
+        if selected[0] == "custom":
+            builder.source_profile = None
+        builder.source_path = path
+        builder.active_source = selected
+        return True
 
     def _configured_output(self, config: ProfileConfigTab) -> Path:
         """Resolve a settings-tab output path relative to the schema directory."""
@@ -1239,7 +1382,11 @@ class ConfigurationDialog(QDialog):
         if len(paths) != len(set(paths)):
             raise ValueError(f"project '{current.name}' writes more than one profile to one file")
         dimensions = recover_dimensions(
-            self.project, paths, overrides, output_root=output_root
+            self.project,
+            paths,
+            overrides,
+            output_root=output_root,
+            profiles=profiles,
         )
         sources = dimension_source_values(self.project, profiles, dimensions)
         initial_values = self.project_initial_values.get(key, {})
@@ -1285,6 +1432,7 @@ class ConfigurationDialog(QDialog):
             editor.deleteLater()
         if key == self.active_project:
             self._refresh_current_view()
+        self.project_initial_values.pop(key, None)
 
     def _select_profile_source(self, builder: FileProfileBuilder) -> None:
         """Populate builder values from a reusable file profile."""
@@ -1292,17 +1440,22 @@ class ConfigurationDialog(QDialog):
         if not data:
             return
         kind, value = data
+        previous = builder.active_source
         try:
+            if kind == "browse":
+                if not self._browse_namelist(builder):
+                    if previous is not None:
+                        self._set_profile_source(builder, previous)
+                return
             if kind == "custom":
                 builder.clear_builder()
-                return
-            profile = (
-                builder.source_profiles[value]
-                if kind == "profile"
-                else profile_from_namelist(self.project, Path(value))
-            )
-            builder.set_profile(profile)
+            else:
+                builder.source_path = None
+                builder.set_profile(builder.source_profiles[value])
+            builder.active_source = data
         except (OSError, ValueError, KeyError) as exc:
+            if previous is not None:
+                self._set_profile_source(builder, previous)
             QMessageBox.critical(self, "Invalid namelist", str(exc))
 
     def _set_configuration(self, project_key: str, config: ProfileConfigTab) -> None:
@@ -1355,6 +1508,14 @@ class ConfigurationDialog(QDialog):
                 )
             profile = replace(profile, description=builder.description.text().strip() or None)
             imported: Mapping[str, Any] | None = None
+            if builder.source_path is not None:
+                imported = load_profile(
+                    self.project,
+                    profile,
+                    self.project_dimensions[current.key],
+                    path=builder.source_path,
+                    output_root=output_root,
+                )
             replace_index = next(
                 (
                     index
@@ -1377,7 +1538,7 @@ class ConfigurationDialog(QDialog):
                 old = profiles_list[replace_index]
                 profiles_list[replace_index] = profile
                 profiles = tuple(profiles_list)
-                if old.default_file != profile.default_file:
+                if imported is None and old.default_file != profile.default_file:
                     old_path = _profile_path(self.project, old, output_root)
                     imported = self.project_editors[current.key][old_path].values()
             profiles = ensure_dimension_sources(self.project, profiles)
@@ -1434,15 +1595,21 @@ class ConfigurationDialog(QDialog):
         """Copy a configured project before a structural edit."""
         if profile.custom:
             return profile
-        name, accepted = QInputDialog.getText(
-            self, "Custom project", "Save structural changes as", text=f"{profile.name}-custom"
+        identity = self._custom_project_identity(
+            "Custom project", f"{profile.name}-custom", profile.key
         )
-        if not accepted:
+        if identity is None:
             raise ValueError("structural change cancelled")
-        name = validate_project_name(name)
-        if name.lower() in self.loaded_projects and name.lower() != profile.key:
-            raise ValueError(f"project '{name}' is already loaded")
-        return replace(profile, name=name, key=name.lower(), title=name, source=None, custom=True)
+        name, filename = identity
+        return replace(
+            profile,
+            name=name,
+            key=name.lower(),
+            title=name,
+            source=None,
+            custom=True,
+            toml_file=filename,
+        )
 
     def _replace_project(self, old_key: str | None, profile: GuiProjectProfile) -> None:
         """Replace one explicit project model and preserve unrelated active state."""
@@ -1454,19 +1621,20 @@ class ConfigurationDialog(QDialog):
         self.treeWidget_projectStructure.takeTopLevelItem(index)
         editors = self.project_editors.pop(old_key)
         config = self.project_configs.pop(old_key)
+        self._detach_tab(config)
+        config.deleteLater()
         dimensions = self.project_dimensions.pop(old_key)
         initial_values = self.project_initial_values.pop(old_key, {})
         initial_dimensions = self.project_initial_dimensions.pop(old_key, {})
         self.loaded_projects.pop(old_key)
         self.loaded_projects[profile.key] = profile
         self.project_editors[profile.key] = editors
-        self.project_configs[profile.key] = config
         self.project_dimensions[profile.key] = dimensions
         self.project_initial_values[profile.key] = initial_values
         self.project_initial_dimensions[profile.key] = initial_dimensions
-        config.set_profiles(profile.profiles, self._project_root(profile))
         if was_active:
             self.active_project = None
+        self._new_config(profile.key)
         self._build_tree(profile)
         if was_active:
             self.treeWidget_projectStructure.setCurrentItem(self.project_items[profile.key])
@@ -1546,7 +1714,18 @@ class ConfigurationDialog(QDialog):
             path = _profile_path(self.project, profile, root)
             if path in old_values:
                 previous = old[path]
-                values = overlay_values(old_values[path], sources.get(profile.key, {}))
+                values = old_values[path]
+                supplied = self.project_initial_values.get(key, {}).get(profile.key, {})
+                if supplied:
+                    values = overlay_values(
+                        values,
+                        _normalize_profile_values(
+                            supplied,
+                            profile,
+                            {**self.project.constants, **self.project_dimensions[key]},
+                        ),
+                    )
+                values = overlay_values(values, sources.get(profile.key, {}))
                 editor = ProfileTab(
                     self.project,
                     profile,
@@ -1566,6 +1745,7 @@ class ConfigurationDialog(QDialog):
                 self._ensure_editor(key, profile)
         if key == self.active_project:
             self._refresh_current_view()
+        self.project_initial_values.pop(key, None)
 
     def _cancel_profile(self, project_key: str, editor: ProfileTab) -> None:
         """Replace one editor with its last successfully saved state."""
@@ -1652,9 +1832,6 @@ class ConfigurationDialog(QDialog):
 
     def _clear_projects(self) -> None:
         """Dispose every project cache and reset all active aliases."""
-        if self.onboarding_tip is not None:
-            self.onboarding_tip.close()
-            self.onboarding_tip = None
         widgets = [
             *self.project_configs.values(),
             *(editor for editors in self.project_editors.values() for editor in editors.values()),
@@ -1663,6 +1840,8 @@ class ConfigurationDialog(QDialog):
             widgets.append(self.current_overview)
         if self.current_tool is not None:
             widgets.append(self.current_tool)
+        if self.empty_view is not None:
+            widgets.append(self.empty_view)
         with QSignalBlocker(self.tabs):
             while self.tabs.count():
                 self._detach_tab(self.tabs.widget(0))
@@ -1681,6 +1860,7 @@ class ConfigurationDialog(QDialog):
         self.config_tab = None
         self.current_overview = None
         self.current_tool = None
+        self.empty_view = None
         self.project_add_item = self._action_item(
             None, "Project", ("add_project", "", "", ""), self._add_selected_project
         )
@@ -1688,13 +1868,33 @@ class ConfigurationDialog(QDialog):
             self.project_add_item, 0
         )
         self.project_add_button.setToolTip("Click here to add a project")
+        self._show_empty_project()
 
     def _remove_tree_item(self, item: QTreeWidgetItem) -> None:
         """Confirm and apply a project, file-profile, or namelist removal."""
         kind, project_key, profile_key, page_key = item.data(0, Qt.ItemDataRole.UserRole)
+        message = f"Remove '{item.text(0)}'?"
+        removed_pages = {page_key} if kind == "namelist" else set()
+        if kind == "profile":
+            removed_pages = {
+                page.key
+                for profile in self.loaded_projects[project_key].profiles
+                if profile.key == profile_key
+                for page in profile.pages
+            }
+        if removed_pages:
+            affected = [
+                name
+                for name, source in self.project.dimension_sources.items()
+                if source.namelist in removed_pages
+            ]
+            if affected:
+                message += (
+                    "\n\nThe following dimensions will no longer be referred and must be "
+                    "set manually: " + ", ".join(affected)
+                )
         if (
-            QMessageBox.question(self, "Remove item", f"Remove '{item.text(0)}'?")
-            != QMessageBox.Yes
+            QMessageBox.question(self, "Remove item", message) != QMessageBox.Yes
         ):
             return
         try:
@@ -1738,11 +1938,9 @@ class ConfigurationDialog(QDialog):
                     pages=pages,
                     required=tuple(name for name in profile.required if name != page_key),
                 )
-            # Validation intentionally occurs before replacing the visible tree.
-            checked = ensure_dimension_sources(self.project, profiles)
-            if checked != tuple(profiles):
-                raise ValueError("this item supplies a runtime dimension used by the project")
-            current = replace(current, profiles=tuple(profiles))
+            current = replace(
+                current, profiles=ensure_dimension_sources(self.project, profiles)
+            )
             saved_path = save_project_profile(self.project, current)
             current = replace(current, source=saved_path)
             self._replace_project(project_key, current)
@@ -1757,23 +1955,6 @@ class ConfigurationDialog(QDialog):
             "Unsaved changes",
             "Close and discard all unsaved namelist changes?",
         ) == QMessageBox.Yes
-
-    def showEvent(self, event: Any) -> None:
-        """Show one onboarding hint when the GUI starts without projects."""
-        super().showEvent(event)
-        if self._show_project_hint:
-            self._show_project_hint = False
-            QTimer.singleShot(200, self._show_onboarding_hint)
-
-    def _show_onboarding_hint(self) -> None:
-        """Point once to the first action when no project was preloaded."""
-        if self.isVisible() and not self.loaded_projects:
-            self.onboarding_tip = OnboardingTip(
-                self,
-                self.project_add_button,
-                "Click here to add a project.",
-            )
-            self.onboarding_tip.show_tip()
 
     def accept(self) -> None:
         """Close from the button only after the shared dirty-state guard."""
@@ -1839,8 +2020,12 @@ def launch_gui(
     application = QApplication.instance()
     owns_application = application is None
     if application is None:
+        if current_thread() is not main_thread():
+            raise RuntimeError("launch_gui must be called from the main GUI thread")
         application = QApplication(sys.argv[:1])
         application.setApplicationName("nml-tools")
+    elif QThread.currentThread() != application.thread():
+        raise RuntimeError("launch_gui must be called from the Qt application thread")
     dialog = ConfigurationDialog(project, project_requests=requests)
     if not owns_application:
         _exec(dialog)
