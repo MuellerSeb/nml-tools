@@ -145,15 +145,6 @@ def _property_information(
         resolved_label = f" ({resolved})" if resolved and resolved != shape else ""
         lines.append(f"Dimensions: {shape}{resolved_label}")
 
-    reference = schema.get(GUI_REF_ORIGIN_KEY)
-    origin = item.get(DERIVED_REF_ORIGIN_KEY)
-    if not reference and isinstance(origin, Mapping):
-        identity = origin.get("identity")
-        if isinstance(identity, (list, tuple)) and len(identity) == 2:
-            reference = f"{identity[0]}{identity[1]}"
-    if reference:
-        lines.append(f"Reference: {reference}")
-
     for label, key in (("Minimum", "minimum"), ("Maximum", "maximum")):
         if key in item:
             lines.append(f"{label}: {item[key]}")

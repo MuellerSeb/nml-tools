@@ -190,12 +190,12 @@ def test_inline_array_title_and_hint_styles(application, monkeypatch):
             "Weight for each body.",
             "Type: array of number",
             "Dimensions: n (2)",
-            "Reference: parameters.yml#/$defs/weights",
             "Minimum: 0.0",
             "Maximum: 10.0",
             "Default: [1.0, 2.0]",
         )
     )
+    assert "Reference:" not in information
     assert inline.infoButton.toolTip() == information
 
     aligned = NamelistForm(
@@ -1638,7 +1638,7 @@ def test_shared_reference_table_edit_reset_and_round_trip(
     assert table.cellWidget(0, 0).fieldLabel.text() == "start *"
     assert not table.cellWidget(0, 0).infoButton.isHidden()
     information = table.cellWidget(0, 0).infoButton.toolTip()
-    assert "Type: derived period_t" in information and "Reference:" in information
+    assert "Type: derived period_t" in information and "Reference:" not in information
     assert set(table.header_info_buttons) == {"year", "enabled"}
     assert all(
         obj.rows["year"].infoButton.isHidden() for obj in table.objects.values()
