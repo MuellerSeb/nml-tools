@@ -1359,6 +1359,7 @@ def _atomic_write_many(outputs: Mapping[Path, str]) -> None:
                 except Exception:
                     backup.unlink(missing_ok=True)
                     raise
+            # Register before replacement so this path is restored if replacement fails.
             backups[path] = backup
             os.replace(temporary, path)
     except Exception as error:
