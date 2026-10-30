@@ -44,16 +44,6 @@ def resolve_shape(
     return tuple(result)
 
 
-def flex_tail_dims(schema: Mapping[str, Any], rank: int) -> int:
-    """Return the validated number of flexible trailing dimensions."""
-    raw = schema.get("x-fortran-flex-tail-dims", 0)
-    if isinstance(raw, bool) or not isinstance(raw, int):
-        raise ValueError("'x-fortran-flex-tail-dims' must be an integer")
-    if not 0 <= raw <= rank:
-        raise ValueError("'x-fortran-flex-tail-dims' must be between zero and the array rank")
-    return raw
-
-
 def array_shape(value: Any) -> tuple[int, ...]:
     """Return the non-empty rectangular shape of a array value."""
     shape = _list_shape(value)
@@ -70,13 +60,7 @@ def validate_array_shape(
     declared = resolve_shape(schema, sizes, value)
     if len(actual) != len(declared):
         raise ValueError(f"array rank {len(actual)} does not match declared rank {len(declared)}")
-    flexible = flex_tail_dims(schema, len(declared))
-    fixed = len(declared) - flexible
-    if actual[:fixed] != declared[:fixed]:
-        raise ValueError(f"array shape {actual} does not match declared shape {declared}")
-    if flexible and any(actual[index] > declared[index] for index in range(fixed, len(declared))):
-        raise ValueError(f"array shape {actual} exceeds declared shape {declared}")
-    if not flexible and actual != declared:
+    if actual != declared:
         raise ValueError(f"array shape {actual} does not match declared shape {declared}")
     return actual
 

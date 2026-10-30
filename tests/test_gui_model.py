@@ -275,17 +275,17 @@ def test_complete_arrays_and_recover_dimensions_before_loading(tmp_path):
     profile = project.profile("main")
     schema = next(page.schema for page in project.namelists if page.key == "alpha")
     weights = schema["properties"]["weights"]
-    weights.update({"x-fortran-shape": [2, "n_items"], "x-fortran-flex-tail-dims": 1})
+    weights["x-fortran-shape"] = [2, "n_items"]
     path = tmp_path / "main.nml"
     for size in (3, 1):
-        values = {"alpha": {"count": 1, "weights": [[4.0], [5.0]]}}
+        values = {"alpha": {"count": 1, "weights": [[4.0] * size, [5.0] * size]}}
         save_profiles(project, [(profile, values, {"n_items": size})])
         assert f"weights(2,{size}) =" in path.read_text()
         dimensions = recover_dimensions(project)
         assert dimensions == {"n_items": size}
         assert load_profile(project, profile, dimensions)["alpha"]["weights"] == [
-            [4.0] + [0.0] * (size - 1),
-            [5.0] + [0.0] * (size - 1),
+            [4.0] * size,
+            [5.0] * size,
         ]
     weights["x-fortran-shape"] = "n_items"
     path.write_text("&alpha count=1 weights(2:6:2)=3*1.0 /\n")

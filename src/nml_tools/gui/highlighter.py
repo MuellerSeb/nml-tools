@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import json
 import pkgutil
-from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from collections.abc import Sequence
+from typing import Any, Mapping, cast
 
 from qtpy.QtCore import QRegularExpression
 from qtpy.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QTextDocument

@@ -118,18 +118,7 @@ def test_derived_array_initialization_does_not_share_mutable_defaults() -> None:
     assert initialized == [{"enabled": True}, {"enabled": False}]
 
 
-def test_saved_arrays_are_completed_without_repeating_or_moving_values() -> None:
-    flexible = {
-        "x-fortran-shape": "max_items",
-        "x-fortran-flex-tail-dims": 1,
-    }
-    assert initial_array(
-        flexible,
-        {"max_items": 5},
-        [10, 20],
-        0,
-        strict=True,
-    ) == [10, 20, 0, 0, 0]
+def test_saved_arrays_are_resized_without_repeating_or_moving_values() -> None:
     assert initial_array({"x-fortran-shape": [2, 3]}, {}, [[1, 2], [3, 4]], 9, resize=True) == [
         [1, 2, 9],
         [3, 4, 9],
