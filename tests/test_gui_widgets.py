@@ -20,23 +20,20 @@ from nml_tools.schema import resolve_schema
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("qtpy")
-try:
-    from qtpy.QtCore import Qt
-    from qtpy.QtGui import QPalette, QTextDocument
-    from qtpy.QtTest import QTest
-    from qtpy.QtWidgets import (
-        QAbstractScrollArea,
-        QApplication,
-        QComboBox,
-        QHeaderView,
-        QLabel,
-        QLineEdit,
-        QMessageBox,
-        QPushButton,
-        QSizePolicy,
-    )
-except ImportError:
-    pytest.skip("Qt binding unavailable", allow_module_level=True)
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QPalette, QTextDocument
+from qtpy.QtTest import QTest
+from qtpy.QtWidgets import (
+    QAbstractScrollArea,
+    QApplication,
+    QComboBox,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+)
 
 from nml_tools.gui.app import (
     ConfigurationDialog,
@@ -1258,9 +1255,11 @@ def test_project_file_summary_refits_wrapped_rows(application, project):
     dialog.show()
     application.processEvents()
     table = dialog.config_tab.fileProfilesTable
-    compact = table.rowHeight(0)
     header = table.horizontalHeader()
     header.setSectionResizeMode(2, QHeaderView.Interactive)
+    header.resizeSection(2, 600)
+    application.processEvents()
+    compact = table.rowHeight(0)
     header.resizeSection(2, 60)
     application.processEvents()
     assert table.rowHeight(0) > compact
@@ -1852,7 +1851,7 @@ def test_single_referenced_array_uses_top_aligned_resizable_table(application):
     assert table.cellWidget(0, 0).fieldLabel.text() == "factor *"
     assert not table.cellWidget(0, 0).infoButton.isHidden()
     assert table.horizontalHeaderItem(0).text() == "Namelist Property"
-    assert table.horizontalHeader().sectionResizeMode(0) == table.horizontalHeader().Interactive
+    assert table.horizontalHeader().sectionResizeMode(0) == QHeaderView.Interactive
     assert table.horizontalHeader().minimumSectionSize() == 88
     assert table.columnWidth(0) >= 180 and table.columnWidth(1) >= 88
     table.rows["factor"][0].set_value(12.0, {})
