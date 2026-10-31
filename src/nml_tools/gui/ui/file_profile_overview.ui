@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>FileProfileOverview</class>
+ <widget class="QWidget" name="FileProfileOverview">
+  <layout class="QVBoxLayout" name="rootLayout" stretch="0,1,0,1">
+   <item>
+    <layout class="QFormLayout" name="fileLayout">
+     <item row="0" column="0">
+      <widget class="QLabel" name="fileNameLabel">
+       <property name="text"><string>File name:</string></property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLineEdit" name="fileNameEdit">
+       <property name="readOnly"><bool>true</bool></property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="currentPathTitle">
+       <property name="text"><string>Current path:</string></property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QLabel" name="currentPathLabel">
+       <property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property>
+       <property name="wordWrap"><bool>true</bool></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QTableWidget" name="namelistsTable">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="sizeAdjustPolicy">
+      <enum>QAbstractScrollArea::AdjustToContents</enum>
+     </property>
+     <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+     <property name="selectionMode"><enum>QAbstractItemView::NoSelection</enum></property>
+     <attribute name="verticalHeaderStretchLastSection">
+      <bool>false</bool>
+     </attribute>
+     <column><property name="text"><string>Namelist</string></property></column>
+     <column><property name="text"><string>Description</string></property></column>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="previewLabel">
+     <property name="text"><string>Namelist preview:</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTextBrowser" name="previewBrowser">
+     <property name="lineWrapMode"><enum>QTextEdit::NoWrap</enum></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

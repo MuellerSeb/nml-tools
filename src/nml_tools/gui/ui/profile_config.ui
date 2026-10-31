@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ProfileConfigTab</class>
+ <widget class="QWidget" name="ProfileConfigTab">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>650</width><height>512</height></rect></property>
+  <property name="autoFillBackground"><bool>true</bool></property>
+  <layout class="QVBoxLayout" name="rootLayout">
+   <item><layout class="QHBoxLayout" name="schemasConfigLayout" stretch="1,2,0">
+    <item><widget class="QLabel" name="sourceLabel_loadSchemasConfigDirectory"><property name="text"><string>Namelist Output Directory:</string></property></widget></item>
+    <item><widget class="QLineEdit" name="lineEdit_pathSchemasConfigDirectory"/></item>
+    <item><widget class="QPushButton" name="browseButton_browseSchemasConfigDirectory"><property name="text"><string>Browse…</string></property></widget></item>
+   </layout></item>
+   <item><widget class="QGroupBox" name="dimensionsGroup"><property name="title"><string>Dimensions</string></property><layout class="QFormLayout" name="dimensionsLayout"/></widget></item>
+   <item><layout class="QHBoxLayout" name="setLayout">
+    <item><spacer name="setSpacer"><property name="orientation"><enum>Qt::Horizontal</enum></property><property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property></spacer></item>
+    <item><widget class="QPushButton" name="setButton"><property name="text"><string>Set</string></property></widget></item>
+   </layout></item>
+   <item><widget class="QTableWidget" name="fileProfilesTable">
+    <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+    <property name="selectionMode"><enum>QAbstractItemView::NoSelection</enum></property>
+    <property name="wordWrap"><bool>true</bool></property>
+    <column><property name="text"><string>File profile</string></property></column>
+    <column><property name="text"><string>Namelist file path</string></property></column>
+    <column><property name="text"><string>Description</string></property></column>
+   </widget></item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -1,0 +1,31 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+
+$defs:
+  material:
+    title: Material properties
+    description: Reusable physical properties for one simulated material.
+    type: object
+    x-fortran-type: material_t
+    x-fortran-module: example_materials
+    required: [density, drag_coefficient, enabled]
+    properties:
+      density:
+        title: Density
+        description: Material density in kilograms per cubic metre.
+        type: number
+        x-fortran-kind: dp
+        minimum: 0.0
+        default: 1000.0
+      drag_coefficient:
+        title: Drag coefficient
+        description: Dimensionless drag coefficient used by the simulation.
+        type: number
+        x-fortran-kind: dp
+        minimum: 0.0
+        maximum: 2.0
+        default: 0.47
+      enabled:
+        title: Enabled
+        description: Controls whether this material participates in the simulation.
+        type: boolean
+        default: true

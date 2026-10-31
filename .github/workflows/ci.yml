@@ -3,6 +3,24 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  gui-python-38:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+          cache: 'pip'
+      - name: Install Python 3.8 GUI
+        run: python -m pip install -U pip && python -m pip install -e ".[gui]" PyQt5 pytest
+      - name: Test Python 3.8 GUI
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q tests/test_gui_arrays.py tests/test_gui_model.py tests/test_gui_widgets.py
+
   test:
     runs-on: ubuntu-latest
     steps:

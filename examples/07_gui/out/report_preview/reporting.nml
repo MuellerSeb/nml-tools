@@ -1,0 +1,9 @@
+&outputs
+  trajectory_file = "trajectory.csv"
+  write_trajectory = .true.
+  output_interval_steps = 10
+  numeric_precision = 0.001
+  output_format = "csv"
+  snapshot_times(1) = "2026-01-01 00:30"
+  snapshot_times(2) = "2026-01-01 01:00"
+/

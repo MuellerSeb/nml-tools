@@ -766,10 +766,11 @@ file_profiles = ["main"]
 ```
 
 All members describe files needed for the selected project setup, each subject
-to its existing file-profile validation rules. These profiles are metadata for
-future tooling: defining them does not select a project, validate files
-together, or change generated outputs. Project profiles impose no dimension
-source uniqueness restriction and are independent of dimension source wiring.
+to its existing file-profile validation rules. The GUI uses this metadata to
+offer complete projects for editing; generation and validation commands do not
+select a project or change their outputs because it exists. When the GUI edits
+a project, every dimension-source namelist used by that project must occur in
+exactly one of its file profiles.
 
 ### templates (array)
 
@@ -977,6 +978,87 @@ complete derived-array element without spilling into adjacent elements.
 Character substring assignment, complex schema values, nested derived values,
 component arrays, nondefault lower bounds, and user-defined formatted I/O are
 currently explicit capability boundaries.
+
+## GUI
+
+Install the current checkout with its optional GUI dependencies and a Qt binding
+(Python 3.8 or newer):
+
+```bash
+python -m pip install '.[gui]' PyQt5
+nml-tools gui -c /path/to/nml-config.toml -p simulation -o /path/to/project
+```
+
+QtPy also permits other supported Qt bindings; PyQt5 is the tested binding on
+Python 3.8. `-c` accepts `nml-config.toml` or a `pyproject.toml` containing
+`[tool.nml-tools]`; relative schema paths are resolved from that file. Omit
+`-c` to discover either file in the current directory, `-p` to choose a project
+inside the GUI, and `-o` to use the current directory. Each project's Settings
+page can choose a different output directory.
+
+The editor loads each profile's `default_file` from the output directory and
+saves directly to that namelist file. Schema defaults are written when needed;
+examples and type-specific suggestions are hints until the user accepts or
+edits them. Invalid input is reported. No JSON configuration or
+JSON-to-namelist conversion is involved. Selected groups are rewritten on
+save; other groups and their comments remain intact.
+
+An interactive launch starts with an empty project tree and a central
+`+ : Project` action. Configured projects can be added from the config, while
+custom projects can be built from file profiles and namelist schemas. Selecting
+a project opens its Settings page; selecting a file shows its namelists and a
+syntax-highlighted file preview; selecting a namelist opens its editable form.
+Creating a custom project asks for its project name and a new `.toml` filename
+in the schemas directory.
+The Back and Next controls move through that file's namelists. Standard file
+profiles initially select their configured namelists and lock required members;
+optional members may be removed and more namelists may be added. Saved `.nml`
+files can be loaded through `+ : File` → `Browse…`, associated with a configured
+profile or treated as custom. A file outside the project output directory is
+imported and later saved under the same filename in that output directory.
+
+One- and two-dimensional arrays use inline tables with copy/paste; a
+one-element one-dimensional array presents its element editor directly.
+Higher-rank arrays use the guidata array editor. Deferred `:` dimensions retain
+a resize action. File-path fields provide browsing and store paths relative to
+the project's output directory.
+
+Applications can launch a subset of the configured profiles:
+
+```python
+from nml_tools.gui import GuiProjectRequest, launch_gui
+
+launch_gui(
+    config_path="/path/to/nml-config.toml",
+    projects=[
+        GuiProjectRequest(
+            project_profile="simulation",
+            output_dir="/path/to/project",
+            file_profiles={"main": ["mainconfig", "time_periods"], "parameter": []},
+            initial_values={"main": {"mainconfig": {"nDomains": 2}}},
+            initial_dimensions={"max_domains": 2},
+        )
+    ],
+)
+```
+
+Each request configures one project and its output directory. A `None`
+`file_profiles` value selects every configured profile; an empty namelist list
+selects every namelist in that profile. Names are checked case-insensitively and
+pages retain TOML order. `initial_values` is an in-memory dictionary of
+profile/namelist/field values applied over existing input. With no project
+requests, the tree starts empty for interactive project selection;
+`default_output_dir` controls the initial output directory for those projects.
+
+For sourced runtime dimensions, `initial_dimensions` takes precedence over an
+explicit saved source property, which takes precedence over the TOML default.
+The source link appears only while its namelist belongs to the current project;
+removing that namelist returns the dimension to manual input.
+The GUI also recovers extents for older unsourced schemas from saved indexed
+arrays where possible. Settings controls can then change the dimensions and
+rebuild the affected editors; `R` opens a configured source property. Existing
+Qt applications reuse their QApplication; importing `nml_tools.gui` alone does
+not import Qt.
 
 ## Error handling
 

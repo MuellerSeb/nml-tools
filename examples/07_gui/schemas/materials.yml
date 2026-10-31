@@ -1,0 +1,22 @@
+title: Body materials
+description: Referenced derived objects used by the falling-body simulation.
+x-fortran-namelist: materials
+type: object
+required: [primary_material, coating_material]
+properties:
+  primary_material:
+    title: Primary body material
+    description: Bulk material used by the simulated bodies.
+    $ref: material.yml#/$defs/material
+    default:
+      density: 7800.0
+      drag_coefficient: 0.47
+      enabled: true
+  coating_material:
+    title: Surface coating
+    description: Optional surface material applied to each body.
+    $ref: material.yml#/$defs/material
+    default:
+      density: 1200.0
+      drag_coefficient: 0.82
+      enabled: true
