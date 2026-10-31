@@ -20,23 +20,20 @@ from nml_tools.schema import resolve_schema
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("qtpy")
-try:
-    from qtpy.QtCore import Qt
-    from qtpy.QtGui import QPalette, QTextDocument
-    from qtpy.QtTest import QTest
-    from qtpy.QtWidgets import (
-        QAbstractScrollArea,
-        QApplication,
-        QComboBox,
-        QHeaderView,
-        QLabel,
-        QLineEdit,
-        QMessageBox,
-        QPushButton,
-        QSizePolicy,
-    )
-except ImportError:
-    pytest.skip("Qt binding unavailable", allow_module_level=True)
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QPalette, QTextDocument
+from qtpy.QtTest import QTest
+from qtpy.QtWidgets import (
+    QAbstractScrollArea,
+    QApplication,
+    QComboBox,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+)
 
 from nml_tools.gui.app import (
     ConfigurationDialog,
