@@ -6,9 +6,10 @@ from __future__ import annotations
 import copy
 import sys
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from itertools import product
 from pathlib import Path
+from shutil import copy2
 from threading import current_thread, main_thread
 from typing import Any
 
@@ -394,7 +395,6 @@ class ProfileConfigTab(QWidget):
         project: GuiProject,
         dimensions: Mapping[str, int],
         parent: QWidget,
-        output_root: Path | None = None,
         linked_dimensions: Iterable[str] = (),
     ) -> None:
         super().__init__(parent)
@@ -402,9 +402,6 @@ class ProfileConfigTab(QWidget):
         self.setAutoFillBackground(True)
         self.project = project
         self.set = self.setButton
-        self.output_path = self.lineEdit_pathSchemasConfigDirectory
-        self.output_browse = self.browseButton_browseSchemasConfigDirectory
-        self.output_path.setText(str((output_root or project.output_root).resolve()))
         self.dimension_boxes: dict[str, QSpinBox] = {}
         self.dimension_source_buttons: dict[str, QPushButton] = {}
         linked = set(linked_dimensions)
@@ -630,6 +627,131 @@ class NamelistPicker(QWidget):
         ]
 
 
+class ProjectPickerDialog(QDialog):
+    """Choose one project and its namelist input/output paths."""
+
+    def __init__(self, project: GuiProject, parent: QWidget) -> None:
+        super().__init__(parent)
+        load_ui("project_picker.ui", self)
+        self.project = project
+        self.profile: GuiProjectProfile | None = None
+        self.source_combo: QComboBox = self.sourceComboBox_loadProject
+        self.output_path: QLineEdit = self.lineEdit_pathProjectOutputDirectory
+        self.output_browse: QPushButton = self.pushButton_browseProjectOutputDirectory
+        self.file_paths: dict[str, QLineEdit] = {}
+        self.output_browse.clicked.connect(self._browse_output)
+        self.output_path.editingFinished.connect(self._populate_files)
+
+    def set_profile(self, profile: GuiProjectProfile, output_root: Path) -> None:
+        """Show one project's file profiles below its output directory."""
+        self.profile = profile
+        for widget in (
+            self.sourceLabel_namelistOutputDirectory,
+            self.output_path,
+            self.output_browse,
+        ):
+            widget.setEnabled(True)
+        self.output_path.setText(str(output_root))
+        self._populate_files()
+
+    def output_root(self) -> Path:
+        """Resolve the selected project output directory."""
+        text = self.output_path.text().strip()
+        if not text:
+            raise ValueError("namelist output directory must not be empty")
+        path = Path(text).expanduser()
+        return (path if path.is_absolute() else self.project.root / path).resolve()
+
+    def paths(self) -> dict[str, Path]:
+        """Return the selected input/output path for each file profile."""
+        root = self.output_root()
+        result = {}
+        for key, edit in self.file_paths.items():
+            text = edit.text().strip()
+            if not text:
+                raise ValueError("namelist file path must not be empty")
+            path = Path(text).expanduser()
+            result[key] = (path if path.is_absolute() else root / path).resolve()
+        return result
+
+    def _clear_files(self) -> None:
+        """Remove dynamically created file-profile path rows."""
+        while self.gridLayout_fileProfileOutputs.count():
+            item = self.gridLayout_fileProfileOutputs.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        self.file_paths.clear()
+
+    def _populate_files(self) -> None:
+        """Rebuild file-profile paths for the selected output directory."""
+        self._clear_files()
+        if self.profile is None or not self.output_path.text().strip():
+            return
+        root = self.output_root()
+        for row, profile in enumerate(self.profile.profiles):
+            label = QLabel(profile.name, self)
+            edit = QLineEdit(str((root / profile.default_file).resolve()), self)
+            button = QPushButton("Browse…", self)
+            edit.textChanged.connect(lambda _text, item=edit: self._color_path(item))
+            button.clicked.connect(
+                lambda _checked=False, item=edit: self._browse_file(item)
+            )
+            self.gridLayout_fileProfileOutputs.addWidget(label, row, 0)
+            self.gridLayout_fileProfileOutputs.addWidget(edit, row, 1)
+            self.gridLayout_fileProfileOutputs.addWidget(button, row, 2)
+            self.file_paths[profile.key] = edit
+            self._color_path(edit)
+
+    def _browse_output(self) -> None:
+        """Select the directory receiving this project's namelists."""
+        path = QFileDialog.getExistingDirectory(
+            self, "Namelist output directory", self.output_path.text()
+        )
+        if path:
+            self.output_path.setText(path)
+            self._populate_files()
+
+    def _browse_file(self, edit: QLineEdit) -> None:
+        """Select an existing namelist source for one file profile."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load namelist",
+            edit.text() or self.output_path.text(),
+            "Fortran namelist files (*.nml)",
+        )
+        if path:
+            edit.setText(str(Path(path).resolve()))
+
+    def _color_path(self, edit: QLineEdit) -> None:
+        """Color existing namelists blue and future outputs red."""
+        path = Path(edit.text()).expanduser()
+        if not path.is_absolute() and self.output_path.text().strip():
+            path = self.output_root() / path
+        palette = edit.palette()
+        palette.setColor(
+            QPalette.ColorRole.Text,
+            QColor("blue" if path.is_file() else "red"),
+        )
+        edit.setPalette(palette)
+
+
+@dataclass(frozen=True)
+class _ProjectFile:
+    """One validated file-profile source and final destination."""
+
+    profile: GuiProfile
+    source: Path
+    target: Path
+
+
+@dataclass(frozen=True)
+class _ProjectSelection:
+    """One confirmed project selection ready to register."""
+
+    profile: GuiProjectProfile
+    files: tuple[_ProjectFile, ...]
+
+
 class ConfigurationDialog(QDialog):
     """Edit one or more project profiles and their direct namelist files."""
 
@@ -811,14 +933,11 @@ class ConfigurationDialog(QDialog):
         ]
         return configured, custom
 
-    def _choose_project_source(self) -> tuple[str, str] | None:
-        """Choose a configured, saved, browsed, or custom project source."""
+    def _choose_project_source(self) -> _ProjectSelection | None:
+        """Choose, validate, and confirm one project's input and output files."""
         configured, custom = self._project_sources()
-        dialog = QDialog(self)
-        load_ui("project_picker.ui", dialog)
-        combo = dialog.findChild(QComboBox, "sourceComboBox_loadProject")
-        if combo is None:
-            return None
+        dialog = ProjectPickerDialog(self.project, self)
+        combo = dialog.source_combo
         for label, data in configured:
             combo.addItem(label, data)
         if configured:
@@ -828,7 +947,191 @@ class ConfigurationDialog(QDialog):
         combo.addItem("Browse…", ("browse", ""))
         combo.insertSeparator(combo.count())
         combo.addItem("<custom>", ("custom", ""))
-        return combo.currentData() if _exec(dialog) else None
+        selected: list[GuiProjectProfile | None] = [None]
+        selected_kind = [""]
+        previous = [-1]
+
+        def select_source(index: int) -> None:
+            data = combo.itemData(index)
+            if not data:
+                return
+            kind, value = data
+            try:
+                if kind == "browse":
+                    value, _ = QFileDialog.getOpenFileName(
+                        self,
+                        "Load project profile",
+                        str(self.project.root),
+                        "TOML files (*.toml)",
+                    )
+                    if not value:
+                        with QSignalBlocker(combo):
+                            combo.setCurrentIndex(previous[0])
+                        return
+                    profile = load_project_profile_file(self.project, Path(value))
+                elif kind == "configured":
+                    profile = self.available_projects[value]
+                elif kind == "path":
+                    profile = load_project_profile_file(self.project, Path(value))
+                else:
+                    profile = GuiProjectProfile(
+                        "custom", "custom", "Custom", None, (), custom=True
+                    )
+                selected[0] = profile
+                selected_kind[0] = kind
+                previous[0] = index
+                dialog.set_profile(profile, self._available_root(profile))
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                QMessageBox.critical(self, "Load project", str(exc))
+                with QSignalBlocker(combo):
+                    combo.setCurrentIndex(previous[0])
+
+        combo.currentIndexChanged.connect(select_source)
+        if combo.count():
+            select_source(combo.currentIndex())
+        while _exec(dialog):
+            try:
+                profile = selected[0]
+                if profile is None:
+                    raise ValueError("select a project type")
+                if selected_kind[0] == "custom":
+                    identity = self._custom_project_identity("New project")
+                    if identity is None:
+                        continue
+                    name, filename = identity
+                    profile = replace(
+                        profile,
+                        name=name,
+                        key=name.lower(),
+                        title=name,
+                        toml_file=filename,
+                    )
+                profile = replace(profile, output_dir=dialog.output_root())
+                choice = self._prepare_project_selection(profile, dialog.paths())
+                if self._confirm_project_selection(choice):
+                    return choice
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                QMessageBox.critical(self, "Load project", str(exc))
+        return None
+
+    def _prepare_project_selection(
+        self, profile: GuiProjectProfile, paths: Mapping[str, Path]
+    ) -> _ProjectSelection:
+        """Resolve destinations and validate every existing namelist source."""
+        if profile.key in self.loaded_projects:
+            raise ValueError(f"project '{profile.name}' is already loaded")
+        root = self._project_root(profile)
+        self._validate_project_root(profile.key, root)
+        files = []
+        destinations: set[Path] = set()
+        profiles = []
+        for item in profile.profiles:
+            source = paths[item.key].resolve()
+            if source.exists() and not source.is_file():
+                raise ValueError(f"namelist path '{source}' is not a file")
+            try:
+                relative = source.relative_to(root)
+                target = source
+            except ValueError:
+                if not source.exists():
+                    raise ValueError(
+                        f"new namelist '{source}' must be inside output directory '{root}'"
+                    ) from None
+                target = (root / source.name).resolve()
+                relative = target.relative_to(root)
+                if target.exists():
+                    raise ValueError(
+                        f"destination namelist '{target}' already exists"
+                    ) from None
+            if target in destinations:
+                raise ValueError(f"more than one file profile writes to '{target}'")
+            destinations.add(target)
+            updated = replace(item, default_file=relative.as_posix())
+            profiles.append(updated)
+            files.append(_ProjectFile(updated, source, target))
+        updated_project = replace(profile, profiles=tuple(profiles), output_dir=root)
+        existing = [item.source for item in files if item.source.exists()]
+        dimensions = recover_dimensions(
+            self.project,
+            existing,
+            self.project_initial_dimensions.get(profile.key, {}),
+            output_root=root,
+            profiles=updated_project.profiles,
+        )
+        for item in files:
+            if not item.source.exists():
+                continue
+            parsed = profile_from_namelist(self.project, item.source)
+            actual = {page.key for page in parsed.pages}
+            allowed = {page.key for page in item.profile.pages}
+            extra = actual - allowed
+            missing = set(item.profile.required) - actual
+            if extra:
+                raise ValueError(
+                    f"'{item.source.name}' contains namelists outside profile "
+                    f"'{item.profile.name}': " + ", ".join(sorted(extra))
+                )
+            if missing:
+                raise ValueError(
+                    f"'{item.source.name}' is missing required namelists from profile "
+                    f"'{item.profile.name}': " + ", ".join(sorted(missing))
+                )
+            load_profile(self.project, item.profile, dimensions, path=item.source)
+        return _ProjectSelection(updated_project, tuple(files))
+
+    def _confirm_project_selection(self, choice: _ProjectSelection) -> bool:
+        """Summarize file handling before creating or copying anything."""
+        lines = [f"Project output directory:\n{self._project_root(choice.profile)}", ""]
+        for item in choice.files:
+            if not item.source.exists():
+                status = (
+                    f"File absent; create on save from schema defaults and user input:\n"
+                    f"  {item.target}"
+                )
+            elif item.source == item.target:
+                status = (
+                    "Load existing values, overriding schema defaults, and edit in place:\n"
+                    f"  {item.target}"
+                )
+            else:
+                status = (
+                    "Copy existing file and load its values, overriding schema defaults:\n"
+                    f"  From: {item.source}\n  To:   {item.target}"
+                )
+            lines.extend((f"{item.profile.name}:", status, ""))
+        if not choice.files:
+            lines.append("No file profiles are currently included.")
+        return (
+            QMessageBox.question(
+                self,
+                "Add project",
+                "\n".join(lines).rstrip(),
+                QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel,
+            )
+            == QMessageBox.Yes
+        )
+
+    @staticmethod
+    def _copy_project_sources(choice: _ProjectSelection) -> list[Path]:
+        """Copy confirmed external sources and clean up if any copy fails."""
+        copied = []
+        try:
+            for item in choice.files:
+                if not item.source.exists() or item.source == item.target:
+                    continue
+                item.target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    copy2(item.source, item.target)
+                except Exception:
+                    item.target.unlink(missing_ok=True)
+                    raise
+                copied.append(item.target)
+        except Exception:
+            for path in copied:
+                path.unlink(missing_ok=True)
+            raise
+        return copied
 
     def _browse_schemas(self) -> None:
         """Select nml-config.toml without loading it yet."""
@@ -880,37 +1183,16 @@ class ConfigurationDialog(QDialog):
             selected = self._choose_project_source()
             if selected is None:
                 return
-            kind, value = selected
-            if kind == "custom":
-                identity = self._custom_project_identity("New project")
-                if identity is None:
-                    return
-                name, filename = identity
-                profile = GuiProjectProfile(
-                    name,
-                    name.lower(),
-                    name,
-                    None,
-                    (),
-                    custom=True,
-                    toml_file=filename,
-                )
-            elif kind == "configured":
-                profile = self.available_projects[value]
-            else:
-                if kind == "browse":
-                    value, _ = QFileDialog.getOpenFileName(
-                        self,
-                        "Load project profile",
-                        str(self.project.root),
-                        "TOML files (*.toml)",
-                    )
-                    if not value:
-                        return
-                profile = load_project_profile_file(self.project, Path(value))
-            profile = replace(profile, output_dir=self._available_root(profile))
-            self._register_project(profile)
-            self.treeWidget_projectStructure.setCurrentItem(self.project_items[profile.key])
+            copied = self._copy_project_sources(selected)
+            try:
+                self._register_project(selected.profile)
+            except Exception:
+                for path in copied:
+                    path.unlink(missing_ok=True)
+                raise
+            self.treeWidget_projectStructure.setCurrentItem(
+                self.project_items[selected.profile.key]
+            )
         except (OSError, ValueError, KeyError, TypeError) as exc:
             QMessageBox.critical(self, "Load project", str(exc))
 
@@ -1033,7 +1315,6 @@ class ConfigurationDialog(QDialog):
             self.project,
             self.project_dimensions[project_key],
             self,
-            self._project_root(self.loaded_projects[project_key]),
             linked,
         )
         config.hide()
@@ -1041,7 +1322,6 @@ class ConfigurationDialog(QDialog):
             profiles,
             self._project_root(self.loaded_projects[project_key]),
         )
-        config.output_browse.clicked.connect(lambda: self._browse_output(config))
         config.set.clicked.connect(lambda: self._set_configuration(project_key, config))
         for dimension, button in config.dimension_source_buttons.items():
             button.clicked.connect(
@@ -1304,14 +1584,6 @@ class ConfigurationDialog(QDialog):
         self.current_tool = picker
         self._show_view(picker, f"Add namelist to {profile.name}")
 
-    def _browse_output(self, config: ProfileConfigTab) -> None:
-        """Select the namelist output directory for one project settings tab."""
-        path = QFileDialog.getExistingDirectory(
-            self, "Namelist output directory", config.output_path.text()
-        )
-        if path:
-            config.output_path.setText(path)
-
     def _choose_namelist_profile(
         self, builder: FileProfileBuilder
     ) -> tuple[str, str] | None:
@@ -1405,80 +1677,6 @@ class ConfigurationDialog(QDialog):
         builder.active_source = selected
         return True
 
-    def _configured_output(self, config: ProfileConfigTab) -> Path:
-        """Resolve a settings-tab output path relative to the schema directory."""
-        text = config.output_path.text().strip()
-        if not text:
-            raise ValueError("namelist output directory must not be empty")
-        path = Path(text).expanduser()
-        return (path if path.is_absolute() else self.project.root / path).resolve()
-
-    def _reload_project_output(
-        self,
-        key: str,
-        output_root: Path,
-        overrides: Mapping[str, int],
-    ) -> None:
-        """Reload one project transactionally after its output directory changes."""
-        self._validate_project_root(key, output_root)
-        current = replace(self.loaded_projects[key], output_dir=output_root)
-        profiles = ensure_dimension_sources(self.project, current.profiles)
-        paths = [_profile_path(self.project, profile, output_root) for profile in profiles]
-        if len(paths) != len(set(paths)):
-            raise ValueError(f"project '{current.name}' writes more than one profile to one file")
-        dimensions = recover_dimensions(
-            self.project,
-            paths,
-            overrides,
-            output_root=output_root,
-            profiles=profiles,
-        )
-        sources = dimension_source_values(self.project, profiles, dimensions)
-        initial_values = self.project_initial_values.get(key, {})
-        prepared: dict[Path, ProfileTab] = {}
-        try:
-            for profile, path in zip(profiles, paths):
-                values = load_profile(
-                    self.project, profile, dimensions, output_root=output_root
-                )
-                supplied = initial_values.get(profile.key, {})
-                if supplied:
-                    values = overlay_values(
-                        values,
-                        _normalize_profile_values(
-                            supplied,
-                            profile,
-                            {**self.project.constants, **dimensions},
-                        ),
-                    )
-                values = overlay_values(values, sources.get(profile.key, {}))
-                editor = ProfileTab(
-                    self.project,
-                    profile,
-                    values,
-                    dimensions,
-                    self,
-                    output_root=output_root,
-                    source_values=sources.get(profile.key),
-                )
-                editor.hide()
-                self._wire_editor(key, editor)
-                prepared[path] = editor
-        except Exception:
-            for editor in prepared.values():
-                editor.deleteLater()
-            raise
-        old = self.project_editors[key]
-        self.loaded_projects[key] = replace(current, profiles=profiles)
-        self.project_dimensions[key] = dimensions
-        self.project_editors[key] = prepared
-        for editor in old.values():
-            self._detach_tab(editor)
-            editor.deleteLater()
-        if key == self.active_project:
-            self._refresh_current_view()
-        self.project_initial_values.pop(key, None)
-
     def _select_profile_source(self, builder: FileProfileBuilder) -> None:
         """Populate builder values from a reusable file profile."""
         data = builder.source_combo.currentData()
@@ -1504,30 +1702,14 @@ class ConfigurationDialog(QDialog):
             QMessageBox.critical(self, "Invalid namelist", str(exc))
 
     def _set_configuration(self, project_key: str, config: ProfileConfigTab) -> None:
-        """Apply only one project's output directory and dimensions."""
+        """Apply one project's runtime dimensions."""
         try:
             dimensions = _normalize_dimensions(config.dimensions(), self.project)
             current = self.loaded_projects[project_key]
-            output_root = self._configured_output(config)
-            if output_root != self._project_root(current):
-                dirty = any(
-                    editor.is_dirty()
-                    for editor in self.project_editors[current.key].values()
-                )
-                if dirty and QMessageBox.question(
-                    self,
-                    "Unsaved changes",
-                    "Changing the output directory will discard unsaved changes. Continue?",
-                ) != QMessageBox.Yes:
-                    return
-                self._reload_project_output(current.key, output_root, dimensions)
-                current = self.loaded_projects[current.key]
-                config.output_path.setText(str(output_root))
-            else:
-                self._rebuild_project_editors(
-                    current.key, fit_arrays=True, dimensions=dimensions
-                )
-            config.set_profiles(current.profiles, output_root)
+            self._rebuild_project_editors(
+                current.key, fit_arrays=True, dimensions=dimensions
+            )
+            config.set_profiles(current.profiles, self._project_root(current))
         except (OSError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Invalid configuration", str(exc))
 

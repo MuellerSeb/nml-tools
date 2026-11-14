@@ -44,6 +44,7 @@ from nml_tools.gui.app import (
     FileProfileOverview,
     NamelistPicker,
     ProfileTab,
+    ProjectPickerDialog,
 )
 from nml_tools.gui.fields import (
     ArrayField,
@@ -106,6 +107,27 @@ def _add_project(dialog, key="default"):
     dialog._register_project(profile)
     dialog.treeWidget_projectStructure.setCurrentItem(dialog.project_items[key])
     return dialog
+
+
+def _project_choice(dialog, key="default", output_root=None, paths=None):
+    """Build the confirmed project choice used by add-project tests."""
+    profile = dialog.available_projects[key]
+    root = (output_root or dialog._available_root(profile)).resolve()
+    profile = replace(profile, output_dir=root)
+    selected = paths or {
+        item.key: root / item.default_file for item in profile.profiles
+    }
+    return dialog._prepare_project_selection(profile, selected)
+
+
+def _project_choice(dialog, key="default", output_root=None, paths=None):
+    profile = dialog.available_projects[key]
+    root = (output_root or dialog._available_root(profile)).resolve()
+    profile = replace(profile, output_dir=root)
+    selected = paths or {
+        item.key: root / item.default_file for item in profile.profiles
+    }
+    return dialog._prepare_project_selection(profile, selected)
 
 
 def test_singletons_keep_array_values_and_restore_schema_defaults(application):
@@ -580,7 +602,8 @@ def test_invalid_existing_input_is_reported_and_never_replaced(application, proj
     path.write_text(invalid)
     dialog = ConfigurationDialog(project)
     assert not errors and not dialog.editors
-    monkeypatch.setattr(dialog, "_choose_project_source", lambda: ("configured", "default"))
+    responses = iter((1, 0))
+    monkeypatch.setattr("nml_tools.gui.app._exec", lambda _dialog: next(responses))
     dialog._add_selected_project()
     assert errors and not dialog.editors
     dialog._save_all()
@@ -909,9 +932,17 @@ def test_browsed_project_source_loads(application, project, monkeypatch):
         'namelists = ["run"]\n\n[[project_profiles]]\nname = "external"\n'
         'file_profiles = ["copy"]\n'
     )
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
     monkeypatch.setattr(app.QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
     dialog = ConfigurationDialog(project)
-    monkeypatch.setattr(dialog, "_choose_project_source", lambda: ("browse", ""))
+
+    def choose_browse(picker):
+        combo = picker.findChild(QComboBox, "sourceComboBox_loadProject")
+        data = [combo.itemData(index) for index in range(combo.count())]
+        combo.setCurrentIndex(data.index(("browse", "")))
+        return 1
+
+    monkeypatch.setattr(app, "_exec", choose_browse)
     dialog._add_selected_project()
     assert "external" in dialog.loaded_projects
     dialog.close()
@@ -1484,6 +1515,7 @@ def test_project_picker_distinguishes_duplicate_titles(application, project, mon
         ),
     )
     dialog = ConfigurationDialog(project)
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
 
     def choose_two(picker):
         combo = picker.findChild(QComboBox, "sourceComboBox_loadProject")
@@ -1500,13 +1532,62 @@ def test_project_picker_distinguishes_duplicate_titles(application, project, mon
     dialog.close()
 
 
+def test_project_picker_copies_existing_files_and_reports_each_profile(
+    application, project, monkeypatch
+):
+    from nml_tools.gui import app
+
+    main = project.profiles[0]
+    second = replace(main, name="second", key="second", default_file="second.nml")
+    project = replace(
+        project,
+        project_profiles=(
+            GuiProjectProfile("default", "default", "Default", None, (main, second)),
+        ),
+    )
+    source = project.root / "outside" / "imported.nml"
+    source.parent.mkdir()
+    source.write_text("&run count=42 /\n")
+    output = project.root / "output"
+    summaries = []
+    dialog = ConfigurationDialog(project)
+
+    def choose(picker):
+        assert isinstance(picker, ProjectPickerDialog)
+        assert picker.output_path.isEnabled() and picker.output_browse.isEnabled()
+        picker.output_path.setText(str(output))
+        picker._populate_files()
+        assert picker.file_paths["main"].palette().color(QPalette.Text).name() == "#ff0000"
+        picker.file_paths["main"].setText(str(source))
+        assert picker.file_paths["main"].palette().color(QPalette.Text).name() == "#0000ff"
+        return 1
+
+    monkeypatch.setattr(app, "_exec", choose)
+
+    def confirm(_parent, _title, text, *_args):
+        summaries.append(text)
+        return QMessageBox.Cancel if len(summaries) == 1 else QMessageBox.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", confirm)
+    dialog._add_selected_project()
+
+    target = output / source.name
+    assert target.read_text() == source.read_text()
+    assert dialog.editors[target].values()["run"]["count"] == 42
+    assert not (output / "second.nml").exists()
+    assert "Copy existing file" in summaries[0]
+    assert "File absent; create on save" in summaries[0]
+    assert "main:" in summaries[0] and "second:" in summaries[0]
+    assert len(summaries) == 2
+    dialog.close()
+
+
 def test_custom_project_asks_for_available_toml_filename(
     application, project, monkeypatch
 ):
     from nml_tools.gui import app
 
     dialog = ConfigurationDialog(project)
-    monkeypatch.setattr(dialog, "_choose_project_source", lambda: ("custom", ""))
 
     def submit_identity(name, filename):
         def submit(identity_dialog):
@@ -1521,15 +1602,29 @@ def test_custom_project_asks_for_available_toml_filename(
 
         return submit
 
-    monkeypatch.setattr(
-        app, "_exec", submit_identity("custom", "project-settings.toml")
-    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
+
+    def add_custom(name, filename):
+        identity = submit_identity(name, filename)
+        picker_results = iter((1, 0))
+
+        def submit(candidate):
+            combo = candidate.findChild(QComboBox, "sourceComboBox_loadProject")
+            if combo is None:
+                return identity(candidate)
+            data = [combo.itemData(index) for index in range(combo.count())]
+            combo.setCurrentIndex(data.index(("custom", "")))
+            return next(picker_results)
+
+        return submit
+
+    monkeypatch.setattr(app, "_exec", add_custom("custom", "project-settings.toml"))
     dialog._add_selected_project()
     assert dialog.loaded_projects["custom"].toml_file == "project-settings.toml"
 
     (project.root / "existing.toml").write_text("")
     errors = []
-    monkeypatch.setattr(app, "_exec", submit_identity("another", "existing.toml"))
+    monkeypatch.setattr(app, "_exec", add_custom("another", "existing.toml"))
     monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))
     dialog._add_selected_project()
     assert errors == ["TOML file 'existing.toml' already exists"]
@@ -1549,10 +1644,11 @@ def test_custom_project_asks_for_available_toml_filename(
     dialog.close()
 
 
-def test_relative_output_uses_schema_root(application, project):
-    dialog = _add_project(ConfigurationDialog(project))
-    dialog.config_tab.output_path.setText("relative")
-    dialog.config_tab.set.click()
+def test_relative_output_uses_schema_root(application, project, monkeypatch):
+    dialog = ConfigurationDialog(project)
+    choice = _project_choice(dialog, output_root=project.root / "relative")
+    monkeypatch.setattr(dialog, "_choose_project_source", lambda: choice)
+    dialog._add_selected_project()
     assert dialog.loaded_projects["default"].output_dir == (project.root / "relative").resolve()
     assert dialog.config_tab.fileProfilesTable.item(0, 1).text() == str(
         (project.root / "relative" / "run.nml").resolve()
