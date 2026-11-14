@@ -814,15 +814,11 @@ class ConfigurationDialog(QDialog):
     def _choose_project_source(self) -> tuple[str, str] | None:
         """Choose a configured, saved, browsed, or custom project source."""
         configured, custom = self._project_sources()
-        dialog = QInputDialog(self)
-        dialog.setWindowTitle("Add project")
-        dialog.setLabelText("Project type")
-        dialog.setComboBoxEditable(False)
-        dialog.setComboBoxItems([""])
-        combo = dialog.findChild(QComboBox)
+        dialog = QDialog(self)
+        load_ui("project_picker.ui", dialog)
+        combo = dialog.findChild(QComboBox, "sourceComboBox_loadProject")
         if combo is None:
             return None
-        combo.clear()
         for label, data in configured:
             combo.addItem(label, data)
         if configured:

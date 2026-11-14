@@ -1486,7 +1486,8 @@ def test_project_picker_distinguishes_duplicate_titles(application, project, mon
     dialog = ConfigurationDialog(project)
 
     def choose_two(picker):
-        combo = picker.findChild(QComboBox)
+        combo = picker.findChild(QComboBox, "sourceComboBox_loadProject")
+        assert picker.windowTitle() == "Add project"
         data = [combo.itemData(index) for index in range(combo.count())]
         assert data[0:2] == [("configured", "one"), ("configured", "two")]
         assert data[-1] == ("custom", "") and None in data
