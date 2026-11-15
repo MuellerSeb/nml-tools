@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +23,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("qtpy")
 try:
     from qtpy.QtCore import Qt
-    from qtpy.QtGui import QPalette, QTextDocument
+    from qtpy.QtGui import QColor, QPalette, QTextDocument
     from qtpy.QtTest import QTest
     from qtpy.QtWidgets import (
         QAbstractScrollArea,
@@ -670,6 +671,45 @@ def test_save_all_notifications_cover_every_project(application, project, monkey
     dialog.close()
 
 
+def test_invalid_field_navigates_focuses_and_stops_save_all(
+    application, project, monkeypatch
+):
+    errors, tooltips = [], []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.Yes)
+    monkeypatch.setattr(
+        gui_dialog.QToolTip,
+        "showText",
+        lambda _position, text, widget: tooltips.append((text, widget)),
+    )
+    dialog = _add_project(AppDialog(project))
+    dialog.show()
+    editor = next(iter(dialog.editors.values()))
+    array = editor.forms["run"].rows["weights"].field
+    cell = array.table_editor.cells[(1,)]
+    cell.field.control.setText("bad")
+    cell.field.modified = True
+
+    dialog._save_all()
+    application.processEvents()
+
+    assert "File:" in errors[0] and "run.nml" in errors[0]
+    assert "Namelist: &run" in errors[0] and "Property: weights" in errors[0]
+    assert "not a valid number" in errors[0]
+    selected = dialog.treeWidget_projectStructure.currentItem()
+    assert selected.data(0, Qt.ItemDataRole.UserRole)[0:4:3] == ("namelist", "run")
+    assert cell.field.control.hasFocus()
+    assert tooltips == [("'bad' is not a valid number", cell.field.control)]
+
+    calls = []
+    monkeypatch.setattr(
+        dialog, "_save_project", lambda key: calls.append(key) or False
+    )
+    dialog._save_all()
+    assert calls == ["default"]
+    dialog.close()
+
+
 def test_guidata_derived_edits_commit(application):
     np = pytest.importorskip("numpy")
     pytest.importorskip("guidata")
@@ -1136,11 +1176,7 @@ def test_public_launch_forwards_profile_selection(application, project, monkeypa
     )
     config = tmp_path / "nml-config.toml"
     assert launch_gui(config, [request]) == 0
-    assert calls["load"] == (
-        config,
-        {"default": tmp_path / "out"},
-        {"default": {"main": ["run"]}},
-    )
+    assert calls["load"] == (config, Path.cwd())
     assert calls["dialog"] == (project, (request,))
     assert calls["exec"] is dialog
 
@@ -1573,6 +1609,23 @@ def test_namelist_highlighter_handles_fortran_quoted_strings(application):
     assert colour(3, '"') == "#4ddd48"
 
 
+def test_namelist_highlighter_uses_application_dark_palette(application):
+    original = application.palette()
+    dark = QPalette(original)
+    dark.setColor(QPalette.Window, QColor("#101010"))
+    application.setPalette(dark)
+    try:
+        highlighter = NamelistHighlighter(QTextDocument())
+        colours = {
+            scope: text_format.foreground().color().name()
+            for _priority, scope, _expression, text_format in highlighter.rules
+        }
+        assert colours["comment.line.exclamation.namelist"] == "#7bcf73"
+        assert colours["variable.assignment.namelist"] == "#91abff"
+    finally:
+        application.setPalette(original)
+
+
 def test_referenced_dimension_button_opens_source(application, project, monkeypatch):
     project = replace(
         project,
@@ -1703,6 +1756,59 @@ def test_explicit_project_profiles_are_preloaded(application, project):
     assert dialog.treeWidget_projectStructure.topLevelItemCount() == 3
     assert dialog.active_project == "one"
     dialog.close()
+
+
+def test_same_project_profile_opens_for_distinct_output_directories(
+    application, project, tmp_path, monkeypatch
+):
+    profile = project.profiles[0]
+    standard = GuiProjectProfile(
+        "simulation", "simulation", "Simulation", None, (profile,)
+    )
+    project = replace(project, project_profiles=(standard,))
+    first, second = tmp_path / "one", tmp_path / "two"
+    dialog = AppDialog(
+        project,
+        project_requests=(
+            GuiProjectRequest(
+                "simulation",
+                first,
+                initial_values={"main": {"run": {"count": 11}}},
+            ),
+            GuiProjectRequest(
+                "simulation",
+                second,
+                initial_values={"main": {"run": {"count": 22}}},
+            ),
+        ),
+    )
+    assert list(dialog.loaded_projects) == ["simulation", "simulation_2"]
+    assert [item.name for item in dialog.loaded_projects.values()] == [
+        "simulation",
+        "simulation",
+    ]
+    assert dialog.project_items["simulation"].toolTip(0).endswith(str(first))
+    assert dialog.project_items["simulation_2"].toolTip(0).endswith(str(second))
+    assert next(iter(dialog.project_editors["simulation"].values())).values()["run"][
+        "count"
+    ] == 11
+    assert next(iter(dialog.project_editors["simulation_2"].values())).values()["run"][
+        "count"
+    ] == 22
+    dialog.close()
+
+    errors = []
+    monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))
+    overlapping = AppDialog(
+        project,
+        project_requests=(
+            GuiProjectRequest("simulation", first),
+            GuiProjectRequest("simulation", first / "nested"),
+        ),
+    )
+    assert errors and "separate output directories" in errors[-1]
+    assert list(overlapping.loaded_projects) == ["simulation"]
+    overlapping.close()
 
 
 def test_project_picker_distinguishes_duplicate_titles(application, project, monkeypatch):

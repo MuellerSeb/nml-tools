@@ -34,6 +34,7 @@ from qtpy.QtWidgets import (
     QSpinBox,
     QTableWidgetItem,
     QToolButton,
+    QToolTip,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -41,7 +42,7 @@ from qtpy.QtWidgets import (
 )
 
 from .arrays import array_shape
-from .fields import NamelistForm, _exec
+from .fields import InputValidationError, NamelistForm, _exec, validation_focus_widget
 from .highlighter import NamelistHighlighter
 from .model import (
     MISSING,
@@ -53,6 +54,7 @@ from .model import (
     _normalize_dimensions,
     _normalize_profile_values,
     _profile_path,
+    _select_profiles,
     create_virtual_project,
     dimension_source_values,
     discover_project_files,
@@ -87,13 +89,16 @@ def _untouched_page_values(
     for name, child in properties.items():
         if not isinstance(name, str) or not isinstance(child, Mapping):
             continue
-        value = _untouched_value(
-            child,
-            raw.get(name, _UNSET),
-            name.lower() in required or "default" in child,
-            name,
-            sizes,
-        )
+        try:
+            value = _untouched_value(
+                child,
+                raw.get(name, _UNSET),
+                name.lower() in required or "default" in child,
+                name,
+                sizes,
+            )
+        except ValueError as exc:
+            raise InputValidationError(name, None, str(exc)) from exc
         if value is not _UNSET:
             result[name] = value
     return result
@@ -212,11 +217,17 @@ class NamelistPage(QWidget):
         result = {}
         for index, page in enumerate(self.profile.pages):
             form = self.forms.get(page.name)
-            result[page.name] = (
-                (form or self._ensure_form(index)).values()
-                if form is not None or self._fit_arrays
-                else _untouched_page_values(page.schema, self._values.get(page.name), self._sizes)
-            )
+            try:
+                result[page.name] = (
+                    (form or self._ensure_form(index)).values()
+                    if form is not None or self._fit_arrays
+                    else _untouched_page_values(
+                        page.schema, self._values.get(page.name), self._sizes
+                    )
+                )
+            except InputValidationError as exc:
+                exc.page_key, exc.page_name = page.key, page.name
+                raise
             if page.name in self.source_values:
                 result[page.name] = overlay_values(
                     result[page.name], self.source_values[page.name]
@@ -268,7 +279,11 @@ class NamelistPage(QWidget):
         """Return the active page and only its current values."""
         index = self.stack.currentIndex()
         page = self.profile.pages[index]
-        values = self._ensure_form(index).values()
+        try:
+            values = self._ensure_form(index).values()
+        except InputValidationError as exc:
+            exc.page_key, exc.page_name = page.key, page.name
+            raise
         if page.name in self.source_values:
             values = overlay_values(values, self.source_values[page.name])
         return page, values
@@ -300,19 +315,39 @@ class NamelistPage(QWidget):
                 self.stack.setCurrentIndex(index)
                 return
 
-    def reveal_property(self, page_key: str, property_name: str) -> None:
-        """Open a page and scroll its scalar property into view."""
+    def reveal_property(
+        self,
+        page_key: str,
+        property_name: str,
+        message: str = "",
+        widget: QWidget | None = None,
+    ) -> None:
+        """Open, focus, and explain one invalid namelist property."""
         for index, page in enumerate(self.profile.pages):
             if page.key != page_key:
                 continue
             self.stack.setCurrentIndex(index)
             form = self._ensure_form(index)
-            row = form.rows.get(property_name)
+            target = widget if widget is not None and form.isAncestorOf(widget) else None
+            target = target or form.validation_widget(property_name)
+            focus = validation_focus_widget(target)
             scroll = self.stack.currentWidget()
-            if row is not None and isinstance(scroll, QScrollArea):
-                QTimer.singleShot(
-                    0, lambda area=scroll, widget=row: area.ensureWidgetVisible(widget)
-                )
+
+            def reveal(
+                area: QWidget = scroll,
+                container: QWidget = target,
+                control: QWidget = focus,
+                text: str = message,
+            ) -> None:
+                if isinstance(area, QScrollArea):
+                    area.ensureWidgetVisible(container)
+                control.setFocus(Qt.OtherFocusReason)
+                if text:
+                    QToolTip.showText(
+                        control.mapToGlobal(control.rect().bottomLeft()), text, control
+                    )
+
+            QTimer.singleShot(0, reveal)
             return
 
     def _page_changed(self, index: int) -> None:
@@ -839,6 +874,7 @@ class AppDialog(QDialog):
         self.project_initial_values: dict[str, dict[str, Any]] = {}
         self.project_initial_dimensions: dict[str, dict[str, int]] = {}
         requested_keys: list[str] = []
+        requested_profiles: list[GuiProjectProfile] = []
         for request in project_requests:
             if not isinstance(request, GuiProjectRequest):
                 raise ValueError("projects must contain GuiProjectRequest objects")
@@ -847,14 +883,32 @@ class AppDialog(QDialog):
             key = request.project_profile.strip().lower()
             if key not in self.available_projects:
                 raise ValueError(f"unknown project profile '{request.project_profile}'")
-            if key in requested_keys:
-                raise ValueError(f"duplicate project profile '{request.project_profile}'")
             if not isinstance(request.output_dir, (str, Path)):
                 raise ValueError("project output_dir must be a directory path")
             profile = replace(
                 self.available_projects[key], output_dir=Path(request.output_dir).resolve()
             )
-            self.available_projects[key] = profile
+            if request.file_profiles is not None:
+                if not isinstance(request.file_profiles, Mapping):
+                    raise ValueError(
+                        "file_profiles must map profile names to namelist names"
+                    )
+                if request.file_profiles:
+                    selection = {
+                        name: list(names) for name, names in request.file_profiles.items()
+                    }
+                    profile = replace(
+                        profile,
+                        profiles=_select_profiles(
+                            replace(project, profiles=profile.profiles), selection
+                        ),
+                    )
+            instance_key = key
+            suffix = 2
+            while instance_key in requested_keys:
+                instance_key = f"{key}_{suffix}"
+                suffix += 1
+            profile = replace(profile, key=instance_key)
             available = {item.key: item for item in profile.profiles}
             values: dict[str, Any] = {}
             if not isinstance(request.initial_values, Mapping):
@@ -869,11 +923,12 @@ class AppDialog(QDialog):
             if not isinstance(request.initial_dimensions, Mapping):
                 raise ValueError("initial_dimensions must map dimension names to sizes")
             _normalize_dimensions(request.initial_dimensions, project)
-            self.project_initial_values[key] = values
-            self.project_initial_dimensions[key] = {
+            self.project_initial_values[instance_key] = values
+            self.project_initial_dimensions[instance_key] = {
                 str(name).lower(): size for name, size in request.initial_dimensions.items()
             }
-            requested_keys.append(key)
+            requested_keys.append(instance_key)
+            requested_profiles.append(profile)
         self.loaded_projects: dict[str, GuiProjectProfile] = {}
         self.project_items: dict[str, QTreeWidgetItem] = {}
         self.project_editors: dict[str, dict[Path, NamelistPage]] = {}
@@ -917,8 +972,8 @@ class AppDialog(QDialog):
         self.project_add_button.setToolTip("Click here to add a project")
         if requested_keys:
             try:
-                for key in requested_keys:
-                    self._register_project(self.available_projects[key])
+                for profile in requested_profiles:
+                    self._register_project(profile)
                 first = requested_keys[0]
                 self.treeWidget_projectStructure.setCurrentItem(self.project_items[first])
             except (OSError, ValueError, KeyError) as exc:
@@ -978,6 +1033,15 @@ class AppDialog(QDialog):
                 raise ValueError(
                     f"projects '{other.name}' and '{key}' must use separate output directories"
                 )
+
+    def _available_project_key(self, configured_key: str) -> str:
+        """Return a session-only key for another instance of one project profile."""
+        candidate = configured_key
+        suffix = 2
+        while candidate in self.loaded_projects:
+            candidate = f"{configured_key}_{suffix}"
+            suffix += 1
+        return candidate
 
     def _project_sources(
         self,
@@ -1081,8 +1145,7 @@ class AppDialog(QDialog):
         self, profile: GuiProjectProfile, paths: Mapping[str, Path]
     ) -> _ProjectSelection:
         """Resolve destinations and validate every existing namelist source."""
-        if profile.key in self.loaded_projects:
-            raise ValueError(f"project '{profile.name}' is already loaded")
+        profile = replace(profile, key=self._available_project_key(profile.key))
         root = self._project_root(profile)
         self._validate_project_root(profile.key, root)
         files = []
@@ -1463,6 +1526,7 @@ class AppDialog(QDialog):
         """Build one project/file/namelist branch with removal controls."""
         root = QTreeWidgetItem([f"Project: {profile.name}", ""])
         root.setData(0, Qt.ItemDataRole.UserRole, ("project", profile.key, "", ""))
+        root.setToolTip(0, f"Output directory: {self._project_root(profile)}")
         index = self.treeWidget_projectStructure.indexOfTopLevelItem(self.project_add_item)
         self.treeWidget_projectStructure.insertTopLevelItem(max(index, 0), root)
         self._remove_button(root)
@@ -1874,11 +1938,23 @@ class AppDialog(QDialog):
         try:
             dimensions = _normalize_dimensions(config.dimensions(), self.project)
             current = self.loaded_projects[project_key]
+            if dimensions == self.project_dimensions[project_key]:
+                config.set_profiles(current.profiles, self._project_root(current))
+                return True
             self._rebuild_project_editors(
                 current.key, fit_arrays=True, dimensions=dimensions
             )
             config.set_profiles(current.profiles, self._project_root(current))
             return True
+        except InputValidationError as exc:
+            if exc.editor is not None:
+                path = _profile_path(
+                    self.project, exc.editor.profile, exc.editor.output_root
+                )
+                self._show_validation_error(exc.editor, path, exc)
+            else:
+                QMessageBox.critical(self, "Invalid configuration", str(exc))
+            return False
         except (OSError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Invalid configuration", str(exc))
             return False
@@ -2175,7 +2251,13 @@ class AppDialog(QDialog):
         """Rebuild a project's editors after dimensions or membership change."""
         root = self._project_root(self.loaded_projects[key])
         old = self.project_editors[key]
-        old_values = {path: editor.values() for path, editor in old.items()}
+        old_values = {}
+        for path, editor in old.items():
+            try:
+                old_values[path] = editor.values()
+            except InputValidationError as exc:
+                exc.editor = editor
+                raise
         new_dimensions = dict(
             self.project_dimensions[key] if dimensions is None else dimensions
         )
@@ -2285,6 +2367,34 @@ class AppDialog(QDialog):
         if refresh:
             self._refresh_current_view()
 
+    def _show_validation_error(
+        self, editor: NamelistPage, path: Path, error: InputValidationError
+    ) -> None:
+        """Navigate to the first invalid field and explain it in context."""
+        project_key = next(
+            key
+            for key, editors in self.project_editors.items()
+            if editor in editors.values()
+        )
+        file_item = self._profile_tree_item(project_key, editor.profile.key)
+        if file_item is not None:
+            for index in range(file_item.childCount()):
+                item = file_item.child(index)
+                data = item.data(0, Qt.ItemDataRole.UserRole)
+                if data and data[0] == "namelist" and data[3] == error.page_key:
+                    file_item.setExpanded(True)
+                    self.treeWidget_projectStructure.setCurrentItem(item)
+                    break
+        message = (
+            f"File: {path}\n"
+            f"Namelist: &{error.page_name}\n"
+            f"Property: {error.property_name}\n\n{error}"
+        )
+        QMessageBox.critical(self, "Invalid namelist input", message)
+        editor.reveal_property(
+            error.page_key, error.property_name, str(error), error.widget
+        )
+
     def _save_namelist(self, editor: NamelistPage) -> None:
         """Save only the active namelist group in one file."""
         try:
@@ -2302,6 +2412,9 @@ class AppDialog(QDialog):
                 "Namelist saved",
                 f"&{page.name} has been saved to:\n{path}",
             )
+        except InputValidationError as exc:
+            path = _profile_path(self.project, editor.profile, editor.output_root)
+            self._show_validation_error(editor, path, exc)
         except (OSError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Save namelist", str(exc))
 
@@ -2318,7 +2431,11 @@ class AppDialog(QDialog):
             collected: list[tuple[NamelistPage, dict[str, Any]]] = []
             for editor in editors:
                 path = _profile_path(self.project, editor.profile, output_root)
-                values = editor.values()
+                try:
+                    values = editor.values()
+                except InputValidationError as exc:
+                    self._show_validation_error(editor, path, exc)
+                    return False
                 collected.append((editor, values))
                 previous = unique.get(path)
                 if previous and (
@@ -2351,15 +2468,17 @@ class AppDialog(QDialog):
             QMessageBox.critical(self, "Save namelist", str(exc))
             return False
 
-    def _save_project(self, project_key: str) -> None:
+    def _save_project(self, project_key: str) -> bool:
         """Apply dimensions and save every file in one project."""
         config = self.project_configs[project_key]
-        if self._set_configuration(project_key, config) and self._save(
+        saved = self._set_configuration(project_key, config) and self._save(
             list(self.project_editors[project_key].values())
-        ):
+        )
+        if saved:
             self.project_saved_dimensions[project_key] = dict(
                 self.project_dimensions[project_key]
             )
+        return saved
 
     def _restore_project(self, project_key: str) -> None:
         """Restore schema defaults throughout one project."""
@@ -2388,7 +2507,8 @@ class AppDialog(QDialog):
     def _save_all(self) -> None:
         """Save every file profile in every loaded project."""
         for project_key in tuple(self.loaded_projects):
-            self._save_project(project_key)
+            if not self._save_project(project_key):
+                break
 
     def _restore_all(self) -> None:
         """Restore schema defaults in every loaded project."""

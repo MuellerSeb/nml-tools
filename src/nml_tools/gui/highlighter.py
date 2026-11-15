@@ -9,10 +9,18 @@ from collections.abc import Sequence
 from typing import Any, Mapping, cast
 
 from qtpy.QtCore import QRegularExpression
-from qtpy.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat, QTextDocument
+from qtpy.QtGui import (
+    QColor,
+    QFont,
+    QPalette,
+    QSyntaxHighlighter,
+    QTextCharFormat,
+    QTextDocument,
+)
+from qtpy.QtWidgets import QApplication
 
 _GRAMMAR = "Resources/Fortran-Namelist.tmLanguage.json"
-_STYLES = (
+_STYLES_LIGHT = (
     ("comment.", "#4ddd48", False, True),
     ("string.regexp", "#ac9b01", False, True),
     ("string.", "#ab2b2c", False, False),
@@ -22,6 +30,17 @@ _STYLES = (
     ("keyword.control", "#be11dc", True, False),
     ("keyword.operator", "#24292e", True, False),
     ("variable.", "#091c91", False, False),
+)
+_STYLES_DARK = (
+    ("comment.", "#7bcf73", False, True),
+    ("string.regexp", "#e7c85c", False, True),
+    ("string.", "#ff8e8e", False, False),
+    ("constant.numeric", "#67d5a4", False, False),
+    ("constant.character", "#ff9ba5", False, False),
+    ("keyword.boolean", "#8fa3ff", True, False),
+    ("keyword.control", "#e18cfa", True, False),
+    ("keyword.operator", "#d0d7de", True, False),
+    ("variable.", "#91abff", False, False),
 )
 
 
@@ -57,9 +76,9 @@ def _rule_pattern(rule: Mapping[str, Any]) -> str | None:
     return f"(?i:{pattern})" if "i" in str(rule.get("flags", "")).lower() else pattern
 
 
-def _text_format(scope: str) -> QTextCharFormat:
+def _text_format(scope: str, styles: tuple[tuple[str, str, bool, bool], ...]) -> QTextCharFormat:
     result = QTextCharFormat()
-    for prefix, colour, bold, italic in _STYLES:
+    for prefix, colour, bold, italic in styles:
         if scope.startswith(prefix):
             result.setForeground(QColor(colour))
             result.setFontWeight(QFont.Bold if bold else QFont.Normal)
@@ -73,6 +92,12 @@ class NamelistHighlighter(QSyntaxHighlighter):
 
     def __init__(self, document: QTextDocument) -> None:
         super().__init__(document)
+        application = QApplication.instance()
+        dark = bool(
+            application
+            and application.palette().color(QPalette.Window).lightness() < 128
+        )
+        styles = _STYLES_DARK if dark else _STYLES_LIGHT
         patterns = _grammar().get("patterns", ())
         self.rules: list[tuple[int, str, QRegularExpression, QTextCharFormat]] = []
         if not isinstance(patterns, Sequence) or isinstance(patterns, (str, bytes)):
@@ -88,7 +113,7 @@ class NamelistHighlighter(QSyntaxHighlighter):
             if not expression.isValid():
                 raise RuntimeError(f"invalid namelist syntax pattern: {expression.errorString()}")
             priority = 2 if scope.startswith("comment.") else int(scope.startswith("string."))
-            self.rules.append((priority, scope, expression, _text_format(scope)))
+            self.rules.append((priority, scope, expression, _text_format(scope, styles)))
         self.rules.sort(key=lambda item: item[0])
 
     def highlightBlock(self, text: str) -> None:

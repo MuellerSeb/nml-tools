@@ -25,23 +25,16 @@ def launch_gui(
 ) -> int:
     """Launch independently or reuse the caller's QApplication."""
     requests = tuple(projects)
-    selections: dict[str, dict[str, list[str]]] = {}
-    output_dirs: dict[str, Path | str] = {}
-    seen: set[str] = set()
     for request in requests:
         if not isinstance(request, GuiProjectRequest):
             raise ValueError("projects must contain GuiProjectRequest objects")
         if not isinstance(request.project_profile, str):
             raise ValueError("project_profile must be a string")
         name = request.project_profile.strip()
-        key = name.lower()
         if not name:
             raise ValueError("project_profile must not be empty")
-        if key in seen:
-            raise ValueError(f"duplicate project profile '{name}'")
         if not isinstance(request.output_dir, (str, Path)):
             raise ValueError("project output_dir must be a directory path")
-        selected: dict[str, list[str]] = {}
         if request.file_profiles is not None:
             if not isinstance(request.file_profiles, Mapping):
                 raise ValueError("file_profiles must map profile names to namelist names")
@@ -52,10 +45,6 @@ def launch_gui(
                     or not isinstance(namelists, Sequence)
                 ):
                     raise ValueError("file_profiles must map profile names to namelist names")
-                selected[profile] = list(namelists)
-        selections[name] = selected
-        output_dirs[name] = request.output_dir
-        seen.add(key)
     output_root = Path(default_output_dir or Path.cwd()).resolve()
     source: Path | str | None = config_path
     if source is not None and Path(source).name not in {
@@ -70,11 +59,7 @@ def launch_gui(
             if requests:
                 raise ValueError("a config file is required when loading a project") from None
     project = (
-        load_project(
-            source,
-            output_dirs if requests else output_root,
-            selections if requests else None,
-        )
+        load_project(source, output_root)
         if source is not None
         else GuiProject(Path.cwd(), {}, {}, (), output_root)
     )
