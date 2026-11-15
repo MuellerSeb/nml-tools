@@ -51,11 +51,41 @@ from .model import (
     GUI_REF_ORIGIN_KEY,
     MISSING,
     InputArray,
+    _normalize_value,
     overlay_values,
     persistence_default,
     suggestion,
 )
 from .ui import load_ui
+
+
+class InputValidationError(ValueError):
+    """Identify the namelist property and widget that failed validation."""
+
+    def __init__(self, property_name: str, widget: QWidget | None, message: str) -> None:
+        super().__init__(message)
+        self.property_name = property_name
+        self.widget = widget
+        self.page_key = ""
+        self.page_name = ""
+        self.editor: Any = None
+
+
+def validation_focus_widget(widget: QWidget) -> QWidget:
+    """Return the actual editable control inside a compound field widget."""
+    if isinstance(widget, FieldRow):
+        return validation_focus_widget(widget.field)
+    if isinstance(widget, ScalarField):
+        return widget.control
+    if isinstance(widget, ArrayField):
+        if widget.table_editor is not None:
+            return widget.table_editor.tableWidget
+        if isinstance(widget.inline, QWidget):
+            return widget.inline
+        return widget.button
+    if isinstance(widget, ObjectField) and widget.rows:
+        return validation_focus_widget(next(iter(widget.rows.values())))
+    return widget
 
 
 def _exec(dialog: Any) -> int:
@@ -639,7 +669,12 @@ class ObjectField(QGroupBox):
         """Collect the present component values from this derived object."""
         result: dict[str, Any] = copy.deepcopy(dict(self.base_default))
         for name, row in self.rows.items():
-            value = row.value()
+            try:
+                value = row.value()
+            except InputValidationError:
+                raise
+            except ValueError as exc:
+                raise InputValidationError(name, row, str(exc)) from exc
             if value is not MISSING:
                 result[name] = value
         return result
@@ -758,7 +793,12 @@ class InlineArrayTable(QWidget):
         assigned = set(self._assigned)
         for indices, cell in self.cells.items():
             modified = _field_modified(cell.field)
-            value = cell.field.value() if modified else MISSING
+            try:
+                value = cell.field.value() if modified else MISSING
+            except InputValidationError:
+                raise
+            except ValueError as exc:
+                raise InputValidationError(self.name, cell, str(exc)) from exc
             if modified and value is MISSING:
                 assigned.discard(indices)
                 continue
@@ -1419,14 +1459,21 @@ class DerivedTable(QTableWidget):
         """Collect each table row into scalar or indexed derived values."""
         result = copy.deepcopy(self.data)
         for (name, indices), obj in self.objects.items():
-            value = obj.value()
+            try:
+                value = obj.value()
+            except InputValidationError as exc:
+                raise InputValidationError(name, exc.widget, str(exc)) from exc
+            except ValueError as exc:
+                raise InputValidationError(name, self, str(exc)) from exc
             if (
                 not indices
                 and name in self.example_only
                 and name.lower() in self.required
                 and not _field_modified(obj)
             ):
-                raise ValueError(f"required field '{name}' has no value")
+                raise InputValidationError(
+                    name, self, f"required field '{name}' has no value"
+                )
             if indices:
                 _nested_get(result[name], indices[:-1])[indices[-1]] = value
                 if _field_modified(obj):
@@ -1442,7 +1489,9 @@ class DerivedTable(QTableWidget):
                 and isinstance(value, InputArray)
                 and not value.assigned
             ):
-                raise ValueError(f"required field '{name}' has no value")
+                raise InputValidationError(
+                    name, self, f"required field '{name}' has no value"
+                )
         return result
 
     def reset(self) -> None:
@@ -1580,7 +1629,12 @@ class ReferencedArrayTable(QTableWidget):
             assigned = set(self.assigned[name])
             for index, cell in enumerate(cells, 1):
                 if _field_modified(cell.field):
-                    value = cell.field.value()
+                    try:
+                        value = cell.field.value()
+                    except InputValidationError:
+                        raise
+                    except ValueError as exc:
+                        raise InputValidationError(name, cell, str(exc)) from exc
                     if value is MISSING:
                         assigned.discard((index,))
                         continue
@@ -1589,7 +1643,9 @@ class ReferencedArrayTable(QTableWidget):
             if assigned:
                 result[name] = InputArray(values, assigned)
             elif name.lower() in self.required:
-                raise ValueError(f"required field '{name}' has no value")
+                raise InputValidationError(
+                    name, self, f"required field '{name}' has no value"
+                )
         return result
 
     def reset(self) -> None:
@@ -1725,12 +1781,38 @@ class NamelistForm(QWidget):
         """Collect fields and grouped tables in original schema order."""
         result: dict[str, Any] = {}
         for name, row in self.rows.items():
-            value = row.value()
+            try:
+                value = row.value()
+                if value is not MISSING:
+                    value = _normalize_value(value, row.schema, self.sizes, name)
+            except InputValidationError as exc:
+                raise InputValidationError(name, exc.widget or row, str(exc)) from exc
+            except ValueError as exc:
+                raise InputValidationError(name, row, str(exc)) from exc
             if value is not MISSING:
                 result[name] = value
         for table in self.tables:
-            result.update(table.values())
+            values = table.values()
+            for name, value in values.items():
+                try:
+                    result[name] = _normalize_value(
+                        value, self.schema["properties"][name], self.sizes, name
+                    )
+                except InputValidationError:
+                    raise
+                except ValueError as exc:
+                    raise InputValidationError(name, table, str(exc)) from exc
         return {name: result[name] for name in self.schema["properties"] if name in result}
+
+    def validation_widget(self, property_name: str) -> QWidget:
+        """Return the visible row or table containing a namelist property."""
+        row = self.rows.get(property_name)
+        if row is not None:
+            return row
+        for table in self.tables:
+            if property_name in table.schemas:
+                return table
+        return self
 
     def reset(self) -> None:
         """Restore every standalone field and grouped table on the form."""

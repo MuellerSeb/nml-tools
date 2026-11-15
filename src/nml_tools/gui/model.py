@@ -673,15 +673,20 @@ def _optional_toml_text(entry: Mapping[str, Any], key: str, label: str) -> str |
     return value.strip() or None
 
 
-def save_project_profile(project: GuiProject, profile: GuiProjectProfile) -> Path:
-    """Persist one custom project profile in the schema directory."""
+def save_project_profile(
+    project: GuiProject,
+    profile: GuiProjectProfile,
+    output_root: Path | None = None,
+) -> Path:
+    """Persist one custom project profile in the selected directory."""
     if not profile.custom:
         raise ValueError("configured project profiles are read-only")
     validate_project_name(profile.key)
     filename = validate_project_filename(profile.toml_file or f"{profile.key}.toml")
-    path = (project.root / filename).resolve()
-    if project.root not in path.parents:
-        raise ValueError("custom project file must remain inside the schema directory")
+    root = (output_root or project.root).resolve()
+    path = (root / filename).resolve()
+    if root not in path.parents:
+        raise ValueError("custom project file must remain inside the output directory")
     if path.exists() and (profile.source is None or path != profile.source.resolve()):
         raise ValueError(f"TOML file '{path.name}' already exists")
     lines: list[str] = []
@@ -721,6 +726,7 @@ def save_project_profile(project: GuiProject, profile: GuiProjectProfile) -> Pat
         lines.insert(-1, f'title = "{_toml_escape(profile.title)}"')
     if profile.description:
         lines.insert(-1, f'description = "{_toml_escape(profile.description)}"')
+    root.mkdir(parents=True, exist_ok=True)
     _atomic_write(path, "\n".join(lines))
     return path
 
