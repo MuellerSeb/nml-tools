@@ -953,7 +953,9 @@ def test_browsed_project_source_loads(application, project, monkeypatch):
     def choose_browse(picker):
         combo = picker.findChild(QComboBox, "sourceComboBox_loadProject")
         data = [combo.itemData(index) for index in range(combo.count())]
-        combo.setCurrentIndex(data.index(("browse", "")))
+        index = data.index(("browse", ""))
+        assert combo.itemText(index) == "Browse Custom Project from .toml"
+        combo.setCurrentIndex(index)
         return 1
 
     monkeypatch.setattr(app, "_exec", choose_browse)
@@ -1410,6 +1412,78 @@ def test_standard_project_allows_optional_namelist_changes(application, project,
     dialog.close()
 
 
+def test_standard_optional_namelist_stays_standard_until_saved_as_custom(
+    application, project, monkeypatch
+):
+    run = project.profiles[0].pages[0]
+    output = NamelistPage(
+        "output",
+        "output",
+        {
+            "type": "object",
+            "x-fortran-namelist": "output",
+            "properties": {"enabled": {"type": "boolean", "default": False}},
+        },
+    )
+    file_profile = replace(
+        project.profiles[0], pages=(run, output), required=("run",)
+    )
+    standard = GuiProjectProfile(
+        "standard", "standard", "Standard", None, (file_profile,), custom=False
+    )
+    project = replace(
+        project,
+        profiles=(file_profile,),
+        namelists=(run, output),
+        project_profiles=(standard,),
+    )
+    messages = []
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda _parent, _title, message, *_args: messages.append(message)
+        or QMessageBox.Yes,
+    )
+    monkeypatch.setattr(
+        QMessageBox,
+        "information",
+        lambda _parent, _title, message: messages.append(message),
+    )
+    dialog = _add_project(AppDialog(project), "standard")
+    assert dialog.config_tab.profile_type.text() == "Standard"
+    monkeypatch.setattr(
+        dialog,
+        "_custom_project_identity",
+        lambda *_args: pytest.fail("allowed optional namelists must remain standard"),
+    )
+
+    optional = dialog._profile_tree_item("standard", "main").child(1)
+    dialog._remove_tree_item(optional)
+    assert "namelist values will be lost" in messages[-1]
+    assert not dialog.loaded_projects["standard"].custom
+    assert [page.key for page in dialog.loaded_projects["standard"].profiles[0].pages] == [
+        "run"
+    ]
+    assert not list(project.root.glob("*.toml"))
+
+    dialog._add_namelists("standard", "main", ["output"])
+    assert not dialog.loaded_projects["standard"].custom
+    optional = dialog._profile_tree_item("standard", "main").child(1)
+    dialog._remove_tree_item(optional)
+    config = dialog.config_tab
+    config.custom_group.setChecked(True)
+    config.save_custom.click()
+
+    saved = project.root / "standard-custom.toml"
+    assert saved.is_file()
+    assert f"Project profile saved to:\n{saved}" in messages
+    assert dialog.loaded_projects["standard-custom"].custom
+    assert dialog.config_tab.profile_type.text() == "Custom"
+    assert dialog.config_tab.custom_name.text() == "standard-custom"
+    assert dialog.config_tab.custom_filename.text() == saved.name
+    dialog.close()
+
+
 def test_project_file_summary_refits_wrapped_rows(application, project):
     profile = replace(project.profiles[0], description="wrapped description " * 12)
     project = replace(project, profiles=(profile,))
@@ -1749,8 +1823,14 @@ def test_custom_project_asks_for_available_toml_filename(
     monkeypatch.setattr(app, "_exec", add_custom("custom", "project-settings.toml"))
     dialog._add_selected_project()
     assert dialog.loaded_projects["custom"].toml_file == "project-settings.toml"
+    assert (project.root / "project-settings.toml").is_file()
+    assert dialog.config_tab.profile_type.text() == "Custom"
+    assert dialog.config_tab.custom_name.text() == "custom"
+    assert dialog.config_tab.custom_filename.text() == "project-settings.toml"
 
-    (project.root / "existing.toml").write_text("")
+    second_root = project.root.with_name(f"{project.root.name}-custom")
+    second_root.mkdir()
+    (second_root / "existing.toml").write_text("")
     errors = []
     monkeypatch.setattr(app, "_exec", add_custom("another", "existing.toml"))
     monkeypatch.setattr(QMessageBox, "critical", lambda *args: errors.append(args[-1]))

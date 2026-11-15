@@ -447,6 +447,11 @@ class ProjectPage(QWidget):
         self.restore = self.restoreButton_project
         self.cancel = self.cancelButton_project
         self.save = self.saveButton_project
+        self.profile_type = self.label_projectProfileTypeValue
+        self.custom_group = self.groupBox_customProjectProfile
+        self.custom_name = self.lineEdit_customProjectProfileName
+        self.custom_filename = self.lineEdit_customTomlFileName
+        self.save_custom = self.pushButton_saveCustomTomlFile
         self.dimension_boxes: dict[str, QSpinBox] = {}
         self.dimension_source_buttons: dict[str, QPushButton] = {}
         linked = set(linked_dimensions)
@@ -487,6 +492,16 @@ class ProjectPage(QWidget):
     def dimensions(self) -> dict[str, int]:
         """Return runtime dimensions entered on this tab."""
         return {name: box.value() for name, box in self.dimension_boxes.items()}
+
+    def set_project_profile(self, profile: GuiProjectProfile) -> None:
+        """Show whether this project is configured or user-owned."""
+        self.profile_type.setText("Custom" if profile.custom else "Standard")
+        name = profile.name if profile.custom else f"{profile.name}-custom"
+        self.custom_name.setText(name)
+        self.custom_filename.setText(
+            profile.toml_file if profile.custom and profile.toml_file else f"{name}.toml"
+        )
+        self.custom_group.setChecked(profile.custom)
 
     def set_profiles(self, profiles: Sequence[GuiProfile], output_root: Path) -> None:
         """Refresh the project file-profile summary."""
@@ -990,7 +1005,7 @@ class AppDialog(QDialog):
             combo.insertSeparator(combo.count())
         for label, data in custom:
             combo.addItem(label, data)
-        combo.addItem("Browse…", ("browse", ""))
+        combo.addItem("Browse Custom Project from .toml", ("browse", ""))
         combo.insertSeparator(combo.count())
         combo.addItem("<custom>", ("custom", ""))
         selected: list[GuiProjectProfile | None] = [None]
@@ -1041,7 +1056,9 @@ class AppDialog(QDialog):
                 if profile is None:
                     raise ValueError("select a project type")
                 if selected_kind[0] == "custom":
-                    identity = self._custom_project_identity("New project")
+                    identity = self._custom_project_identity(
+                        "New project", "", None, dialog.output_root()
+                    )
                     if identity is None:
                         continue
                     name, filename = identity
@@ -1230,11 +1247,23 @@ class AppDialog(QDialog):
             if selected is None:
                 return
             copied = self._copy_project_sources(selected)
+            created_profile: Path | None = None
             try:
+                if selected.profile.custom and selected.profile.source is None:
+                    root = self._project_root(selected.profile)
+                    created_profile = save_project_profile(
+                        self.project, selected.profile, root
+                    )
+                    selected = replace(
+                        selected,
+                        profile=replace(selected.profile, source=created_profile),
+                    )
                 self._register_project(selected.profile)
             except Exception:
                 for path in copied:
                     path.unlink(missing_ok=True)
+                if created_profile is not None:
+                    created_profile.unlink(missing_ok=True)
                 raise
             self.treeWidget_projectStructure.setCurrentItem(
                 self.project_items[selected.profile.key]
@@ -1243,7 +1272,11 @@ class AppDialog(QDialog):
             QMessageBox.critical(self, "Load project", str(exc))
 
     def _custom_project_identity(
-        self, title: str, suggested: str = "", current_key: str | None = None
+        self,
+        title: str,
+        suggested: str = "",
+        current_key: str | None = None,
+        output_root: Path | None = None,
     ) -> tuple[str, str] | None:
         """Ask for a unique custom project name and TOML filename."""
         dialog = QDialog(self)
@@ -1276,7 +1309,7 @@ class AppDialog(QDialog):
         if name.lower() in self.loaded_projects and name.lower() != current_key:
             raise ValueError(f"project '{name}' is already loaded")
         filename = validate_project_filename(filename_edit.text())
-        if (self.project.root / filename).exists():
+        if ((output_root or self.project.output_root) / filename).exists():
             raise ValueError(f"TOML file '{filename}' already exists")
         return name, filename
 
@@ -1365,11 +1398,15 @@ class AppDialog(QDialog):
             linked,
         )
         config.hide()
+        config.set_project_profile(self.loaded_projects[project_key])
         config.set_profiles(
             profiles,
             self._project_root(self.loaded_projects[project_key]),
         )
         config.set.clicked.connect(lambda: self._set_configuration(project_key, config))
+        config.save_custom.clicked.connect(
+            lambda: self._save_custom_project(project_key, config)
+        )
         config.back.clicked.connect(
             lambda: self._navigate_scope("project", project_key, "", -1)
         )
@@ -1908,7 +1945,9 @@ class AppDialog(QDialog):
                 return
             current = customized
             current = replace(current, profiles=profiles)
-            saved_path = save_project_profile(self.project, current)
+            saved_path = save_project_profile(
+                self.project, current, self._project_root(current)
+            )
             current = replace(current, source=saved_path)
             self._replace_project(project_key, current)
             if imported is not None:
@@ -1949,17 +1988,21 @@ class AppDialog(QDialog):
                     f"Standard file profile '{standard.name}' does not contain: "
                     f"{', '.join(outside)}.\n\nA custom project will be created.",
                 )
-            customized = self._customize(current)
-            if customized is None:
-                return
-            current = customized
+            if current.custom or standard is None or outside:
+                customized = self._customize(current)
+                if customized is None:
+                    return
+                current = customized
             profiles = list(current.profiles)
             profile = profiles[index]
             profiles[index] = replace(profile, pages=(*profile.pages, *additions))
             checked = ensure_dimension_sources(self.project, profiles)
             current = replace(current, profiles=checked)
-            saved_path = save_project_profile(self.project, current)
-            current = replace(current, source=saved_path)
+            if current.custom:
+                saved_path = save_project_profile(
+                    self.project, current, self._project_root(current)
+                )
+                current = replace(current, source=saved_path)
             self._replace_project(project_key, current)
             self._rebuild_project_editors(current.key)
             file_item = self._profile_tree_item(current.key, profile_key)
@@ -1973,12 +2016,52 @@ class AppDialog(QDialog):
         except (OSError, ValueError, KeyError) as exc:
             QMessageBox.critical(self, "Add namelist", str(exc))
 
+    def _save_custom_project(self, project_key: str, config: ProjectPage) -> None:
+        """Save the current project structure as an output-owned TOML file."""
+        try:
+            current = self.loaded_projects[project_key]
+            name = validate_project_name(config.custom_name.text())
+            key = name.lower()
+            if key != project_key and key in self.loaded_projects:
+                raise ValueError(f"project '{name}' is already loaded")
+            filename = validate_project_filename(config.custom_filename.text())
+            root = self._project_root(current)
+            target = (root / filename).resolve()
+            source = (
+                current.source
+                if current.source is not None and current.source.resolve() == target
+                else None
+            )
+            updated = replace(
+                current,
+                name=name,
+                key=key,
+                title=name,
+                source=source,
+                custom=True,
+                toml_file=filename,
+            )
+            path = save_project_profile(self.project, updated, root)
+            updated = replace(updated, source=path)
+            self._replace_project(project_key, updated)
+            self._rebuild_project_editors(updated.key)
+            QMessageBox.information(
+                self,
+                "Project profile saved",
+                f"Project profile saved to:\n{path}",
+            )
+        except (OSError, ValueError, KeyError) as exc:
+            QMessageBox.critical(self, "Save project profile", str(exc))
+
     def _customize(self, profile: GuiProjectProfile) -> GuiProjectProfile | None:
         """Copy a configured project before a structural edit."""
         if profile.custom:
             return profile
         identity = self._custom_project_identity(
-            "Custom project", f"{profile.name}-custom", profile.key
+            "Custom project",
+            f"{profile.name}-custom",
+            profile.key,
+            self._project_root(profile),
         )
         if identity is None:
             return None
@@ -2358,6 +2441,8 @@ class AppDialog(QDialog):
         kind, project_key, profile_key, page_key = item.data(0, Qt.ItemDataRole.UserRole)
         message = f"Remove '{item.text(0)}'?"
         removed_pages = {page_key} if kind == "namelist" else set()
+        if kind == "namelist":
+            message += "\n\nThe namelist values will be lost."
         if kind == "profile":
             removed_pages = {
                 page.key
@@ -2405,9 +2490,21 @@ class AppDialog(QDialog):
                 elif not self.loaded_projects:
                     self._clear_projects()
                 return
-            current = self._customize(self.loaded_projects[project_key])
-            if current is None:
-                return
+            current = self.loaded_projects[project_key]
+            standard = next(
+                (profile for profile in self.project.profiles if profile.key == profile_key),
+                None,
+            )
+            optional_standard = (
+                kind == "namelist"
+                and standard is not None
+                and page_key not in standard.required
+            )
+            if not current.custom and not optional_standard:
+                customized = self._customize(current)
+                if customized is None:
+                    return
+                current = customized
             profiles = list(current.profiles)
             index = next(i for i, profile in enumerate(profiles) if profile.key == profile_key)
             if kind == "profile":
@@ -2427,8 +2524,11 @@ class AppDialog(QDialog):
             current = replace(
                 current, profiles=ensure_dimension_sources(self.project, profiles)
             )
-            saved_path = save_project_profile(self.project, current)
-            current = replace(current, source=saved_path)
+            if current.custom:
+                saved_path = save_project_profile(
+                    self.project, current, self._project_root(current)
+                )
+                current = replace(current, source=saved_path)
             self._replace_project(project_key, current)
             self._rebuild_project_editors(current.key)
         except (OSError, ValueError, KeyError) as exc:

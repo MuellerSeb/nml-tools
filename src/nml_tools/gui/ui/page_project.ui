@@ -47,6 +47,86 @@
     </layout>
    </item>
    <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_projectProfileType" stretch="0,2">
+     <property name="topMargin">
+      <number>0</number>
+     </property>
+     <item>
+      <widget class="QLabel" name="label_projectProfileType">
+       <property name="text">
+        <string>Project Profile Type:</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="label_projectProfileTypeValue">
+       <property name="text">
+        <string/>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupBox_customProjectProfile">
+     <property name="title">
+      <string>Save as Custom Project Profile</string>
+     </property>
+     <property name="checkable">
+      <bool>true</bool>
+     </property>
+     <property name="checked">
+      <bool>false</bool>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout">
+      <property name="spacing">
+       <number>2</number>
+      </property>
+      <property name="topMargin">
+       <number>2</number>
+      </property>
+      <property name="bottomMargin">
+       <number>2</number>
+      </property>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_customProjectProfileName" stretch="2,3">
+        <item>
+         <widget class="QLabel" name="label_customProjectProfileName">
+          <property name="text">
+           <string>Project Profile Name:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="lineEdit_customProjectProfileName"/>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_customTomlFileName" stretch="2,3,1">
+        <item>
+         <widget class="QLabel" name="label_ccustomTomlFileName">
+          <property name="text">
+           <string>Project Profile TOML Filename :</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="lineEdit_customTomlFileName"/>
+        </item>
+        <item>
+         <widget class="QPushButton" name="pushButton_saveCustomTomlFile">
+          <property name="text">
+           <string>Save</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QTableWidget" name="fileProfilesTable">
      <property name="editTriggers">
       <set>QAbstractItemView::NoEditTriggers</set>
